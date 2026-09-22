@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+out/
+*.E01
+*.dd
+*.raw
+*.img
+# fixtures are regenerable from a seed - never committed
+.DS_Store

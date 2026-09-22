@@ -1,0 +1,6 @@
+# Core runtime has ZERO hard dependencies - stdlib only, by design.
+# The tool must run on an air-gapped forensic workstation.
+#
+# Optional, for later phases:
+# cryptography>=42.0      # Ed25519 report signing (Phase 2)
+# pytest>=8.0             # test runner (dev only)

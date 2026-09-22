@@ -1,0 +1,102 @@
+# PS26150 — Multi-Vendor DVR/NVR Forensic Analysis Tool
+
+SIH 2026 · Problem Statement **26150** · National Technical Research Organisation (NTRO)
+Theme: Blockchain & Cybersecurity · Category: Software
+
+Standardized acquisition, recovery and analysis of surveillance evidence across
+DVR/NVR vendors that all use different proprietary filesystems.
+
+---
+
+## Safety rules (non-negotiable)
+
+1. **The tool never writes to the evidence drive.** There is no write path in
+   `acquire/device.py` — not behind a flag, not behind a confirmation.
+2. **Software write-blocking is mandatory on Windows.** The enclosure has no
+   hardware write-blocker, so the read-only handle *is* the write block, and the
+   report says exactly that (`software:read-only-handle`) rather than claiming
+   hardware blocking.
+3. **If Windows offers to format the disk, always click Cancel.** A DVR platter
+   has no filesystem Windows recognises; that prompt is normal and accepting it
+   destroys the evidence.
+4. **Raw device reads need Administrator.** Run the terminal elevated.
+
+## The honesty rule
+
+Every vendor claim carries a status, and the weakest piece of evidence sets it:
+
+| status | meaning |
+|---|---|
+| `validated` | confirmed against a real disk or image we possess |
+| `spec_only` | implemented from published research, untested on real media |
+| `detected_not_parsed` | recognised on the platter, no parser implemented |
+| `synthetic_only` | only ever tested against our generated fixture |
+
+The trap in this problem statement is claiming support for eight OEMs with no
+way to validate it. We claim breadth through **detection plus a plugin SDK**,
+and depth only where we have media. Today that is Hikvision (physical DS-80xx
+unit) and nothing else.
+
+## Usage
+
+```bash
+python cli.py devices                       # list attached drives (read-only)
+python cli.py scan --device "\\.\PhysicalDrive1" \
+                   --case CASE-001 --investigator "Aakash"
+python cli.py scan --device image.img --case TEST --max-mb 512   # triage
+python cli.py verify --out out/CASE-001     # re-verify custody + Merkle root
+python cli.py prove  --out out/CASE-001 --offset 8388608
+
+python tests/test_pipeline.py               # 46 regression tests, no hardware
+python demo/tamper_demo.py                  # 2-minute stage demo
+python tests/synth_dvr.py fixture.img --vendor mixed
+```
+
+## Design
+
+**Single pass.** Reading a 2 TB drive over USB is hours, so hashing, signature
+detection and codec profiling all happen in one traversal (`acquire/scanner.py`).
+
+**Block map + Merkle root, not one hash.** A linear SHA-256 proves the whole
+image is unchanged but cannot survive an interrupted scan and cannot say *which*
+region changed. Every pass also hashes each 8 MiB block and builds a Merkle tree
+over those leaves. That buys resumable acquisition, per-clip inclusion proofs,
+and tamper *localisation* — see `demo/tamper_demo.py`.
+
+**Bad sectors are zero-filled in place, never skipped.** Skipping would shift
+every downstream offset and silently corrupt the provenance record.
+
+**Confidence, not yes/no.** CP Plus boards are frequently Dahua rebadges, so
+vendor attribution is scored from weighted signatures, with a large bonus for a
+magic found at its documented offset and sharply diminishing returns for repeats.
+
+```
+core/      contract.py   frozen JSON contract (v1.0.0, frozen 2026-09-22)
+           hashing.py    streaming hashes, Merkle tree + inclusion proofs
+acquire/   device.py     read-only raw block device (Windows ctypes / POSIX)
+           ledger.py     hash-chained chain-of-custody ledger
+           scanner.py    single-pass acquisition
+detect/    signatures.py vendor + filesystem signature database
+           engine.py     scoring, codec profiling, partition parsing
+tests/     synth_dvr.py  synthetic DVR image generator
+demo/      tamper_demo.py
+```
+
+## Status
+
+| Component | State |
+|---|---|
+| Read-only device layer, bad-sector handling | working |
+| Single-pass hash + block map + Merkle root | working |
+| Custody ledger + verification | working |
+| Signature detection + confidence scoring | working |
+| Partition parsing (MBR/GPT) | working |
+| Hikvision FS parser | not started |
+| Dahua FS parser | not started |
+| Deleted-footage carver | not started |
+| Clock-lie detector, timeline | not started |
+| BSA s.63 certificate, CASE/UCO export | not started |
+
+Nothing has yet touched real DVR media — every result so far is against the
+synthetic fixture, which tests the code, not our understanding of any vendor
+format. Only the physical DS-80xx drive can move Hikvision to `validated`.
