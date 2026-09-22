@@ -308,11 +308,55 @@ class BlockDevice:
         )
 
 
+def _read_sysfs(path: str, default: str = "") -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read().strip()
+    except OSError:
+        return default
+
+
+def list_block_devices_linux() -> list[dict]:
+    """Enumerate via /sys/block. Pure reads of sysfs - touches no device node,
+    so it is safe to run before write-blocking is in place."""
+    found: list[dict] = []
+    base = "/sys/block"
+    if not os.path.isdir(base):
+        return found
+    for name in sorted(os.listdir(base)):
+        if name.startswith(("loop", "ram", "zram", "dm-", "md")):
+            continue
+        d = os.path.join(base, name)
+        sectors = int(_read_sysfs(os.path.join(d, "size"), "0") or 0)
+        log_bs = int(_read_sysfs(os.path.join(d, "queue/logical_block_size"),
+                                 "512") or 512)
+        size = sectors * 512               # sysfs 'size' is always 512B units
+        model = _read_sysfs(os.path.join(d, "device/model"))
+        vendor = _read_sysfs(os.path.join(d, "device/vendor"))
+        serial = (_read_sysfs(os.path.join(d, "device/serial"))
+                  or _read_sysfs(os.path.join(d, "serial")))
+        found.append({
+            "index": len(found),
+            "path": f"/dev/{name}",
+            "model": " ".join(x for x in (vendor, model) if x),
+            "serial": serial,
+            "bus_type": "USB" if "usb" in os.path.realpath(d) else "",
+            "size_bytes": size,
+            "sector_size": log_bs,
+            "removable": _read_sysfs(os.path.join(d, "removable")) == "1",
+            "size_gb": round(size / 1024**3, 2),
+            # Linux exposes the kernel's own read-only flag - this is the one
+            # authoritative answer to "is write-blocking actually on?"
+            "read_only": _read_sysfs(os.path.join(d, "ro")) == "1",
+        })
+    return found
+
+
 def list_physical_drives(max_index: int = 16) -> list[dict]:
-    """Enumerate physical drives by probing. Read-only and harmless."""
+    """Enumerate physical drives. Read-only and harmless on both platforms."""
     found = []
     if not IS_WINDOWS:
-        return found
+        return list_block_devices_linux()
     for i in range(max_index):
         path = f"\\\\.\\PhysicalDrive{i}"
         try:

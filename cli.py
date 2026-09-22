@@ -27,25 +27,40 @@ BANNER = "PS26150 multi-vendor DVR/NVR forensic tool"
 
 
 def cmd_devices(args) -> int:
+    is_win = sys.platform == "win32"
+    privilege = "Administrator" if is_win else "root"
     print(f"{BANNER} - attached block devices\n")
     if not is_admin():
-        print("!! Not running as Administrator. Raw device reads will be denied.")
-        print("   Relaunch elevated to acquire.\n")
+        print(f"!! Not running as {privilege}. Raw device reads will be denied.")
+        print(f"   {'Relaunch elevated' if is_win else 'Re-run under sudo'} to acquire.\n")
     drives = list_physical_drives(args.max_index)
     if not drives:
         print("No physical drives enumerated.")
         return 1
-    print(f"{'idx':<4} {'path':<24} {'size':>10}  {'bus':<8} {'sector':>6}  model / serial")
-    print("-" * 92)
+    print(f"{'idx':<4} {'path':<20} {'size':>10}  {'bus':<6} {'sect':>5} "
+          f"{'wblock':<8} model / serial")
+    print("-" * 94)
     for d in drives:
         if "error" in d:
-            print(f"{d['index']:<4} {d['path']:<24} {'?':>10}  {'-':<8} {'-':>6}  [{d['error']}]")
+            print(f"{d['index']:<4} {d['path']:<20} {'?':>10}  {'-':<6} {'-':>5} "
+                  f"{'-':<8} [{d['error']}]")
             continue
-        print(f"{d['index']:<4} {d['path']:<24} {human_size(d['size_bytes']):>10}  "
-              f"{d['bus_type']:<8} {d['sector_size']:>6}  "
+        # On Linux the kernel tells us whether the device is genuinely
+        # read-only. On Windows there is no such flag - the read-only handle
+        # is the block - so we say "handle" rather than implying more.
+        if "read_only" in d:
+            wb = "RO(kernel)" if d["read_only"] else "RW !!"
+        else:
+            wb = "handle"
+        print(f"{d['index']:<4} {d['path']:<20} {human_size(d['size_bytes']):>10}  "
+              f"{d['bus_type']:<6} {d['sector_size']:>5} {wb:<8} "
               f"{d['model']} {('/ ' + d['serial']) if d['serial'] else ''}")
+
+    if any(d.get("read_only") is False and d.get("bus_type") == "USB" for d in drives):
+        print("\n!! A USB device is writable (RW). Before acquiring, write-block it:")
+        print("     sudo blockdev --setro /dev/sdX && blockdev --getro /dev/sdX")
     print("\nNote: a DVR drive usually shows NO recognisable partitions - the whole")
-    print("platter is a proprietary volume. Windows may offer to format it. Never accept.")
+    print("platter is a proprietary volume. The OS may offer to format it. Never accept.")
     return 0
 
 
