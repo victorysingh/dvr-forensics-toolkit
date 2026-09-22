@@ -173,7 +173,9 @@ cat out/DEV-001/scan_report.json | head -60
 
 ---
 
-Read `docs/TECH_STACK.md` before adding any dependency or writing a parser.
+## 6. Before you add a dependency or write a parser
+
+Read `docs/TECH_STACK.md` first.
 Two things in it bind you directly: the forensic core is **stdlib-only**, and
 **parsers must be stateless per block** (a pure `(offset, bytes) -> findings`
 shape). The second one exists because block detection will be moved to a
@@ -182,7 +184,7 @@ from a drop-in change into a rewrite.
 
 ---
 
-## 6. Memory
+## 7. Memory
 
 `docs/MEMORY_SEED.md` holds the project context worth persisting across
 sessions — team roles, hardware state, dataset decisions (including which
