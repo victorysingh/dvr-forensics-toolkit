@@ -173,6 +173,15 @@ cat out/DEV-001/scan_report.json | head -60
 
 ---
 
+Read `docs/TECH_STACK.md` before adding any dependency or writing a parser.
+Two things in it bind you directly: the forensic core is **stdlib-only**, and
+**parsers must be stateless per block** (a pure `(offset, bytes) -> findings`
+shape). The second one exists because block detection will be moved to a
+process pool once the parsers land — state carried across blocks turns that
+from a drop-in change into a rewrite.
+
+---
+
 ## 6. Memory
 
 `docs/MEMORY_SEED.md` holds the project context worth persisting across
@@ -183,7 +192,7 @@ re-derived every session.
 
 ---
 
-## 7. Honest status of the problem statement itself
+## 8. Honest status of the problem statement itself
 
 The PS text in `docs/PROBLEM_STATEMENT.md` is the official portal text.
 Earlier planning used third-party listings, so if anything in older team docs
