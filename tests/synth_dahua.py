@@ -103,7 +103,10 @@ def _record(kind: int, ch: int, a: int, start: int, end: int, nxt: int,
                        start, end, nxt, 0, prev, head, 0x38, 0)
 
 
-def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150) -> dict:
+def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150,
+          twins: bool = False) -> dict:
+    """`twins=True` gives cameras 1 and 2 identical counters and clocks - the
+    worst case, where nothing in the frames themselves tells them apart."""
     rng = random.Random(seed)
     img = bytearray(IMAGE_SIZE)
 
@@ -135,6 +138,9 @@ def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150) -> 
     cams = [Camera(n, T0, [1000, 64000, 30000][n % 3] + n,
                    400000 + 37 * n, 400000 + 37 * n + [3, 150, 300][n % 3], rng)
             for n in range(cameras)]
+    if twins and cameras >= 3:
+        cams[2] = Camera(2, T0, cams[1].ms, cams[1].vfn, cams[1].afn, rng)
+        cams[2].xfn = cams[1].xfn
     next_free = FIRST_DATA_CLUSTER
     heads, chains, cur, fill = {}, {}, {}, {}
     written: dict[int, list[tuple[int, int]]] = {n: [] for n in range(cameras)}
@@ -178,11 +184,13 @@ def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150) -> 
 
     # A frame is lost when a later overflow overwrote any byte of it.
     survived: dict[int, set[tuple[int, int]]] = {n: set() for n in range(cameras)}
+    owner: dict[int, int] = {}                           # abs offset -> camera
     for off, (n, ftype, fn) in frame_at.items():
         flen = struct.unpack_from("<I", img, off + 12)[0]
         if (img[off:off + 4] == b"DHAV" and img[off + flen - 8:off + flen - 4] == b"dhav"
                 and sum(img[off:off + 23]) & 0xFF == img[off + 23]):
             survived[n].add((ftype, fn))
+            owner[off] = n
 
     # -- the cluster table
     table = bytearray(CAPACITY * 32)
@@ -220,6 +228,7 @@ def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150) -> 
     return {
         "path": path, "cameras": cameras, "data_base": DATA_BASE,
         "heads": heads, "chains": chains, "written": written, "survived": survived,
+        "owner": owner,   # every other valid frame on the image is the older recording
         "old_date": T_OLD, "t0": T0,
     }
 

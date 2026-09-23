@@ -157,9 +157,11 @@ These are why a naive carve produces wrong evidence.
 
 3. **Cameras are near-twins.** Cameras started together keep near-identical
    frame counters and millisecond clocks: at one instant they are 20–60 frames
-   and about a second apart. Anything that separates streams by "does this
-   frame continue that one?" will jump from one camera to another unless it
-   takes the closest match.
+   and about a second apart, and over an hour they drift through each other.
+   Anything that separates streams by "does this frame continue that one?"
+   will jump from one camera to another. Taking the closest match helps but is
+   not enough on its own: without an index it still mixed two cameras (section
+   6a). Byte contiguity, plus refusing to guess, is what holds.
 
 4. **Counters are per frame type, and they drift.** Video, audio and aux frames
    each keep their own counter. They start in near-lockstep, which hides this,
@@ -233,6 +235,55 @@ and the index now points to the cluster's new owner.
 The synthetic fixture (`tests/synth_dahua.py`) reproduces traps 1–5. Against
 its known ground truth, reassembly gets every camera exactly right — no foreign,
 missed or duplicate frames — across the seeds tested.
+
+---
+
+## 6a. Carving without the index
+
+`recover/carver.py` (`cli.py carve`) recovers the same footage **from raw
+bytes alone**, for when an index is damaged, wiped or missing, and for footage
+no index describes. It validates every DHAV frame in a region and assigns each
+one to a stream:
+
+1. **Byte contiguity first.** A frame that starts exactly where the previous
+   frame ended, and continues its stream, is that stream's. This settles
+   99.9% of frames on the real disk (6,996,492 of 7,004,515).
+2. **At a discontinuity** (cluster start, overflow, stale data), the closest
+   continuing stream, **but only if it beats the runner-up by 4×**. Otherwise
+   the frame starts a new stream.
+
+Rule 2's refusal is the point. The first version took the plain closest match,
+and on the real disk **146 of 152 streams mixed two cameras**: CH02 and CH03
+drift to within tens of frames and seconds of each other (trap 3). Splitting
+one camera into several pure fragments is an inconvenience. Mixing two cameras
+into one output is a false statement.
+
+A carved stream is **not a camera**: it is labelled `UNKNOWN`, one camera can
+span several streams, and carving alone says nothing about deletion. Where a
+DHFS index is readable, `cross_reference` uses it **only afterwards** to label
+each stream with the camera whose clusters hold it, or `outside_index` when no
+index record accounts for those frames at their dates.
+
+**Results, whole 20 GiB, no index used to carve:**
+
+| | |
+|---|---|
+| Time | 50 s carve + 40 s labelling |
+| Streams kept | 152; 104 ambiguous boundaries split; **0 with mixed evidence** |
+| CH01 / CH02 / CH03 | 2.32 M frames each, in 22 / 46 / 35 streams |
+| Outside every index window | 49 streams, ~14 min of video — 47 from Aug 2026, 1 May, 1 June |
+
+Over hour one, the carve holds 100% of the frames index-guided extraction
+recovers for each camera, with no stream mixing them. The outside-index
+footage agrees with the independent remnant scan (section 6) in both amount
+and dates. On the synthetic fixture, including a mode where two cameras have
+identical counters and clocks, every surviving frame is carved and no stream
+mixes sources.
+
+```bash
+python cli.py carve --device image.dd --out out/CASE/carve                   # report only
+python cli.py carve --device image.dd --out out/CASE/carve --extract outside # + write unindexed footage
+```
 
 ---
 

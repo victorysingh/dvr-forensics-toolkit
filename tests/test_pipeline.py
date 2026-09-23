@@ -9,6 +9,7 @@ Covers the properties the rest of the tool depends on being true:
   * bad sectors are zero-filled in place and never shift later offsets
   * a resume onto the wrong device is refused
   * Dahua DHFS reassembly never splices one camera's frames into another's
+  * the indexless carver splits indistinguishable cameras rather than mixing them
 
 Set DHFS_REAL_IMAGE to the SkyHawk partial image to also run the checks that
 pin the parser to what was observed on real media.
@@ -36,6 +37,7 @@ from detect import signatures as sig
 from parsers import get_parser
 from parsers import dahua
 from parsers import hikvision as hik
+from recover import carver
 from tests import synth_dahua, synth_dvr
 
 PASSED: list[str] = []
@@ -599,6 +601,56 @@ def test_dahua_robustness(tmp: str) -> None:
           not f0.chain_ok and any("outside the table" in n for n in f0.chain_notes))
 
 
+def _owners(dev, stream, owner: dict) -> dict:
+    tally: dict = {}
+    for e in stream.extents:
+        buf = dev.read_at(e.offset, e.length)
+        for fr in dahua.walk_frames(buf, e.offset, 0, len(buf)):
+            k = owner.get(fr.offset, "old")
+            tally[k] = tally.get(k, 0) + 1
+    return tally
+
+
+def test_carver(tmp: str) -> None:
+    print("\n[indexless carver - synthetic, ground truth known]")
+    for twins in (False, True):
+        tag = "twins" if twins else "normal"
+        for seed in (26150, 1):
+            img = os.path.join(tmp, f"carve-{tag}-{seed}.img")
+            meta = synth_dahua.build(img, seconds=14, seed=seed, twins=twins)
+            with BlockDevice(img) as dev:
+                streams, stats = carver.carve(dev)
+                tallies = [_owners(dev, s, meta["owner"]) for s in streams]
+                p = get_parser("Dahua")
+                p.parse(dev)
+                xref = carver.cross_reference(dev, streams, p.volumes[0])
+                sink = _Sink()
+                biggest = max(streams, key=lambda s: s.frames)
+                carver.write_stream(dev, biggest, sink)
+            impure = [t for t in tallies if len(t) > 1]
+            check(f"[{tag} {seed}] no carved stream mixes two sources", not impure,
+                  str(impure[:2]))
+            for n in range(3):
+                got = sum(t.get(n, 0) for t in tallies)
+                check(f"[{tag} {seed}] camera {n + 1}: every surviving frame carved",
+                      got == len(meta["survived"][n]),
+                      f"{got}/{len(meta['survived'][n])}")
+            if twins:
+                check(f"[{tag} {seed}] indistinguishable cameras are split, not guessed",
+                      stats["ambiguous_splits"] > 0)
+            labels_ok = all(
+                (xref[s.sid]["label"] == "outside_index") == (set(t) == {"old"})
+                for s, t in zip(streams, tallies) if s.frames >= carver.MIN_FRAMES)
+            check(f"[{tag} {seed}] the index labels the older recording 'outside_index' "
+                  f"and nothing else", labels_ok)
+            keys = [(dahua._kind(f), f.frame_number) for f in sink.frames]
+            check(f"[{tag} {seed}] a written stream has no duplicate frames",
+                  len(keys) == len(set(keys)))
+            check(f"[{tag} {seed}] a carved stream is a fragment of unknown camera",
+                  carver.to_recording(biggest).camera_id == "UNKNOWN"
+                  and carver.to_recording(biggest).state == "fragment")
+
+
 def test_dahua_real_media() -> None:
     """Pins the parser to what was observed on the real SkyHawk disk.  Runs
     only when DHFS_REAL_IMAGE points at the partial image (never committed)."""
@@ -622,6 +674,22 @@ def test_dahua_real_media() -> None:
     check("CH01 hour one: no more frames than its counter span",
           st["video_frames"] <= st["video_counter_span"])
 
+    # The carver, with no index, over the region holding hour one - then the
+    # index, used only to label what the carve found.
+    with BlockDevice(path) as dev:
+        streams, stats = carver.carve(dev, vol.cluster_offset(2120), vol.cluster_offset(3223))
+        xref = carver.cross_reference(dev, streams, vol)
+    kept = [s for s in streams if s.frames >= carver.MIN_FRAMES]
+    check("indexless carve: no stream carries mixed camera evidence",
+          all(xref[s.sid]["label"] != "mixed-evidence" for s in kept))
+    per_cam: dict = {}
+    for s in kept:
+        per_cam[xref[s.sid]["label"]] = per_cam.get(xref[s.sid]["label"], 0) + s.frames
+    check("indexless carve: all three cameras recovered in comparable volume",
+          all(k in per_cam for k in ("CH01", "CH02", "CH03"))
+          and min(per_cam[k] for k in ("CH01", "CH02", "CH03"))
+          > 0.9 * max(per_cam[k] for k in ("CH01", "CH02", "CH03")))
+
 
 def synth_hik_fields() -> list:
     """The fields the parser is expected to declare provenance for."""
@@ -643,6 +711,7 @@ def main() -> int:
         test_dahua_frames()
         test_dahua_parser(tmp)
         test_dahua_robustness(tmp)
+        test_carver(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 151 tests, all should pass
+python tests/test_pipeline.py     # 181 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -92,7 +92,7 @@ If those pass, the engine below is intact:
 | Hikvision filesystem parser | `parsers/hikvision.py` | working, `synthetic_only` |
 | **Dahua DHFS 4.1 parser + per-camera extract** | `parsers/dahua.py` | **working on real media, `spec_only`** — see `docs/DAHUA_DHFS.md` |
 | Remnants of overwritten footage (Dahua) | `parsers/dahua.py` | working, `spec_only` |
-| **Indexless carver** | — | **not started** |
+| Indexless DHAV carver, index cross-reference | `recover/carver.py` | working on real media, `spec_only` |
 | Clock-lie detector, camera timeline | — | not started |
 | BSA s.63 certificate, CASE/UCO export | — | not started |
 
@@ -152,11 +152,10 @@ The highest-value unblocked work, in order:
    (`docs/LINUX_ACQUISITION.md` section 6). That is the only route to
    `validated`. The SkyHawk is **not** this DVR's disk: it holds Dahua DHFS.
 
-2. **Indexless carver** (`recover/carver.py`, new). For when the index is
-   damaged or gone. `parsers/dahua.py` already separates cameras by stream
-   continuity alone (`Stream`, `classify_cluster`); generalise that, plus Annex-B
-   carving for vendors without a container. Attach `Provenance` and an honest
-   `confidence` to every carved clip.
+2. **Carving for other containers.** `recover/carver.py` carves DHAV (Dahua)
+   without an index, splitting rather than mixing cameras it cannot tell apart.
+   Hikvision streams are not DHAV. Their container needs the same treatment,
+   and bare Annex-B carving is the last-resort fallback for unknown vendors.
 
 3. **Finish the Dahua disk.** Image the first ~16 MiB of volumes 2–4 (their
    indexes) to list every recording on the SkyHawk, and find the recorder it came

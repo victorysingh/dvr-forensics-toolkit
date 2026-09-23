@@ -6,6 +6,7 @@
     python cli.py parse --device image.img --vendor Hikvision --out out/CASE-001
     python cli.py parse --device image.dd --vendor Dahua --remnants --out out/CASE-002
     python cli.py extract --device image.dd --recording dhfs-v1-c002120 --out out/CASE-002/clips
+    python cli.py carve --device image.dd --out out/CASE-002/carve --extract outside
     python cli.py verify --out out/CASE-001
     python cli.py prove  --out out/CASE-001 --offset 8388608
 """
@@ -396,6 +397,127 @@ def cmd_extract(args) -> int:
     return 0
 
 
+def cmd_carve(args) -> int:
+    """Carve DHAV streams from raw bytes, with no filesystem index.
+
+    The fallback when an index is damaged or wiped, and the route to footage
+    no index describes.  If a DHFS index is readable it is used only
+    afterwards, to label each carved stream - never to find the frames - so
+    the carve stands on its own and the two can be checked against each other.
+    """
+    from core.contract import SCHEMA_VERSION, dump_json, to_dict, utc_now
+    from core.hashing import sha256_file
+    from parsers import get_parser
+    from recover import carver
+
+    def num(v):
+        return int(v, 0) if v else None
+
+    os.makedirs(args.out, exist_ok=True)
+    print(f"{BANNER} - indexless DHAV carve\n")
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            start, end = num(args.start) or 0, num(args.end) or dev.size_bytes
+            print(f"  device        {dev.path}  ({human_size(dev.size_bytes)})")
+            print(f"  write-block   {info.write_block_method}")
+            print(f"  region        0x{start:X} - 0x{end:X} ({human_size(end - start)})")
+
+            def progress(done, total, live):
+                print(f"    {done / total:6.1%}  {live} live streams", flush=True)
+
+            streams, stats = carver.carve(dev, start, end, progress=progress)
+            vol = None
+            parser = get_parser("Dahua")
+            if not args.no_index and parser.detect(dev):
+                print("  index         DHFS found - used only to LABEL carved streams")
+                parser.parse(dev)
+                vol = next((v for v in parser.volumes if v.data_base is not None), None)
+            xref = carver.cross_reference(dev, streams, vol) if vol else {}
+
+            kept = [s for s in streams if s.frames >= carver.MIN_FRAMES]
+            rows = []
+            for s in kept:
+                rec = carver.to_recording(s, args.tz_offset)
+                x = xref.get(s.sid, {})
+                rows.append({"recording": to_dict(rec), "index_label": x.get("label"),
+                             "index_tally": x.get("tally"), "duplicates_dropped": s.duplicates,
+                             "extents": [[e.offset, e.length] for e in s.extents]})
+
+            want = {"none": set(), "all": {s.sid for s in kept},
+                    "outside": {s.sid for s in kept
+                                if xref.get(s.sid, {}).get("label") == "outside_index"}}[args.extract]
+            outputs = {}
+            for s in kept:
+                if s.sid not in want:
+                    continue
+                base = os.path.join(args.out, f"carve-{s.sid:05d}")
+                with open(base + ".dav", "wb") as dav, open(base + ".es", "wb") as es:
+                    _, codec = carver.write_stream(dev, s, dav, es)
+                es_path = base + (f".{codec}" if codec in ("h264", "h265") else ".es")
+                os.replace(base + ".es", es_path)
+                for path in (base + ".dav", es_path):
+                    outputs[os.path.basename(path)] = {
+                        "bytes": os.path.getsize(path), "sha256": sha256_file(path)}
+    except PermissionNeeded as exc:
+        print(f"[!] {exc}")
+        return 2
+    except DeviceError as exc:
+        print(f"[!] {exc}")
+        return 1
+
+    report = {
+        "schema_version": SCHEMA_VERSION, "generated_utc": utc_now(),
+        "tool": "ps26150-forensics carve", "rule": carver.PARSER_RULE,
+        "validation_status": "spec_only",
+        "source_device": info.path, "source_bytes": info.size_bytes,
+        "write_block_method": info.write_block_method,
+        "stats": stats, "index_used_for_labels": vol is not None,
+        "streams": rows, "outputs": outputs,
+        "notes": [
+            "A carved stream is a run of mutually continuous, validated DHAV frames. "
+            "It is not a camera: frames carry no camera number.",
+            "Where continuity was ambiguous the carve split rather than guessed, so one "
+            "camera can span several streams; streams never knowingly mix cameras.",
+            "index_label comes from the DHFS index AFTER carving; 'outside_index' means "
+            "no index record accounts for those frames at their dates.",
+        ],
+    }
+    path = os.path.join(args.out, "carve_report.json")
+    dump_json(report, path)
+
+    labels: dict = {}
+    for r in rows:
+        k = r["index_label"] or "no index"
+        labels.setdefault(k, [0, 0])
+        labels[k][0] += 1
+        labels[k][1] += r["recording"]["frame_count"]
+    print(f"\n--- carve {'-' * 49}")
+    print(f"  frames        {stats['frames']:,} validated, {stats['joined_by_contiguity']:,} "
+          f"joined by contiguity, {stats['joined_by_closest']:,} by clear closest match")
+    print(f"  streams       {len(kept)} kept (>= {carver.MIN_FRAMES} frames); "
+          f"{stats['ambiguous_splits']} ambiguous boundaries split, not guessed")
+    for k, (n, f) in sorted(labels.items()):
+        print(f"    {k:<16} {n:4d} streams  {f:>10,} frames")
+    outside = [r for r in rows if r["index_label"] == "outside_index"]
+    if outside:
+        print(f"\n--- outside every index window ({len(outside)}) {'-' * 24}")
+        for r in outside[:args.limit]:
+            rec = r["recording"]
+            print(f"  {rec['id']}  @0x{rec['offset']:<10X} {rec['frame_count']:6d} frames  "
+                  f"{rec['timestamps'][0]['raw_value'].split(' = ', 1)[-1]}")
+        if len(outside) > args.limit:
+            print(f"  ... {len(outside) - args.limit} more in {path}")
+    if outputs:
+        total = sum(o["bytes"] for o in outputs.values())
+        print(f"\n  [+] {len(outputs) // 2} streams written to {args.out} "
+              f"({human_size(total)}); per-file SHA-256 in the report")
+    print(f"\n[+] {path}")
+    print("  status SPEC_ONLY - carved by stream continuity; not validated against a "
+          "recorder export.")
+    return 0
+
+
 def cmd_verify(args) -> int:
     """Re-verify a completed scan: custody chain + Merkle root recomputation."""
     out_dir = args.out
@@ -498,6 +620,20 @@ def main() -> int:
     p.add_argument("--out", required=True, help="output directory (never the device)")
     p.add_argument("--tz-offset", type=int, default=None)
     p.set_defaults(func=cmd_extract)
+
+    p = sub.add_parser("carve", help="carve DHAV streams with no filesystem index")
+    p.add_argument("--device", required=True)
+    p.add_argument("--out", required=True, help="output directory (never the device)")
+    p.add_argument("--start", default="", help="region start in bytes (0x.. ok)")
+    p.add_argument("--end", default="", help="region end in bytes (0x.. ok)")
+    p.add_argument("--extract", choices=["none", "outside", "all"], default="none",
+                   help="write carved streams out: none, only those outside every "
+                        "index window, or all")
+    p.add_argument("--no-index", action="store_true",
+                   help="do not use a DHFS index even to label streams")
+    p.add_argument("--tz-offset", type=int, default=None)
+    p.add_argument("--limit", type=int, default=25)
+    p.set_defaults(func=cmd_carve)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)
