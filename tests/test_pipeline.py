@@ -8,6 +8,10 @@ Covers the properties the rest of the tool depends on being true:
   * signatures straddling a block boundary are still found, exactly once
   * bad sectors are zero-filled in place and never shift later offsets
   * a resume onto the wrong device is refused
+  * Dahua DHFS reassembly never splices one camera's frames into another's
+
+Set DHFS_REAL_IMAGE to the SkyHawk partial image to also run the checks that
+pin the parser to what was observed on real media.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import sys
 import tempfile
 
@@ -28,7 +33,10 @@ from core.contract import CaseInfo, canonical_json
 from core.hashing import merkle_proof, merkle_root, sha256_bytes, verify_merkle_proof
 from detect.engine import SignatureScanner, parse_partitions
 from detect import signatures as sig
-from tests import synth_dvr
+from parsers import get_parser
+from parsers import dahua
+from parsers import hikvision as hik
+from tests import synth_dahua, synth_dvr
 
 PASSED: list[str] = []
 FAILED: list[tuple[str, str]] = []
@@ -185,7 +193,16 @@ def test_full_scan(tmp: str) -> None:
         check("Hikvision is NOT claimed as validated",
               vendors["Hikvision"].validation_status != "validated",
               vendors["Hikvision"].validation_status)
-        check("no parser is claimed", not vendors["Hikvision"].parser_available)
+        # A Hikvision parser now ships, so `parser_available` is True here -
+        # but that is a statement about code existing, never about validation.
+        # The invariant that must hold forever is the one above: having a
+        # parser must not promote the vendor to `validated`.
+        check("parser availability reflects the plugin registry",
+              vendors["Hikvision"].parser_available
+              == ("Hikvision" in sig.PARSERS_AVAILABLE))
+        check("vendors with no parser never claim one",
+              all(not d.parser_available for d in report.detections
+                  if d.vendor not in sig.PARSERS_AVAILABLE))
 
     check("master magic found at its expected offset",
           any(h.signature_id == "hik.master" and h.at_expected_offset
@@ -265,6 +282,352 @@ def test_partitions() -> None:
           parse_partitions(bytes(1024)) == [])
 
 
+# ---------------------------------------------------------------------------
+def test_hikvision_parser(tmp: str) -> None:
+    print("\n[hikvision parser]")
+    img = os.path.join(tmp, "hik.img")
+    meta = synth_dvr.build(img, size=16 * 1024 * 1024, vendor="hikvision")
+
+    parser = get_parser("Hikvision")
+    check("plugin registers itself", parser is not None)
+    if parser is None:
+        return
+    check("signatures.PARSERS_AVAILABLE tracks the registry",
+          "Hikvision" in sig.PARSERS_AVAILABLE)
+
+    with BlockDevice(img) as dev:
+        check("detects a Hikvision volume", parser.detect(dev))
+        check("master sector found at 0x200",
+              parser.find_master(dev) == 0x200,
+              hex(parser.find_master(dev)))
+        result = parser.parse(dev)
+
+    # --- the honesty invariants. These matter more than the parse itself.
+    check("parse is NEVER claimed as validated",
+          result.validation_status != "validated", result.validation_status)
+    check("fixture-sourced fields force synthetic_only",
+          result.validation_status == "synthetic_only",
+          result.validation_status)
+    check("field provenance is recorded for every decoded field",
+          len(result.field_provenance) >= len(synth_hik_fields()))
+    check("every fixture-sourced field says so",
+          all(f["implies_status"] == "synthetic_only"
+              for f in result.field_provenance if f["source"] == "fixture"))
+
+    # --- the parse
+    check("every indexed clip is recovered",
+          len(result.recordings) == meta["active_clips"],
+          f"{len(result.recordings)} vs {meta['active_clips']}")
+    check("volume metadata decoded",
+          result.volume["master"]["model"].startswith("DS-"),
+          result.volume["master"]["model"])
+    check("channel count decoded", result.volume["master"]["channel_count"] == 4)
+
+    by_offset = {r.offset: r for r in result.recordings}
+    for start, length, cam, ts in meta["index_entries"]:
+        rec = by_offset.get(start)
+        if rec is None:
+            check(f"index entry at 0x{start:X} recovered", False)
+            continue
+        check(f"extent matches index at 0x{start:X}", rec.length == length)
+        check(f"camera id decoded at 0x{start:X}",
+              rec.camera_id == f"CH{cam + 1:02d}", rec.camera_id)
+
+    r0 = result.recordings[0]
+    check("provenance is attached to every recording",
+          all(r.provenance is not None for r in result.recordings))
+    check("provenance sha256 matches the bytes on the platter",
+          r0.provenance.sha256 == hashlib.sha256(
+              open(img, "rb").read()[r0.offset:r0.offset + r0.length]
+          ).hexdigest())
+    check("sector range brackets the byte extent",
+          r0.provenance.sector_start * 512 <= r0.offset
+          and r0.provenance.sector_end * 512 >= r0.offset + r0.length)
+    check("frames are counted", r0.frame_count > 0, str(r0.frame_count))
+    check("codec identified per recording", r0.codec == "h264")
+
+    # --- timestamps are claims, never conclusions
+    check("every recording carries a timestamp claim",
+          all(r.timestamps for r in result.recordings))
+    tc = r0.timestamps[0]
+    check("timestamp claim names its source", tc.source == "index")
+    check("timestamp claim carries a decode rule", bool(tc.decode_rule))
+    check("a single-source timestamp is not asserted as certain",
+          tc.confidence < 1.0, str(tc.confidence))
+    check("timestamp decodes to the fixture's value",
+          tc.decoded_utc == "2025-09-22T00:00:00.000Z", str(tc.decoded_utc))
+
+    # --- confidence is never certainty
+    check("no recording claims certainty",
+          all(r.confidence < 1.0 for r in result.recordings))
+
+    # --- the deleted clip is NOT in the index: that is the carver's job, and
+    # the parser must not silently invent it.
+    deleted_off = meta["deleted_clip"]["offset"]
+    check("the unindexed deleted clip is absent from the parse",
+          deleted_off not in by_offset)
+
+
+def test_parser_robustness(tmp: str) -> None:
+    """A dying DVR disk is the normal case. A corrupt index must degrade into
+    reported errors, never an exception or a silent wrong answer."""
+    print("\n[parser robustness]")
+    parser = get_parser("Hikvision")
+    if parser is None:
+        return
+
+    # A disk with no Hikvision structures at all.
+    empty = os.path.join(tmp, "empty.img")
+    with open(empty, "wb") as fh:
+        fh.write(bytes(1 << 20))
+    with BlockDevice(empty) as dev:
+        check("a non-Hikvision disk is not detected", not parser.detect(dev))
+        res = parser.parse(dev)
+    check("a non-Hikvision disk reports an error, not a crash", bool(res.errors))
+    check("a non-Hikvision disk yields no recordings", not res.recordings)
+
+    # Master sector present, index absent - the damaged-index case.
+    noidx = os.path.join(tmp, "noindex.img")
+    buf = bytearray(1 << 20)
+    buf[0x200:0x200 + 18] = b"HIKVISION@HANGZHOU"
+    with open(noidx, "wb") as fh:
+        fh.write(bytes(buf))
+    with BlockDevice(noidx) as dev:
+        res = parser.parse(dev)
+    check("a missing index is reported, not fatal",
+          any("HIKBTREE" in n for n in res.notes))
+    check("a missing index still reports the volume", bool(res.volume))
+
+    # Index claiming absurd extents - garbage read off a damaged platter.
+    bad = os.path.join(tmp, "badindex.img")
+    buf = bytearray(1 << 20)
+    buf[0x200:0x200 + 18] = b"HIKVISION@HANGZHOU"
+    buf[0x1000:0x1008] = b"HIKBTREE"
+    buf[0x1010:0x1014] = (3).to_bytes(4, "little")
+    buf[0x1020:0x1026] = b"OFFSET"
+    # entry 0: extent past the end of the device.  entry 1: absurd length.
+    # entry 2: valid but empty (length 0).
+    struct_pack = __import__("struct").pack_into
+    struct_pack("<QQII", buf, 0x1040, 1 << 40, 4096, 0, 1758499200)
+    struct_pack("<QQII", buf, 0x1058, 0x2000, 1 << 40, 1, 1758499200)
+    struct_pack("<QQII", buf, 0x1070, 0x3000, 0, 2, 1758499200)
+    with open(bad, "wb") as fh:
+        fh.write(bytes(buf))
+    with BlockDevice(bad) as dev:
+        res = parser.parse(dev)
+    check("out-of-range extents are skipped and reported",
+          any("past the end" in n for n in res.notes))
+    check("absurd lengths are skipped and reported",
+          any("sanity bound" in n for n in res.notes))
+    check("no garbage recording is emitted", not res.recordings)
+
+    # A timestamp of 0 must not become 1970 presented as fact.
+    check("an unusable timestamp decodes to None",
+          hik._decode_utc(0) is None)
+
+
+# ---------------------------------------------------------------------------
+class _Sink:
+    def __init__(self):
+        self.frames: list = []
+
+    def write(self, b: bytes) -> None:
+        self.frames.append(next(dahua.walk_frames(b, 0)))
+
+
+def test_dahua_frames() -> None:
+    print("\n[dahua DHAV frames]")
+    from datetime import datetime
+    dt = datetime(2026, 9, 3, 12, 53, 53)
+    packed = synth_dahua.pack_date(dt)
+    check("packed date decodes to the same wall-clock time",
+          dahua.decode_date(packed) == dt)
+    check("the real disk's first index date decodes as observed",
+          dahua.fmt_date(0x6A46CD75) == "2026-09-03 12:53:53")
+    check("an impossible packed date decodes to None, not an exception",
+          dahua.decode_date(0xFFFFFFFF) is None)
+
+    good = synth_dahua.dhav(0xFC, 10, dt, 100, b"\x00\x00\x00\x01\x02\x01" + bytes(50),
+                            synth_dahua.EXT_VIDEO)
+    buf = bytes(7) + good + bytes(5)
+    frames = list(dahua.walk_frames(buf, 1000))
+    check("a valid frame is found at its absolute offset",
+          len(frames) == 1 and frames[0].offset == 1007)
+    bad_ck = bytearray(good)
+    bad_ck[23] ^= 0xFF
+    check("a bad header checksum is rejected", not list(dahua.walk_frames(bytes(bad_ck), 0)))
+    bad_tr = bytearray(good)
+    bad_tr[-8:-4] = b"XXXX"
+    check("a missing trailer is rejected", not list(dahua.walk_frames(bytes(bad_tr), 0)))
+    check("a frame cut off by the buffer end is not yielded",
+          not list(dahua.walk_frames(good[:-3], 0)))
+    ext = dahua.frame_ext(good, 0, frames[0].__class__(0, 0xFC, 10, len(good),
+                                                         packed, 100, len(synth_dahua.EXT_VIDEO)))
+    check("extension tags decode codec, size and fps",
+          ext.get("codec") == "h265" and ext.get("width") == 1920
+          and ext.get("height") == 1080 and ext.get("fps") == 25)
+
+    # Video and audio counters drift apart on real disks (78 apart after six
+    # hours).  Continuity must compare a counter only with its own kind.
+    F = dahua.DhavFrame
+    v1 = F(0, 0xFC, 918167, 900, packed, 40385, 24)
+    a1 = F(0, 0xF0, 918245, 368, packed, 40403, 16)
+    v2 = F(0, 0xFC, 918168, 900, packed, 40425, 24)
+    s = dahua.Stream(v1).feed(a1)
+    check("drifted audio/video counters still read as one stream",
+          s.distance(v2) is not None)
+    other = F(0, 0xFC, 918168, 900, packed, (40425 + 9000) & 0xFFFF, 24)
+    check("a frame 9 s away on the ms clock is another stream",
+          s.distance(other) is None)
+    check("the ms clock wrapping at 65536 is not a break",
+          dahua.Stream(F(0, 0xFC, 918167, 900, packed, 0xFFF0, 24)).distance(
+              F(0, 0xFC, 918168, 900, packed, 0x0018, 24)) is not None)
+
+
+def test_dahua_parser(tmp: str) -> None:
+    print("\n[dahua DHFS parser - synthetic, ground truth known]")
+    parser = get_parser("Dahua")
+    check("plugin registers itself", parser is not None)
+    if parser is None:
+        return
+    check("signatures.PARSERS_AVAILABLE includes Dahua", "Dahua" in sig.PARSERS_AVAILABLE)
+
+    for seed in (26150, 1, 2):
+        img = os.path.join(tmp, f"dhfs-{seed}.img")
+        meta = synth_dahua.build(img, seconds=14, seed=seed)
+        lost = sum(len(meta["written"][n]) - len(meta["survived"][n])
+                   for n in meta["written"])
+        parser = get_parser("Dahua")
+        with BlockDevice(img) as dev:
+            check(f"[{seed}] detects a DHFS volume", parser.detect(dev))
+            res = parser.parse(dev)
+            vol = parser.volumes[0]
+            check(f"[{seed}] one recording per camera",
+                  sorted(r.camera_id for r in res.recordings) == ["CH01", "CH02", "CH03"])
+            check(f"[{seed}] every chain is intact", all(f.chain_ok for f in vol.files))
+            check(f"[{seed}] data base calibrated to the true offset",
+                  vol.data_base == synth_dahua.DATA_BASE,
+                  f"got {vol.data_base}")
+            foreign = missed = dup = 0
+            spill = overflow = 0
+            for f in vol.files:
+                sink = _Sink()
+                st = dahua.reassemble(dev, vol, f, sink)
+                got = [(fr.ftype, fr.frame_number) for fr in sink.frames]
+                truth = meta["survived"][f.camera]
+                foreign += len(set(got) - truth)
+                missed += len(truth - set(got))
+                dup += len(got) - len(set(got))
+                spill += st["spill_in"]
+                overflow += st["overflow_recovered"]
+            check(f"[{seed}] the fixture really exercises overflow",
+                  lost > 0 and spill > 0 and overflow > 0,
+                  f"lost {lost} spill {spill} overflow {overflow}")
+            check(f"[{seed}] no camera receives another camera's frames", foreign == 0,
+                  f"{foreign} foreign")
+            check(f"[{seed}] every surviving frame is recovered", missed == 0,
+                  f"{missed} missed")
+            check(f"[{seed}] no frame is emitted twice", dup == 0, f"{dup} duplicates")
+            rem = parser.remnant_recordings(dev)
+            check(f"[{seed}] the older recording underneath is found as remnants",
+                  bool(rem) and all("2026-08-01" in r.timestamps[0].raw_value for r in rem))
+            check(f"[{seed}] remnants are fragments with camera unknown",
+                  all(r.state == "fragment" and r.camera_id == "UNKNOWN" for r in rem))
+
+        # --- the honesty invariants
+        check(f"[{seed}] parse is never claimed as validated",
+              res.validation_status != "validated")
+        check(f"[{seed}] without a timezone, no time is presented as UTC",
+              all(r.start_utc is None for r in res.recordings))
+
+    parser = get_parser("Dahua")
+    parser.tz_offset_min = 330
+    with BlockDevice(img) as dev:
+        res = parser.parse(dev)
+    check("an investigator-supplied offset converts recorder time to UTC",
+          res.recordings[0].start_utc == "2026-09-03T04:30:00.000Z",
+          str(res.recordings[0].start_utc))
+
+
+def test_dahua_robustness(tmp: str) -> None:
+    print("\n[dahua parser robustness]")
+    parser = get_parser("Dahua")
+    empty = os.path.join(tmp, "empty-dhfs.img")
+    with open(empty, "wb") as fh:
+        fh.write(bytes(1 << 20))
+    with BlockDevice(empty) as dev:
+        check("a non-DHFS disk is not detected", not parser.detect(dev))
+        res = parser.parse(dev)
+    check("a non-DHFS disk reports an error, not a crash", bool(res.errors))
+
+    # Structures intact but no video: calibration must fail loudly and
+    # extraction must refuse rather than guess a base.
+    img = os.path.join(tmp, "novideo.img")
+    synth_dahua.build(img, seconds=8, seed=5)
+    raw = bytearray(open(img, "rb").read())
+    start = synth_dahua.DATA_BASE + synth_dahua.FIRST_DATA_CLUSTER * synth_dahua.CLUSTER
+    raw[start:] = bytes(len(raw) - start)
+    with open(img, "wb") as fh:
+        fh.write(bytes(raw))
+    parser = get_parser("Dahua")
+    with BlockDevice(img) as dev:
+        res = parser.parse(dev)
+        vol = parser.volumes[0]
+        check("no footage: data base left unknown", vol.data_base is None)
+        check("no footage: recordings still listed from the index",
+              len(res.recordings) == 3)
+        try:
+            dahua.reassemble(dev, vol, vol.files[0])
+            refused = False
+        except ValueError:
+            refused = True
+        check("extraction refuses an uncalibrated volume", refused)
+
+    # A broken chain link is reported, never followed into garbage.
+    img = os.path.join(tmp, "brokenchain.img")
+    meta = synth_dahua.build(img, seconds=8, seed=6)
+    raw = bytearray(open(img, "rb").read())
+    c = meta["chains"][0][1]
+    struct.pack_into("<I", raw, synth_dahua.INDEX_SECTOR * 512 + c * 32 + 0x0C, 10 ** 6)
+    with open(img, "wb") as fh:
+        fh.write(bytes(raw))
+    parser = get_parser("Dahua")
+    with BlockDevice(img) as dev:
+        parser.parse(dev)
+    f0 = next(f for f in parser.volumes[0].files if f.camera == 0)
+    check("a chain pointing outside the table is flagged broken",
+          not f0.chain_ok and any("outside the table" in n for n in f0.chain_notes))
+
+
+def test_dahua_real_media() -> None:
+    """Pins the parser to what was observed on the real SkyHawk disk.  Runs
+    only when DHFS_REAL_IMAGE points at the partial image (never committed)."""
+    path = os.environ.get("DHFS_REAL_IMAGE")
+    if not path:
+        print("\n[dahua real media] skipped - set DHFS_REAL_IMAGE to run")
+        return
+    print("\n[dahua real media]")
+    parser = get_parser("Dahua")
+    with BlockDevice(path) as dev:
+        res = parser.parse(dev)
+        vol = parser.volumes[0]
+        check("513 recordings on volume 1", len(res.recordings) == 513)
+        check("0 broken chains", all(f.chain_ok for f in vol.files))
+        check("data base 0x95E000", vol.data_base == 0x95E000, hex(vol.data_base or 0))
+        v, f = parser.file_for("dhfs-v1-c002120")
+        st = dahua.reassemble(dev, v, f)
+    check("CH01 hour one: no stream breaks", st["stream_breaks"] == 0)
+    check("CH01 hour one: under 0.5% of video frames missing",
+          st["video_counter_missing"] < 0.005 * st["video_counter_span"])
+    check("CH01 hour one: no more frames than its counter span",
+          st["video_frames"] <= st["video_counter_span"])
+
+
+def synth_hik_fields() -> list:
+    """The fields the parser is expected to declare provenance for."""
+    return hik.MASTER_FIELDS + hik.BTREE_FIELDS
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -275,6 +638,12 @@ def main() -> int:
         test_partitions()
         test_full_scan(tmp)
         test_resume_guard(tmp)
+        test_hikvision_parser(tmp)
+        test_parser_robustness(tmp)
+        test_dahua_frames()
+        test_dahua_parser(tmp)
+        test_dahua_robustness(tmp)
+        test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
