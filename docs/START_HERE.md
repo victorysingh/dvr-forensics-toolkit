@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 46 tests, all should pass
+python tests/test_pipeline.py     # 151 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -88,15 +88,18 @@ If those pass, the engine below is intact:
 | Signature DB + confidence scoring | `detect/` | working |
 | Partition parsing (MBR/GPT) | `detect/engine.py` | working |
 | Synthetic DVR image generator | `tests/synth_dvr.py` | working |
-| **Hikvision filesystem parser** | — | **not started** |
-| **Dahua filesystem parser** | — | **not started** |
-| **Deleted-footage carver** | — | **not started** |
+| Vendor parser plugin SDK (field provenance) | `parsers/base.py` | working |
+| Hikvision filesystem parser | `parsers/hikvision.py` | working, `synthetic_only` |
+| **Dahua DHFS 4.1 parser + per-camera extract** | `parsers/dahua.py` | **working on real media, `spec_only`** — see `docs/DAHUA_DHFS.md` |
+| Remnants of overwritten footage (Dahua) | `parsers/dahua.py` | working, `spec_only` |
+| **Indexless carver** | — | **not started** |
 | Clock-lie detector, camera timeline | — | not started |
 | BSA s.63 certificate, CASE/UCO export | — | not started |
 
-**Nothing has touched real DVR media yet.** Every result so far is against
-the synthetic fixture, which tests the code, not our understanding of any
-vendor's format.
+**One real disk so far:** the first 20 GiB of the SkyHawk, which turned out to
+hold Dahua-family DHFS 4.1, not Hikvision. The Dahua parser was built against
+it. Everything Hikvision is still tested only against the synthetic fixture,
+which tests the code, not our understanding of the format.
 
 ---
 
@@ -141,26 +144,23 @@ Read `docs/DATA_CONTRACT.md` before you emit any JSON.
 
 The highest-value unblocked work, in order:
 
-1. **Hikvision filesystem parser** (`parsers/hikvision.py`, new).
-   The master sector magic is `HIKVISION@HANGZHOU` at offset `0x200`, and
-   `HIKBTREE` marks the index header. The detection engine already finds both
-   and reports their absolute offsets — start by running a scan and looking at
-   `out/<case>/scan_report.json`. Emit `Recording` objects per the contract.
-   Mark it `spec_only`.
+1. **Hikvision ground truth.** The parser exists (`parsers/hikvision.py`) but
+   its struct offsets come only from our synthetic fixture. The team owns a
+   Hikvision DVR (board `DS-80xx P REV1.1`, 8-channel analog). Put a spare small
+   SATA disk in it, record known footage with the clock written down, delete one
+   clip, export another, and image the whole disk
+   (`docs/LINUX_ACQUISITION.md` section 6). That is the only route to
+   `validated`. The SkyHawk is **not** this DVR's disk: it holds Dahua DHFS.
 
-2. **Deleted-footage carver** (`recover/carver.py`, new).
-   Annex-B carving with SPS/PPS rebuild. Testable today: the synthetic fixture
-   contains one clip that is present on the platter but absent from the index
-   (that is exactly what a deleted recording looks like) — its offset is
-   printed by `tests/synth_dvr.py`. Attach `Provenance` to every carved clip
-   and an honest `confidence`, never a claim of certainty.
+2. **Indexless carver** (`recover/carver.py`, new). For when the index is
+   damaged or gone. `parsers/dahua.py` already separates cameras by stream
+   continuity alone (`Stream`, `classify_cluster`); generalise that, plus Annex-B
+   carving for vendors without a container. Attach `Provenance` and an honest
+   `confidence` to every carved clip.
 
-3. **Validate against real media.** The team owns a physical Hikvision DVR
-   (board marked `DS-80xx P REV1.1`, 8-channel analog) and its Seagate SkyHawk
-   drive. On Aakash's Windows laptop the USB-SATA bridge is not enumerating, so
-   **if you can get that drive attached under Linux, you are unblocking the
-   single most important thing in the project** — it is what moves Hikvision
-   from `spec_only` to `validated`.
+3. **Finish the Dahua disk.** Image the first ~16 MiB of volumes 2–4 (their
+   indexes) to list every recording on the SkyHawk, and find the recorder it came
+   from to export a reference clip — see `docs/DAHUA_DHFS.md` section 7.
 
 Before starting, run a scan against the fixture so you can see the shape of
 the output you are extending:

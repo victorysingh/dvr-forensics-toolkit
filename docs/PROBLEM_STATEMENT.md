@@ -82,8 +82,8 @@ produce reliable and legally defensible forensic results.
 |---|---|---|
 | Device Identification | `detect/signatures.py`, `detect/engine.py` | working |
 | Acquisition | `acquire/device.py`, `acquire/scanner.py` | working |
-| File System & Format Parsing | `parsers/` | **not started** |
-| Recovery | `recover/` | **not started** |
+| File System & Format Parsing | `parsers/` | Dahua DHFS on real media (`spec_only`); Hikvision `synthetic_only` |
+| Recovery | `parsers/dahua.py` remnants; `recover/` | Dahua remnants working; indexless carver not started |
 | Timeline Analysis | — | not started |
 | Reporting | — | not started |
 | Machine Learning | — | not started (stretch) |
