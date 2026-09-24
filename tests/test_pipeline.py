@@ -18,6 +18,7 @@ pin the parser to what was observed on real media.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -805,6 +806,33 @@ def test_inline_carve(tmp: str) -> None:
         check("inline carve report is written and labelled",
               rep["index_used_for_labels"] and "outside_index" in labels
               and any(l.startswith("CH") for l in labels), str(labels))
+        from report.case import load_case as _lc
+        rows = rep["streams"]
+        out_sel = carver.streams_from_report(rep, label="outside_index")
+        ex_dir = os.path.join(tmp, "inl-tap", "carve", "streams")
+        man = os.path.join(tmp, "inl-tap", "carve", "extracted.json")
+        with BlockDevice(img) as dev:
+            m = carver.extract_from_report(dev, out_sel, ex_dir, man, log=lambda *_: None)
+            direct = {}
+            for s_ in ref:
+                if any(s_.extents[0].offset == r["extents"][0][0] and
+                       r["index_label"] == "outside_index" for r in rows):
+                    sink = io.BytesIO()
+                    carver.write_stream(dev, s_, sink)
+                    direct[s_.extents[0].offset] = sink.getvalue()
+        ok = bool(m["streams"]) and all(v["frames_match"] for v in m["streams"].values())
+        for sid, v in m["streams"].items():
+            with open(os.path.join(ex_dir, sid + ".dav"), "rb") as fh:
+                got_bytes = fh.read()
+            ok = ok and direct[v["extents"][0][0]] == got_bytes
+        check("streams extracted from the report equal a direct carve's output", ok,
+              f"{len(m['streams'])} streams")
+        before = os.path.getmtime(man)
+        with BlockDevice(img) as dev:
+            carver.extract_from_report(dev, out_sel, ex_dir, man, log=lambda *_: None)
+        check("re-running extraction skips finished streams", os.path.getmtime(man) == before)
+        check("the case view lists the extracted files",
+              bool(_lc(os.path.join(tmp, "inl-tap"))["carve"].get("extracted")))
         check("the ledger records the inline carve and still verifies",
               any(e["action"] == "inline_carve_completed" for e in tapped_s.ledger.entries)
               and tapped_s.ledger.verify()["valid"])

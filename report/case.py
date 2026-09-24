@@ -170,6 +170,13 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                          "labels": labels, "outside_index": outside[:recordings_limit],
                          "outside_total": len(outside), "outputs": carve.get("outputs", {}),
                          "notes": carve.get("notes", [])}
+        ex = _load(j("carve", "extracted.json"))
+        if ex:
+            case["carve"]["extracted"] = {
+                "sha256": _hashed(j("carve", "extracted.json")),
+                "streams": {k: {x: v[x] for x in ("label", "frames_written", "frames_carved",
+                                                   "frames_match", "codec", "files")}
+                            for k, v in ex.get("streams", {}).items()}}
 
     t = _load(j("timeline.json"))
     if t:

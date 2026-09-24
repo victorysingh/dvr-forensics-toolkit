@@ -281,6 +281,18 @@ def cmd_parse(args) -> int:
             "errors": result.errors,
         }, path)
         print(f"\n[+] {path}")
+        ledger_path = os.path.join(args.out, "custody_ledger.jsonl")
+        if os.path.exists(ledger_path):
+            from core.hashing import sha256_file
+            ledger = CustodyLedger(ledger_path)
+            ledger.actor = ledger.entries[0].get("actor", "unknown")
+            ledger.case_id = ledger.entries[0].get("case_id", "")
+            ledger.append("filesystem_parsed", {
+                "report": os.path.basename(path), "vendor": result.vendor,
+                "recordings": len(result.recordings), "remnants": len(remnants),
+                "validation_status": result.validation_status,
+                "write_block_method": info.write_block_method},
+                data_hash=sha256_file(path))
     return 0
 
 
@@ -726,6 +738,78 @@ def cmd_writeblock_rule(args) -> int:
     return 0
 
 
+def cmd_extract_carved(args) -> int:
+    """Save carved streams as files, from the scan's carve report."""
+    import shutil
+    from acquire.device import DeviceLost
+    from core.hashing import sha256_file
+    from recover import carver
+
+    rpath = os.path.join(args.out, "carve", "carve_report.json")
+    if not os.path.exists(rpath):
+        print(f"[!] no carve report in {args.out} - run `scan --carve` first")
+        return 1
+    with open(rpath, "r", encoding="utf-8") as fh:
+        report = json.load(fh)
+    ids = set(args.ids.split(",")) if args.ids else None
+    label = None if args.label == "all" else args.label
+    streams = carver.streams_from_report(report, label=label, ids=ids)
+    need = sum(e.length for s in streams for e in s.extents)
+    out_dir = os.path.join(args.out, "carve", "streams")
+    os.makedirs(out_dir, exist_ok=True)
+    free = shutil.disk_usage(out_dir).free
+    print(f"{BANNER} - extract carved streams\n")
+    print(f"  selected      {len(streams)} stream(s), label {args.label}"
+          f"{', ids ' + args.ids if args.ids else ''}")
+    print(f"  size          up to {human_size(need * 2)} (.dav + bare video); "
+          f"{human_size(free)} free")
+    if need * 2 > free - (5 << 30):
+        print("[!] not enough free space (keeping 5 GB spare) - narrow the selection "
+              "with --ids or --label")
+        return 1
+    manifest_path = os.path.join(args.out, "carve", "extracted.json")
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            print(f"  device        {dev.path}  ({info.write_block_method})\n")
+            if dev.size_bytes != report.get("source_bytes"):
+                print(f"[!] {dev.path} is {dev.size_bytes} bytes; the carve was of a "
+                      f"{report.get('source_bytes')}-byte device - wrong drive?")
+                return 1
+            m = carver.extract_from_report(dev, streams, out_dir, manifest_path)
+    except DeviceLost as exc:
+        print(f"\n[!] {exc}\n    finished streams are kept; re-run with the drive's new "
+              f"device path to continue")
+        return 3
+    except PermissionNeeded as exc:
+        print(f"[!] {exc}")
+        return 2
+    except DeviceError as exc:
+        print(f"[!] {exc}")
+        return 1
+    m.update({"source_device": info.path, "write_block_method": info.write_block_method,
+              "carve_report_sha256": sha256_file(rpath)})
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        json.dump(m, fh, indent=2)
+    bad = [k for k, v in m["streams"].items() if not v["frames_match"]]
+    total = sum(f["bytes"] for v in m["streams"].values() for f in v["files"].values())
+    print(f"\n  [+] {len(m['streams'])} stream(s), {human_size(total)} in {out_dir}")
+    if bad:
+        print(f"  [!] {len(bad)} stream(s) wrote a different frame count than the carve "
+              f"recorded: {', '.join(bad[:10])}")
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("carved_streams_extracted", {
+            "manifest": "carve/extracted.json", "streams": len(m["streams"]),
+            "bytes": total, "frame_count_mismatches": bad,
+            "write_block_method": info.write_block_method},
+            data_hash=sha256_file(manifest_path))
+        print("  manifest SHA-256 recorded in the custody ledger")
+    return 0 if not bad else 1
+
+
 def cmd_prove(args) -> int:
     """Produce a Merkle inclusion proof for the block containing an offset.
 
@@ -852,6 +936,16 @@ def main() -> int:
     p.add_argument("--device", default="", help="or read the serial from this node")
     p.add_argument("--user", default="", help="also grant this user READ-only access")
     p.set_defaults(func=cmd_writeblock_rule)
+
+    p = sub.add_parser("extract-carved",
+                       help="save carved streams as files, from the scan's carve report")
+    p.add_argument("--device", required=True)
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--label", default="outside_index",
+                   help="index label to extract: outside_index (default), CH01.., "
+                        "mixed-evidence, or all")
+    p.add_argument("--ids", default="", help="comma-separated stream ids instead")
+    p.set_defaults(func=cmd_extract_carved)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)
