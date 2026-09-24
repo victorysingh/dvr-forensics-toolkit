@@ -82,11 +82,11 @@ produce reliable and legally defensible forensic results.
 |---|---|---|
 | Device Identification | `detect/signatures.py`, `detect/engine.py` | working |
 | Acquisition | `acquire/device.py`, `acquire/scanner.py` | working |
-| File System & Format Parsing | `parsers/` | Dahua DHFS on real media (`spec_only`); Hikvision `synthetic_only` |
-| Recovery | `parsers/dahua.py` remnants; `recover/carver.py` | Dahua remnants + indexless DHAV carver working on real media (`spec_only`) |
-| Timeline Analysis | — | not started |
-| Reporting | — | not started |
-| Machine Learning | — | not started (stretch) |
+| File System & Format Parsing | `parsers/`, `plugins/` | Dahua DHFS on real media (`spec_only`); Hikvision `synthetic_only`; drop-in plugins for new vendors |
+| Recovery | `parsers/dahua.py` remnants; `recover/carver.py` | Dahua remnants + indexless DHAV carver on real media (`spec_only`), run inside the acquisition pass |
+| Timeline Analysis | `analyse/timeline.py` | working: zone + measured clock error, gaps, cross-camera correlation |
+| Reporting | `report/`, `ui/` | working: HTML + JSON report, local UI |
+| Machine Learning | — | not started (optional add-on; needs a video decoder) |
 
 ## Named deliverables not yet started
 
@@ -105,7 +105,9 @@ polish:
 ## Reading the PS honestly
 
 The PS names eight OEMs and asks for "at least five to six". We hold media for
-exactly one (Hikvision). The defensible way to answer this is detection across
+two: a CP Plus unit's drive, which carries Dahua-family DHFS 4.1 (so it covers
+the Dahua format, with CP Plus attribution resting on the unit's label), and a
+second drive believed to be Hikvision, not yet read. The defensible way to answer this is detection across
 all eight plus a documented plugin SDK, with per-vendor status stated
 explicitly — not an implied claim of full support for eight formats we cannot
 test. See Rule 3 in `START_HERE.md`.

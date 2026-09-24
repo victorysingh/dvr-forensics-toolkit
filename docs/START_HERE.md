@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 181 tests, all should pass
+python tests/test_pipeline.py     # 213 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -93,12 +93,23 @@ If those pass, the engine below is intact:
 | **Dahua DHFS 4.1 parser + per-camera extract** | `parsers/dahua.py` | **working on real media, `spec_only`** — see `docs/DAHUA_DHFS.md` |
 | Remnants of overwritten footage (Dahua) | `parsers/dahua.py` | working, `spec_only` |
 | Indexless DHAV carver, index cross-reference | `recover/carver.py` | working on real media, `spec_only` |
-| Clock-lie detector, camera timeline | — | not started |
+| Carve inside the acquisition pass (`scan --carve`) | `recover/carver.py`, `acquire/scanner.py` | working; identical to a standalone carve on real media |
+| Survive a USB drop mid-pass, verified reconnect | `acquire/device.py`, `acquire/scanner.py` | working |
+| Write block that survives reconnects (udev rule) | `cli.py writeblock-rule` | working |
+| Filesystem metadata preserved, provable to the scan | `recover/preserve.py` | working |
+| Timestamp normalization, gaps, cross-camera correlation | `analyse/timeline.py` | working |
+| Forensic report (HTML + JSON) | `report/` | working |
+| Local web UI (all eight OEMs, pipeline, timeline) | `ui/` | working |
+| Drop-in vendor plugins | `plugins/`, `parsers/__init__.py` | working |
+| Unknown-vendor survey tool | — | not started |
+| Video decode (MP4) and AI analytics | — | not started (optional add-on, needs ffmpeg/OpenCV) |
 | BSA s.63 certificate, CASE/UCO export | — | not started |
 
-**One real disk so far:** the first 20 GiB of the SkyHawk, which turned out to
-hold Dahua-family DHFS 4.1, not Hikvision. The Dahua parser was built against
-it. Everything Hikvision is still tested only against the synthetic fixture,
+**Real media:** two DVR drives are held. The CP Plus unit's SkyHawk
+(`WWD4A3NX`) carries Dahua-family DHFS 4.1 — the Dahua parser was built
+against its first 20 GiB, and a full acquisition of the drive is under way.
+The second drive is believed to be Hikvision and has not been read yet, so
+everything Hikvision is still tested only against the synthetic fixture,
 which tests the code, not our understanding of the format.
 
 ---

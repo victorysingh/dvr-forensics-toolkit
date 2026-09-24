@@ -41,16 +41,24 @@ unit) and nothing else.
 
 ```bash
 python cli.py devices                       # list attached drives (read-only)
-python cli.py scan --device "\\.\PhysicalDrive1" \
-                   --case CASE-001 --investigator "Aakash"
+python cli.py writeblock-rule --device /dev/sdb --user "$USER"   # keep it RO across reconnects
+python cli.py scan --device /dev/sdb --case CASE-001 --investigator "Shrestha" \
+                   --carve --reconnect-wait 480   # one pass: hashes + carve
 python cli.py scan --device image.img --case TEST --max-mb 512   # triage
-python cli.py verify --out out/CASE-001     # re-verify custody + Merkle root
+python cli.py preserve --device /dev/sdb --out out/CASE-001      # filesystem metadata
+python cli.py parse    --device /dev/sdb --vendor Dahua --out out/CASE-001
+python cli.py timeline --out out/CASE-001 --tz-offset 330
+python cli.py report   --out out/CASE-001    # HTML + JSON, hashed into the ledger
+python cli.py serve                          # UI on http://127.0.0.1:8150
+python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, preserved blocks
 python cli.py prove  --out out/CASE-001 --offset 8388608
 
-python tests/test_pipeline.py               # 46 regression tests, no hardware
+python tests/test_pipeline.py               # 213 regression tests, no hardware
 python demo/tamper_demo.py                  # 2-minute stage demo
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
+
+Full Linux procedure: `docs/LINUX_ACQUISITION.md`.
 
 ## Design
 
@@ -87,16 +95,22 @@ demo/      tamper_demo.py
 | Component | State |
 |---|---|
 | Read-only device layer, bad-sector handling | working |
+| Survives a USB drop mid-pass (verified reconnect) | working |
 | Single-pass hash + block map + Merkle root | working |
 | Custody ledger + verification | working |
 | Signature detection + confidence scoring | working |
 | Partition parsing (MBR/GPT) | working |
-| Hikvision FS parser | not started |
-| Dahua FS parser | not started |
-| Deleted-footage carver | not started |
-| Clock-lie detector, timeline | not started |
+| Hikvision FS parser | working, `synthetic_only` |
+| Dahua DHFS 4.1 parser + extract | working on real media, `spec_only` |
+| Indexless carver, inline in the scan | working on real media, `spec_only` |
+| Metadata preservation | working |
+| Timeline (normalization, gaps, correlation) | working |
+| Report (HTML + JSON) and local UI | working |
+| Drop-in vendor plugins | working |
+| Video decode, AI analytics | not started (optional add-on) |
 | BSA s.63 certificate, CASE/UCO export | not started |
 
-Nothing has yet touched real DVR media — every result so far is against the
-synthetic fixture, which tests the code, not our understanding of any vendor
-format. Only the physical DS-80xx drive can move Hikvision to `validated`.
+Nothing is `validated`: that needs a byte-match between recovered footage and
+the recorder's own export. The CP Plus drive (Dahua-family DHFS) is real
+media; Hikvision is still tested only against the synthetic fixture until the
+team's second drive is read.
