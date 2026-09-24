@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PS26150 DVR Forensics</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">◧</span>
+    <div>
+      <div class="name">PS26150 · DVR/NVR Forensics</div>
+      <div class="sub">multi-vendor acquisition, recovery &amp; analysis</div>
+    </div>
+  </div>
+  <div class="tools">
+    <label class="case-pick">Case
+      <select id="case"></select>
+    </label>
+    <span class="badge" title="The UI listens on the loopback interface only and never opens an evidence device">offline · read-only viewer</span>
+  </div>
+</header>
+
+<nav class="pipeline" id="pipeline" aria-label="Pipeline stages"></nav>
+
+<nav class="tabs" id="tabs" role="tablist">
+  <button data-tab="overview" class="on">Overview</button>
+  <button data-tab="vendors">Vendors</button>
+  <button data-tab="acq">Acquisition &amp; custody</button>
+  <button data-tab="fs">Filesystem</button>
+  <button data-tab="rec">Recovered</button>
+  <button data-tab="tl">Timeline</button>
+  <button data-tab="report">Report</button>
+</nav>
+
+<main id="view"><p class="muted">Loading…</p></main>
+
+<footer class="foot">Statuses are the weakest evidence behind each claim:
+  <span class="pill s-validated">validated</span>
+  <span class="pill s-spec_only">spec_only</span>
+  <span class="pill s-synthetic_only">synthetic_only</span>
+  <span class="pill s-detected_not_parsed">detected_not_parsed</span>
+  · AI output, when enabled, is a lead, not evidence.
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

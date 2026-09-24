@@ -8,6 +8,11 @@ Covers the properties the rest of the tool depends on being true:
   * signatures straddling a block boundary are still found, exactly once
   * bad sectors are zero-filled in place and never shift later offsets
   * a resume onto the wrong device is refused
+  * Dahua DHFS reassembly never splices one camera's frames into another's
+  * the indexless carver splits indistinguishable cameras rather than mixing them
+
+Set DHFS_REAL_IMAGE to the SkyHawk partial image to also run the checks that
+pin the parser to what was observed on real media.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import sys
 import tempfile
 
@@ -28,7 +34,11 @@ from core.contract import CaseInfo, canonical_json
 from core.hashing import merkle_proof, merkle_root, sha256_bytes, verify_merkle_proof
 from detect.engine import SignatureScanner, parse_partitions
 from detect import signatures as sig
-from tests import synth_dvr
+from parsers import get_parser
+from parsers import dahua
+from parsers import hikvision as hik
+from recover import carver
+from tests import synth_dahua, synth_dvr
 
 PASSED: list[str] = []
 FAILED: list[tuple[str, str]] = []
@@ -185,7 +195,16 @@ def test_full_scan(tmp: str) -> None:
         check("Hikvision is NOT claimed as validated",
               vendors["Hikvision"].validation_status != "validated",
               vendors["Hikvision"].validation_status)
-        check("no parser is claimed", not vendors["Hikvision"].parser_available)
+        # A Hikvision parser now ships, so `parser_available` is True here -
+        # but that is a statement about code existing, never about validation.
+        # The invariant that must hold forever is the one above: having a
+        # parser must not promote the vendor to `validated`.
+        check("parser availability reflects the plugin registry",
+              vendors["Hikvision"].parser_available
+              == ("Hikvision" in sig.PARSERS_AVAILABLE))
+        check("vendors with no parser never claim one",
+              all(not d.parser_available for d in report.detections
+                  if d.vendor not in sig.PARSERS_AVAILABLE))
 
     check("master magic found at its expected offset",
           any(h.signature_id == "hik.master" and h.at_expected_offset
@@ -265,6 +284,803 @@ def test_partitions() -> None:
           parse_partitions(bytes(1024)) == [])
 
 
+# ---------------------------------------------------------------------------
+def test_hikvision_parser(tmp: str) -> None:
+    print("\n[hikvision parser]")
+    img = os.path.join(tmp, "hik.img")
+    meta = synth_dvr.build(img, size=16 * 1024 * 1024, vendor="hikvision")
+
+    parser = get_parser("Hikvision")
+    check("plugin registers itself", parser is not None)
+    if parser is None:
+        return
+    check("signatures.PARSERS_AVAILABLE tracks the registry",
+          "Hikvision" in sig.PARSERS_AVAILABLE)
+
+    with BlockDevice(img) as dev:
+        check("detects a Hikvision volume", parser.detect(dev))
+        check("master sector found at 0x200",
+              parser.find_master(dev) == 0x200,
+              hex(parser.find_master(dev)))
+        result = parser.parse(dev)
+
+    # --- the honesty invariants. These matter more than the parse itself.
+    check("parse is NEVER claimed as validated",
+          result.validation_status != "validated", result.validation_status)
+    check("fixture-sourced fields force synthetic_only",
+          result.validation_status == "synthetic_only",
+          result.validation_status)
+    check("field provenance is recorded for every decoded field",
+          len(result.field_provenance) >= len(synth_hik_fields()))
+    check("every fixture-sourced field says so",
+          all(f["implies_status"] == "synthetic_only"
+              for f in result.field_provenance if f["source"] == "fixture"))
+
+    # --- the parse
+    check("every indexed clip is recovered",
+          len(result.recordings) == meta["active_clips"],
+          f"{len(result.recordings)} vs {meta['active_clips']}")
+    check("volume metadata decoded",
+          result.volume["master"]["model"].startswith("DS-"),
+          result.volume["master"]["model"])
+    check("channel count decoded", result.volume["master"]["channel_count"] == 4)
+
+    by_offset = {r.offset: r for r in result.recordings}
+    for start, length, cam, ts in meta["index_entries"]:
+        rec = by_offset.get(start)
+        if rec is None:
+            check(f"index entry at 0x{start:X} recovered", False)
+            continue
+        check(f"extent matches index at 0x{start:X}", rec.length == length)
+        check(f"camera id decoded at 0x{start:X}",
+              rec.camera_id == f"CH{cam + 1:02d}", rec.camera_id)
+
+    r0 = result.recordings[0]
+    check("provenance is attached to every recording",
+          all(r.provenance is not None for r in result.recordings))
+    check("provenance sha256 matches the bytes on the platter",
+          r0.provenance.sha256 == hashlib.sha256(
+              open(img, "rb").read()[r0.offset:r0.offset + r0.length]
+          ).hexdigest())
+    check("sector range brackets the byte extent",
+          r0.provenance.sector_start * 512 <= r0.offset
+          and r0.provenance.sector_end * 512 >= r0.offset + r0.length)
+    check("frames are counted", r0.frame_count > 0, str(r0.frame_count))
+    check("codec identified per recording", r0.codec == "h264")
+
+    # --- timestamps are claims, never conclusions
+    check("every recording carries a timestamp claim",
+          all(r.timestamps for r in result.recordings))
+    tc = r0.timestamps[0]
+    check("timestamp claim names its source", tc.source == "index")
+    check("timestamp claim carries a decode rule", bool(tc.decode_rule))
+    check("a single-source timestamp is not asserted as certain",
+          tc.confidence < 1.0, str(tc.confidence))
+    check("timestamp decodes to the fixture's value",
+          tc.decoded_utc == "2025-09-22T00:00:00.000Z", str(tc.decoded_utc))
+
+    # --- confidence is never certainty
+    check("no recording claims certainty",
+          all(r.confidence < 1.0 for r in result.recordings))
+
+    # --- the deleted clip is NOT in the index: that is the carver's job, and
+    # the parser must not silently invent it.
+    deleted_off = meta["deleted_clip"]["offset"]
+    check("the unindexed deleted clip is absent from the parse",
+          deleted_off not in by_offset)
+
+
+def test_parser_robustness(tmp: str) -> None:
+    """A dying DVR disk is the normal case. A corrupt index must degrade into
+    reported errors, never an exception or a silent wrong answer."""
+    print("\n[parser robustness]")
+    parser = get_parser("Hikvision")
+    if parser is None:
+        return
+
+    # A disk with no Hikvision structures at all.
+    empty = os.path.join(tmp, "empty.img")
+    with open(empty, "wb") as fh:
+        fh.write(bytes(1 << 20))
+    with BlockDevice(empty) as dev:
+        check("a non-Hikvision disk is not detected", not parser.detect(dev))
+        res = parser.parse(dev)
+    check("a non-Hikvision disk reports an error, not a crash", bool(res.errors))
+    check("a non-Hikvision disk yields no recordings", not res.recordings)
+
+    # Master sector present, index absent - the damaged-index case.
+    noidx = os.path.join(tmp, "noindex.img")
+    buf = bytearray(1 << 20)
+    buf[0x200:0x200 + 18] = b"HIKVISION@HANGZHOU"
+    with open(noidx, "wb") as fh:
+        fh.write(bytes(buf))
+    with BlockDevice(noidx) as dev:
+        res = parser.parse(dev)
+    check("a missing index is reported, not fatal",
+          any("HIKBTREE" in n for n in res.notes))
+    check("a missing index still reports the volume", bool(res.volume))
+
+    # Index claiming absurd extents - garbage read off a damaged platter.
+    bad = os.path.join(tmp, "badindex.img")
+    buf = bytearray(1 << 20)
+    buf[0x200:0x200 + 18] = b"HIKVISION@HANGZHOU"
+    buf[0x1000:0x1008] = b"HIKBTREE"
+    buf[0x1010:0x1014] = (3).to_bytes(4, "little")
+    buf[0x1020:0x1026] = b"OFFSET"
+    # entry 0: extent past the end of the device.  entry 1: absurd length.
+    # entry 2: valid but empty (length 0).
+    struct_pack = __import__("struct").pack_into
+    struct_pack("<QQII", buf, 0x1040, 1 << 40, 4096, 0, 1758499200)
+    struct_pack("<QQII", buf, 0x1058, 0x2000, 1 << 40, 1, 1758499200)
+    struct_pack("<QQII", buf, 0x1070, 0x3000, 0, 2, 1758499200)
+    with open(bad, "wb") as fh:
+        fh.write(bytes(buf))
+    with BlockDevice(bad) as dev:
+        res = parser.parse(dev)
+    check("out-of-range extents are skipped and reported",
+          any("past the end" in n for n in res.notes))
+    check("absurd lengths are skipped and reported",
+          any("sanity bound" in n for n in res.notes))
+    check("no garbage recording is emitted", not res.recordings)
+
+    # A timestamp of 0 must not become 1970 presented as fact.
+    check("an unusable timestamp decodes to None",
+          hik._decode_utc(0) is None)
+
+
+# ---------------------------------------------------------------------------
+class _Sink:
+    def __init__(self):
+        self.frames: list = []
+
+    def write(self, b: bytes) -> None:
+        self.frames.append(next(dahua.walk_frames(b, 0)))
+
+
+def test_dahua_frames() -> None:
+    print("\n[dahua DHAV frames]")
+    from datetime import datetime
+    dt = datetime(2026, 9, 3, 12, 53, 53)
+    packed = synth_dahua.pack_date(dt)
+    check("packed date decodes to the same wall-clock time",
+          dahua.decode_date(packed) == dt)
+    check("the real disk's first index date decodes as observed",
+          dahua.fmt_date(0x6A46CD75) == "2026-09-03 12:53:53")
+    check("an impossible packed date decodes to None, not an exception",
+          dahua.decode_date(0xFFFFFFFF) is None)
+
+    good = synth_dahua.dhav(0xFC, 10, dt, 100, b"\x00\x00\x00\x01\x02\x01" + bytes(50),
+                            synth_dahua.EXT_VIDEO)
+    buf = bytes(7) + good + bytes(5)
+    frames = list(dahua.walk_frames(buf, 1000))
+    check("a valid frame is found at its absolute offset",
+          len(frames) == 1 and frames[0].offset == 1007)
+    bad_ck = bytearray(good)
+    bad_ck[23] ^= 0xFF
+    check("a bad header checksum is rejected", not list(dahua.walk_frames(bytes(bad_ck), 0)))
+    bad_tr = bytearray(good)
+    bad_tr[-8:-4] = b"XXXX"
+    check("a missing trailer is rejected", not list(dahua.walk_frames(bytes(bad_tr), 0)))
+    check("a frame cut off by the buffer end is not yielded",
+          not list(dahua.walk_frames(good[:-3], 0)))
+    ext = dahua.frame_ext(good, 0, frames[0].__class__(0, 0xFC, 10, len(good),
+                                                         packed, 100, len(synth_dahua.EXT_VIDEO)))
+    check("extension tags decode codec, size and fps",
+          ext.get("codec") == "h265" and ext.get("width") == 1920
+          and ext.get("height") == 1080 and ext.get("fps") == 25)
+
+    # Video and audio counters drift apart on real disks (78 apart after six
+    # hours).  Continuity must compare a counter only with its own kind.
+    F = dahua.DhavFrame
+    v1 = F(0, 0xFC, 918167, 900, packed, 40385, 24)
+    a1 = F(0, 0xF0, 918245, 368, packed, 40403, 16)
+    v2 = F(0, 0xFC, 918168, 900, packed, 40425, 24)
+    s = dahua.Stream(v1).feed(a1)
+    check("drifted audio/video counters still read as one stream",
+          s.distance(v2) is not None)
+    other = F(0, 0xFC, 918168, 900, packed, (40425 + 9000) & 0xFFFF, 24)
+    check("a frame 9 s away on the ms clock is another stream",
+          s.distance(other) is None)
+    check("the ms clock wrapping at 65536 is not a break",
+          dahua.Stream(F(0, 0xFC, 918167, 900, packed, 0xFFF0, 24)).distance(
+              F(0, 0xFC, 918168, 900, packed, 0x0018, 24)) is not None)
+
+
+def test_dahua_parser(tmp: str) -> None:
+    print("\n[dahua DHFS parser - synthetic, ground truth known]")
+    parser = get_parser("Dahua")
+    check("plugin registers itself", parser is not None)
+    if parser is None:
+        return
+    check("signatures.PARSERS_AVAILABLE includes Dahua", "Dahua" in sig.PARSERS_AVAILABLE)
+
+    for seed in (26150, 1, 2):
+        img = os.path.join(tmp, f"dhfs-{seed}.img")
+        meta = synth_dahua.build(img, seconds=14, seed=seed)
+        lost = sum(len(meta["written"][n]) - len(meta["survived"][n])
+                   for n in meta["written"])
+        parser = get_parser("Dahua")
+        with BlockDevice(img) as dev:
+            check(f"[{seed}] detects a DHFS volume", parser.detect(dev))
+            res = parser.parse(dev)
+            vol = parser.volumes[0]
+            check(f"[{seed}] one recording per camera",
+                  sorted(r.camera_id for r in res.recordings) == ["CH01", "CH02", "CH03"])
+            check(f"[{seed}] every chain is intact", all(f.chain_ok for f in vol.files))
+            check(f"[{seed}] data base calibrated to the true offset",
+                  vol.data_base == synth_dahua.DATA_BASE,
+                  f"got {vol.data_base}")
+            foreign = missed = dup = 0
+            spill = overflow = 0
+            for f in vol.files:
+                sink = _Sink()
+                st = dahua.reassemble(dev, vol, f, sink)
+                got = [(fr.ftype, fr.frame_number) for fr in sink.frames]
+                truth = meta["survived"][f.camera]
+                foreign += len(set(got) - truth)
+                missed += len(truth - set(got))
+                dup += len(got) - len(set(got))
+                spill += st["spill_in"]
+                overflow += st["overflow_recovered"]
+            check(f"[{seed}] the fixture really exercises overflow",
+                  lost > 0 and spill > 0 and overflow > 0,
+                  f"lost {lost} spill {spill} overflow {overflow}")
+            check(f"[{seed}] no camera receives another camera's frames", foreign == 0,
+                  f"{foreign} foreign")
+            check(f"[{seed}] every surviving frame is recovered", missed == 0,
+                  f"{missed} missed")
+            check(f"[{seed}] no frame is emitted twice", dup == 0, f"{dup} duplicates")
+            rem = parser.remnant_recordings(dev)
+            check(f"[{seed}] the older recording underneath is found as remnants",
+                  bool(rem) and all("2026-08-01" in r.timestamps[0].raw_value for r in rem))
+            check(f"[{seed}] remnants are fragments with camera unknown",
+                  all(r.state == "fragment" and r.camera_id == "UNKNOWN" for r in rem))
+
+        # --- the honesty invariants
+        check(f"[{seed}] parse is never claimed as validated",
+              res.validation_status != "validated")
+        check(f"[{seed}] without a timezone, no time is presented as UTC",
+              all(r.start_utc is None for r in res.recordings))
+
+    parser = get_parser("Dahua")
+    parser.tz_offset_min = 330
+    with BlockDevice(img) as dev:
+        res = parser.parse(dev)
+    check("an investigator-supplied offset converts recorder time to UTC",
+          res.recordings[0].start_utc == "2026-09-03T04:30:00.000Z",
+          str(res.recordings[0].start_utc))
+
+
+def test_dahua_robustness(tmp: str) -> None:
+    print("\n[dahua parser robustness]")
+    parser = get_parser("Dahua")
+    empty = os.path.join(tmp, "empty-dhfs.img")
+    with open(empty, "wb") as fh:
+        fh.write(bytes(1 << 20))
+    with BlockDevice(empty) as dev:
+        check("a non-DHFS disk is not detected", not parser.detect(dev))
+        res = parser.parse(dev)
+    check("a non-DHFS disk reports an error, not a crash", bool(res.errors))
+
+    # Structures intact but no video: calibration must fail loudly and
+    # extraction must refuse rather than guess a base.
+    img = os.path.join(tmp, "novideo.img")
+    synth_dahua.build(img, seconds=8, seed=5)
+    raw = bytearray(open(img, "rb").read())
+    start = synth_dahua.DATA_BASE + synth_dahua.FIRST_DATA_CLUSTER * synth_dahua.CLUSTER
+    raw[start:] = bytes(len(raw) - start)
+    with open(img, "wb") as fh:
+        fh.write(bytes(raw))
+    parser = get_parser("Dahua")
+    with BlockDevice(img) as dev:
+        res = parser.parse(dev)
+        vol = parser.volumes[0]
+        check("no footage: data base left unknown", vol.data_base is None)
+        check("no footage: recordings still listed from the index",
+              len(res.recordings) == 3)
+        try:
+            dahua.reassemble(dev, vol, vol.files[0])
+            refused = False
+        except ValueError:
+            refused = True
+        check("extraction refuses an uncalibrated volume", refused)
+
+    # A broken chain link is reported, never followed into garbage.
+    img = os.path.join(tmp, "brokenchain.img")
+    meta = synth_dahua.build(img, seconds=8, seed=6)
+    raw = bytearray(open(img, "rb").read())
+    c = meta["chains"][0][1]
+    struct.pack_into("<I", raw, synth_dahua.INDEX_SECTOR * 512 + c * 32 + 0x0C, 10 ** 6)
+    with open(img, "wb") as fh:
+        fh.write(bytes(raw))
+    parser = get_parser("Dahua")
+    with BlockDevice(img) as dev:
+        parser.parse(dev)
+    f0 = next(f for f in parser.volumes[0].files if f.camera == 0)
+    check("a chain pointing outside the table is flagged broken",
+          not f0.chain_ok and any("outside the table" in n for n in f0.chain_notes))
+
+
+def _owners(dev, stream, owner: dict) -> dict:
+    tally: dict = {}
+    for e in stream.extents:
+        buf = dev.read_at(e.offset, e.length)
+        for fr in dahua.walk_frames(buf, e.offset, 0, len(buf)):
+            k = owner.get(fr.offset, "old")
+            tally[k] = tally.get(k, 0) + 1
+    return tally
+
+
+def test_carver(tmp: str) -> None:
+    print("\n[indexless carver - synthetic, ground truth known]")
+    for twins in (False, True):
+        tag = "twins" if twins else "normal"
+        for seed in (26150, 1):
+            img = os.path.join(tmp, f"carve-{tag}-{seed}.img")
+            meta = synth_dahua.build(img, seconds=14, seed=seed, twins=twins)
+            with BlockDevice(img) as dev:
+                streams, stats = carver.carve(dev)
+                tallies = [_owners(dev, s, meta["owner"]) for s in streams]
+                p = get_parser("Dahua")
+                p.parse(dev)
+                xref = carver.cross_reference(dev, streams, p.volumes[0])
+                sink = _Sink()
+                biggest = max(streams, key=lambda s: s.frames)
+                carver.write_stream(dev, biggest, sink)
+            impure = [t for t in tallies if len(t) > 1]
+            check(f"[{tag} {seed}] no carved stream mixes two sources", not impure,
+                  str(impure[:2]))
+            for n in range(3):
+                got = sum(t.get(n, 0) for t in tallies)
+                check(f"[{tag} {seed}] camera {n + 1}: every surviving frame carved",
+                      got == len(meta["survived"][n]),
+                      f"{got}/{len(meta['survived'][n])}")
+            if twins:
+                check(f"[{tag} {seed}] indistinguishable cameras are split, not guessed",
+                      stats["ambiguous_splits"] > 0)
+            labels_ok = all(
+                (xref[s.sid]["label"] == "outside_index") == (set(t) == {"old"})
+                for s, t in zip(streams, tallies) if s.frames >= carver.MIN_FRAMES)
+            check(f"[{tag} {seed}] the index labels the older recording 'outside_index' "
+                  f"and nothing else", labels_ok)
+            keys = [(dahua._kind(f), f.frame_number) for f in sink.frames]
+            check(f"[{tag} {seed}] a written stream has no duplicate frames",
+                  len(keys) == len(set(keys)))
+            check(f"[{tag} {seed}] a carved stream is a fragment of unknown camera",
+                  carver.to_recording(biggest).camera_id == "UNKNOWN"
+                  and carver.to_recording(biggest).state == "fragment")
+
+
+def test_dahua_real_media() -> None:
+    """Pins the parser to what was observed on the real SkyHawk disk.  Runs
+    only when DHFS_REAL_IMAGE points at the partial image (never committed)."""
+    path = os.environ.get("DHFS_REAL_IMAGE")
+    if not path:
+        print("\n[dahua real media] skipped - set DHFS_REAL_IMAGE to run")
+        return
+    print("\n[dahua real media]")
+    parser = get_parser("Dahua")
+    with BlockDevice(path) as dev:
+        res = parser.parse(dev)
+        vol = parser.volumes[0]
+        check("513 recordings on volume 1", len(res.recordings) == 513)
+        check("0 broken chains", all(f.chain_ok for f in vol.files))
+        check("data base 0x95E000", vol.data_base == 0x95E000, hex(vol.data_base or 0))
+        v, f = parser.file_for("dhfs-v1-c002120")
+        st = dahua.reassemble(dev, v, f)
+    check("CH01 hour one: no stream breaks", st["stream_breaks"] == 0)
+    check("CH01 hour one: under 0.5% of video frames missing",
+          st["video_counter_missing"] < 0.005 * st["video_counter_span"])
+    check("CH01 hour one: no more frames than its counter span",
+          st["video_frames"] <= st["video_counter_span"])
+
+    # The carver, with no index, over the region holding hour one - then the
+    # index, used only to label what the carve found.
+    with BlockDevice(path) as dev:
+        streams, stats = carver.carve(dev, vol.cluster_offset(2120), vol.cluster_offset(3223))
+        xref = carver.cross_reference(dev, streams, vol)
+    kept = [s for s in streams if s.frames >= carver.MIN_FRAMES]
+    check("indexless carve: no stream carries mixed camera evidence",
+          all(xref[s.sid]["label"] != "mixed-evidence" for s in kept))
+    per_cam: dict = {}
+    for s in kept:
+        per_cam[xref[s.sid]["label"]] = per_cam.get(xref[s.sid]["label"], 0) + s.frames
+    check("indexless carve: all three cameras recovered in comparable volume",
+          all(k in per_cam for k in ("CH01", "CH02", "CH03"))
+          and min(per_cam[k] for k in ("CH01", "CH02", "CH03"))
+          > 0.9 * max(per_cam[k] for k in ("CH01", "CH02", "CH03")))
+
+
+def synth_hik_fields() -> list:
+    """The fields the parser is expected to declare provenance for."""
+    return hik.MASTER_FIELDS + hik.BTREE_FIELDS
+
+
+def test_preserve(tmp: str) -> None:
+    """Metadata preservation: whole scan blocks, provable to the scan root."""
+    print("\n[preserve]")
+    from core.hashing import merkle_root, sha256_bytes
+    from recover.preserve import preserve, verify_bundle
+
+    img = os.path.join(tmp, "preserve.dd")
+    synth_dahua.build(img, seconds=6)
+    bs = 1 << 20
+    blockmap = []
+    with open(img, "rb") as fh:
+        data = fh.read()
+    for off in range(0, len(data), bs):
+        blockmap.append({"offset": off, "length": len(data[off:off + bs]),
+                         "sha256": sha256_bytes(data[off:off + bs])})
+    root = merkle_root([b["sha256"] for b in blockmap])
+
+    bundle = os.path.join(tmp, "preserved")
+    with BlockDevice(img) as dev:
+        m = preserve(dev, bundle, vendor="Dahua", blockmap=blockmap)
+    names = [r["name"] for r in m["regions"]]
+    check("superblock and volume metadata are both preserved",
+          "superblock_and_partition_tables" in names and "volume1_metadata" in names,
+          str(names))
+    check("every saved block matches the acquisition hash", m["all_blocks_match"] is True)
+    check("the manifest carries the acquisition root", m["acquisition_merkle_root"] == root)
+    check("every saved block carries a Merkle path",
+          all("merkle_path" in b for b in m["blocks"]))
+    check("only the metadata is kept, not the video",
+          m["bytes_saved"] < len(data), f"{m['bytes_saved']} of {len(data)}")
+    vol = next(r for r in m["regions"] if r["name"] == "volume1_metadata")
+    check("volume metadata ends at the data area",
+          vol["end"] == synth_dahua.DATA_BASE, hex(vol["end"]))
+    with open(os.path.join(bundle, vol["file"]), "rb") as fh:
+        check("region bytes equal the platter bytes",
+              fh.read() == data[vol["start"]:vol["end"]])
+    v = verify_bundle(bundle)
+    check("an untouched bundle verifies from its own files",
+          v["ok"] and v["proven_to_root"] == len(m["blocks"]), str(v))
+
+    first = m["blocks"][0]["file"]
+    with open(os.path.join(bundle, first), "r+b") as fh:
+        fh.seek(10)
+        fh.write(b"\xFF")
+    v = verify_bundle(bundle)
+    check("a one-byte edit to a saved block is caught", not v["ok"], str(v))
+
+    lied = [dict(b) for b in blockmap]
+    lied[0]["sha256"] = "0" * 64
+    with BlockDevice(img) as dev:
+        m2 = preserve(dev, os.path.join(tmp, "preserved2"), vendor="Dahua", blockmap=lied)
+    check("a block that differs from the scan is reported, not hidden",
+          m2["all_blocks_match"] is False and any("differs" in n for n in m2["notes"]))
+    with BlockDevice(img) as dev:
+        m3 = preserve(dev, os.path.join(tmp, "preserved3"), vendor="Dahua",
+                      blockmap=blockmap[:2])
+    check("a partial scan issues no Merkle proofs",
+          m3["acquisition_merkle_root"] == "" and
+          not any("merkle_path" in b for b in m3["blocks"]))
+
+
+def test_inline_carve(tmp: str) -> None:
+    """Carving inside the acquisition pass must equal carving by re-reading,
+    and must never change a hash - even when it breaks."""
+    print("\n[inline carve in the acquisition pass]")
+    img = os.path.join(tmp, "inline.img")
+    meta = synth_dahua.build(img, seconds=14, seed=26150)
+    saved = carver.CHUNK
+    carver.CHUNK = 256 << 10     # many windows, so window edges are exercised
+    try:
+        with BlockDevice(img) as dev:
+            p = get_parser("Dahua")
+            p.parse(dev)
+            ref, _ = carver.carve(dev)
+            ref_x = carver.cross_reference(dev, ref, p.volumes[0])
+            inline_lab = carver.IndexLabeler(p.volumes)
+            feeder = carver.FrameFeeder(0, dev.size_bytes)
+            c = carver.Carver(0, dev.size_bytes, labeler=inline_lab)
+            for off, data, _ in dev.read_blocks(100_000):   # odd, unaligned blocks
+                for fr in feeder.push(off, data):
+                    c.add(fr)
+            for fr in feeder.close():
+                c.add(fr)
+            got, _ = c.finish()
+        sig = lambda ss: [(s.frames, [(e.offset, e.length) for e in s.extents]) for s in ss]
+        check("block-fed carve yields the same streams as a device carve",
+              sig(got) == sig(ref), f"{len(got)} vs {len(ref)} streams")
+        got_x = carver.label_streams(got)
+        check("inline labels equal labels from re-reading every frame",
+              all(got_x[a.sid]["tally"] == ref_x[b.sid]["tally"]
+                  for a, b in zip(got, ref)))
+
+        plain = ScanSession(img, os.path.join(tmp, "inl-plain"),
+                            CaseInfo(case_id="T-INL", investigator="test"),
+                            block_size=1 << 20, quiet=True).run()
+        tapped_s = ScanSession(img, os.path.join(tmp, "inl-tap"),
+                               CaseInfo(case_id="T-INL", investigator="test"),
+                               block_size=1 << 20, quiet=True, taps=[carver.CarveTap()])
+        tapped = tapped_s.run()
+        hv = lambda r: sorted((h.algorithm, h.value) for h in r.hashes)
+        check("a carve tap does not change any acquisition hash",
+              hv(plain) == hv(tapped) and plain.merkle_root == tapped.merkle_root)
+        rep_path = os.path.join(tmp, "inl-tap", "carve", "carve_report.json")
+        with open(rep_path, "r", encoding="utf-8") as fh:
+            rep = json.load(fh)
+        labels = {r["index_label"] for r in rep["streams"]}
+        check("inline carve report is written and labelled",
+              rep["index_used_for_labels"] and "outside_index" in labels
+              and any(l.startswith("CH") for l in labels), str(labels))
+        check("the ledger records the inline carve and still verifies",
+              any(e["action"] == "inline_carve_completed" for e in tapped_s.ledger.entries)
+              and tapped_s.ledger.verify()["valid"])
+
+        class Broken(carver.CarveTap):
+            def feed(self, offset, data):
+                if offset:
+                    raise RuntimeError("simulated tap crash")
+                super().feed(offset, data)
+        broken_s = ScanSession(img, os.path.join(tmp, "inl-broken"),
+                               CaseInfo(case_id="T-INL", investigator="test"),
+                               block_size=1 << 20, quiet=True, taps=[Broken()])
+        broken = broken_s.run()
+        check("a crashing tap is switched off and the hashes are unaffected",
+              hv(broken) == hv(plain) and broken.stats.complete_pass
+              and "failed" in broken_s.tap_results["carve"])
+        check("the tap failure is recorded in the custody ledger",
+              any(e["action"] == "inline_carve_failed" for e in broken_s.ledger.entries))
+    finally:
+        carver.CHUNK = saved
+
+
+def test_plugins(tmp: str) -> None:
+    """A new vendor is one file in plugins/ - no edit to the core."""
+    print("\n[drop-in plugins]")
+    import parsers as P
+    from detect import signatures as sig
+
+    pdir = os.path.join(tmp, "plugins")
+    os.makedirs(pdir)
+    with open(os.path.join(pdir, "acme.py"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '"""Acme NVR test plugin."""\n'
+            "from detect.signatures import DETECTED_ONLY, Signature\n"
+            "from parsers.base import ParseResult, VendorParser, register\n"
+            "SIGNATURES = [Signature(id='acme.magic', vendor='Acme', pattern=b'ACMEFS01',"
+            " description='test', source='test', validation_status=DETECTED_ONLY,"
+            " weight=6.0)]\n"
+            "@register\n"
+            "class AcmeParser(VendorParser):\n"
+            "    vendor = 'Acme'\n"
+            "    parser_rule = 'acme.v0'\n"
+            "    def detect(self, dev, hint_offsets=None):\n"
+            "        return dev.read_at(0, 8) == b'ACMEFS01'\n"
+            "    def parse(self, dev, hint_offsets=None):\n"
+            "        return ParseResult(vendor='Acme', parser_rule='acme.v0')\n")
+    with open(os.path.join(pdir, "broken.py"), "w", encoding="utf-8") as fh:
+        fh.write("raise RuntimeError('bad plugin')\n")
+    with open(os.path.join(pdir, "_skipped.py"), "w", encoding="utf-8") as fh:
+        fh.write("raise RuntimeError('must not load')\n")
+    saved_dir, saved_sigs = P.PLUGIN_DIR, list(sig.ALL_SIGNATURES)
+    P.PLUGIN_DIR = pdir
+    try:
+        P._load_plugins()
+        check("a dropped-in plugin registers its parser", "Acme" in P.available_vendors())
+        check("its signatures join the detection catalog", "acme.magic" in sig.BY_ID)
+        check("a broken plugin is reported and skipped, not fatal",
+              "broken.py" in P.PLUGIN_ERRORS)
+        check("underscore files (the template) are never loaded",
+              "_skipped.py" not in P.PLUGIN_ERRORS and "_skipped.py" not in P.LOADED_PLUGINS)
+        img = os.path.join(tmp, "acme.img")
+        with open(img, "wb") as fh:
+            fh.write(b"ACMEFS01" + bytes(1 << 20))
+        from detect.engine import SignatureScanner
+        sc = SignatureScanner()
+        with open(img, "rb") as fh:
+            sc.scan_block(0, fh.read(), 0, "")
+        check("the scan detects the new vendor with no core change",
+              any(d.vendor == "Acme" for d in sc.detections()))
+    finally:
+        P.PLUGIN_DIR = saved_dir
+        P.REGISTRY.pop("Acme", None)
+        P.LOADED_PLUGINS.clear()
+        P.PLUGIN_ERRORS.clear()
+        sig.ALL_SIGNATURES[:] = saved_sigs
+        sig.BY_ID.pop("acme.magic", None)
+
+
+def test_device_loss(tmp: str) -> None:
+    """A device that drops off the bus is never zero-filled as 'bad sectors';
+    a verified reconnect continues the same pass with identical hashes."""
+    print("\n[device loss and reconnect]")
+    import acquire.scanner as scanner_mod
+    from acquire.device import DeviceError, DeviceLost
+
+    img = os.path.join(tmp, "drop.img")
+    synth_dahua.build(img, seconds=14, seed=26150)
+    size = os.path.getsize(img)
+
+    class Gone(BlockDevice):
+        def alive(self):
+            return False
+
+        def _raw_read(self, offset, length):
+            raise OSError(5, "Input/output error")
+    try:
+        with Gone(img) as dev:
+            list(dev.read_blocks(1 << 20))
+        check("a vanished device raises DeviceLost instead of zero-filling", False)
+    except DeviceLost:
+        check("a vanished device raises DeviceLost instead of zero-filling", True)
+
+    plain = ScanSession(img, os.path.join(tmp, "drop-plain"),
+                        CaseInfo(case_id="T-DROP", investigator="test"),
+                        block_size=1 << 20, quiet=True, taps=[carver.CarveTap()]).run()
+    hv = lambda r: sorted((h.algorithm, h.value) for h in r.hashes)
+    with open(os.path.join(tmp, "drop-plain", "carve", "carve_report.json"), encoding="utf-8") as fh:
+        plain_streams = json.load(fh)["streams"]
+
+    class Dropping(BlockDevice):
+        dropped = False
+
+        def _read_block(self, off, want):
+            if not Dropping.dropped and self.path == img and off >= 2 << 20:
+                Dropping.dropped = True
+                raise DeviceLost(self.path, off, "simulated USB bridge reset")
+            return super()._read_block(off, want)
+
+    def session(name, candidate_path, read_only=True, wait=5.0):
+        Dropping.dropped = False
+        sess = ScanSession(img, os.path.join(tmp, name),
+                           CaseInfo(case_id="T-DROP", investigator="test"),
+                           block_size=1 << 20, quiet=True, taps=[carver.CarveTap()],
+                           reconnect_wait_s=wait, reconnect_poll_s=0.05)
+        sess.find_devices = lambda: [{"path": candidate_path, "size_bytes": size,
+                                      "serial": "", "read_only": read_only}]
+        return sess
+
+    renamed = os.path.join(tmp, "drop-as-sdc.img")      # the same drive, new name
+    shutil.copyfile(img, renamed)
+    saved = scanner_mod.BlockDevice
+    scanner_mod.BlockDevice = Dropping
+    try:
+        sess = session("drop-ok", renamed)
+        rep = sess.run()
+        acts = [e["action"] for e in sess.ledger.entries]
+        check("the pass survives a drop and finishes as ONE complete pass",
+              rep.stats.complete_pass and Dropping.dropped)
+        check("MD5/SHA-256 equal an uninterrupted pass", hv(rep) == hv(plain))
+        check("no block is recorded as unreadable", not rep.bad_regions)
+        with open(os.path.join(tmp, "drop-ok", "carve", "carve_report.json"),
+                  encoding="utf-8") as fh:
+            check("the inline carve is identical across the drop",
+                  json.load(fh)["streams"] == plain_streams)
+        check("the ledger discloses the loss and the verified reconnect",
+              "device_lost" in acts and "device_reconnected" in acts
+              and sess.ledger.verify()["valid"])
+        from report.case import load_case
+        from report.html import render
+        page = render(load_case(os.path.join(tmp, "drop-ok")))
+        check("the report discloses the interruption",
+              "Interruptions during acquisition" in page and "device_reconnected" in page)
+
+        changed = os.path.join(tmp, "drop-changed.img")
+        shutil.copyfile(img, changed)
+        with open(changed, "r+b") as fh:
+            fh.seek(100)
+            fh.write(b"\xEE")
+        sess = session("drop-changed", changed)
+        try:
+            sess.run()
+            check("a returning disk with different content is refused", False)
+        except DeviceError:
+            check("a returning disk with different content is refused",
+                  any(e["action"] == "reconnect_refused" for e in sess.ledger.entries))
+
+        opened = []
+
+        class Watch(Dropping):
+            def __init__(self, path, *a, **k):
+                opened.append(path)
+                super().__init__(path, *a, **k)
+        scanner_mod.BlockDevice = Watch
+        sess = session("drop-writable", renamed, read_only=False, wait=0.3)
+        try:
+            sess.run()
+            check("a returning disk that is not write-blocked is never opened", False)
+        except DeviceError:
+            check("a returning disk that is not write-blocked is never opened",
+                  renamed not in opened and any(
+                      e["action"] == "reconnect_waiting_for_write_block"
+                      for e in sess.ledger.entries))
+    finally:
+        scanner_mod.BlockDevice = saved
+
+
+def test_short_read(tmp: str) -> None:
+    """25 Sep, real media: a dying USB bridge returned 6976 KiB of an 8 MiB
+    read with no error, and the device layer zero-padded the rest into the
+    evidence hash.  A short read must never become padded data."""
+    print("\n[short read at a USB drop]")
+    import acquire.scanner as scanner_mod
+    from acquire.device import DeviceLost
+
+    img = os.path.join(tmp, "short.img")
+    synth_dahua.build(img, seconds=14, seed=26150)
+    size = os.path.getsize(img)
+    with open(img, "rb") as fh:
+        truth = fh.read()
+    fail_at = (2 << 20) + 700_000          # mid-block, like the real one
+
+    class DyingFile:
+        """The kernel's behaviour: one short read with no error, then EIO."""
+        def __init__(self, fh):
+            self.fh, self.pos, self.dead = fh, 0, False
+
+        def seek(self, pos, whence=0):
+            self.pos = self.fh.seek(pos, whence)
+            return self.pos
+
+        def tell(self):
+            return self.fh.tell()
+
+        def read(self, n):
+            if self.dead:
+                raise OSError(5, "Input/output error")
+            if self.pos <= fail_at < self.pos + n:
+                data = self.fh.read(fail_at - self.pos)
+                self.dead = True
+                return data
+            data = self.fh.read(n)
+            self.pos += len(data)
+            return data
+
+        def close(self):
+            self.fh.close()
+
+    class Dying(BlockDevice):
+        RETRY_DELAYS = (0.0,)
+        live = True
+
+        def __init__(self, path, *a, **k):
+            super().__init__(path, *a, **k)
+            if path == img and Dying.live:
+                self._fh = DyingFile(self._fh)
+
+        def alive(self):
+            return not getattr(self._fh, "dead", False)
+
+    yielded = []
+    try:
+        with Dying(img) as dev:
+            for off, data, err in dev.read_blocks(1 << 20):
+                yielded.append((off, data, err))
+        check("a short read at a drop raises DeviceLost", False)
+    except DeviceLost as lost:
+        check("a short read at a drop raises DeviceLost", True)
+        check("the loss is placed at the start of the unfinished block",
+              lost.offset == (fail_at // (1 << 20)) * (1 << 20), hex(lost.offset))
+    check("no block before the drop is padded or altered",
+          all(data == truth[off:off + len(data)] and err is None
+              for off, data, err in yielded))
+
+    renamed = os.path.join(tmp, "short-as-sdc.img")
+    shutil.copyfile(img, renamed)
+    plain = ScanSession(img, os.path.join(tmp, "short-plain"),
+                        CaseInfo(case_id="T-SHORT", investigator="test"),
+                        block_size=1 << 20, quiet=True).run()
+    saved = scanner_mod.BlockDevice
+    scanner_mod.BlockDevice = Dying
+    try:
+        Dying.live = True
+        sess = ScanSession(img, os.path.join(tmp, "short-scan"),
+                           CaseInfo(case_id="T-SHORT", investigator="test"),
+                           block_size=1 << 20, quiet=True,
+                           reconnect_wait_s=5, reconnect_poll_s=0.05)
+        sess.find_devices = lambda: [{"path": renamed, "size_bytes": size,
+                                      "serial": "", "read_only": True}]
+        rep = sess.run()
+        hv = lambda r: sorted((h.algorithm, h.value) for h in r.hashes)
+        check("a pass through the real failure pattern gives the true hashes",
+              hv(rep) == hv(plain) and rep.stats.complete_pass and not rep.bad_regions)
+    finally:
+        scanner_mod.BlockDevice = saved
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -275,6 +1091,18 @@ def main() -> int:
         test_partitions()
         test_full_scan(tmp)
         test_resume_guard(tmp)
+        test_hikvision_parser(tmp)
+        test_parser_robustness(tmp)
+        test_dahua_frames()
+        test_dahua_parser(tmp)
+        test_dahua_robustness(tmp)
+        test_carver(tmp)
+        test_preserve(tmp)
+        test_inline_carve(tmp)
+        test_plugins(tmp)
+        test_device_loss(tmp)
+        test_short_read(tmp)
+        test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

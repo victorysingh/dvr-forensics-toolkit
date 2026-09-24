@@ -20,6 +20,7 @@ from __future__ import annotations
 import ctypes
 import os
 import platform
+import time
 from ctypes import wintypes
 from typing import Iterator, Optional
 
@@ -50,6 +51,21 @@ class DeviceError(Exception):
 
 class PermissionNeeded(DeviceError):
     """Raised when the read failed purely for lack of Administrator."""
+
+
+class DeviceLost(DeviceError):
+    """The device stopped existing mid-read: its node is gone, its SCSI state
+    is no longer 'running', or its name now belongs to a different disk.
+
+    This is NOT a bad sector and must never be handled like one.  Zero-filling
+    a vanished device would put fabricated zeros into the evidence hash - on a
+    USB bridge that drops out, gigabytes of them, recorded as "unreadable"."""
+
+    def __init__(self, path: str, offset: int, detail: str):
+        super().__init__(f"{path} lost at offset 0x{offset:X}: {detail}")
+        self.path = path
+        self.offset = offset
+        self.detail = detail
 
 
 def is_admin() -> bool:
@@ -108,6 +124,11 @@ class BlockDevice:
     downstream engine works identically on live hardware and on a fixture.
     """
 
+    # A failed read on a live device is retried after these pauses before any
+    # sector is declared unreadable: a USB bridge reset takes a few seconds,
+    # and a transient error is not a bad sector.
+    RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0, 9.0)
+
     def __init__(self, path: str, sector_size: int = 0):
         self.path = path
         self._handle = None
@@ -155,9 +176,47 @@ class BlockDevice:
                 self._fh.seek(0, os.SEEK_END)
                 self.size_bytes = self._fh.tell()
                 self._fh.seek(0)
+                self._probe_linux()
             else:
                 self.size_bytes = os.path.getsize(self.path)
                 self.model = "disk image file"
+
+    def _probe_linux(self) -> None:
+        """Model/serial/bus from udev's database - plain file reads, no
+        ioctl, nothing sent to the drive.  Through a USB-SATA bridge that
+        passes ATA IDENTIFY through, this is the drive's own serial, which is
+        what lets a reconnected drive be recognised whatever its new name."""
+        u = udev_properties(self.path)
+        # The kernel object behind the node right now.  Its sysfs path carries
+        # the SCSI host number, which changes when a bridge re-enumerates - so
+        # a reconnected drive that got the same name back is still detected.
+        self._sys_path = os.path.realpath(os.path.join(
+            "/sys/class/block", os.path.basename(os.path.realpath(self.path))))
+        self.serial = u.get("ID_SERIAL_SHORT", "")
+        self.model = u.get("ID_MODEL", "").replace("_", " ").strip()
+        name = os.path.basename(os.path.realpath(self.path))
+        self.bus_type = "USB" if "usb" in os.path.realpath(
+            os.path.join("/sys/class/block", name)) else u.get("ID_BUS", "")
+
+    def alive(self) -> bool:
+        """Is the device we opened still the one answering at this path?
+
+        Only meaningful for Linux raw devices; image files and Windows handles
+        report True and keep the old bad-sector behaviour."""
+        if IS_WINDOWS or not self.path.startswith("/dev/"):
+            return True
+        name = os.path.basename(os.path.realpath(self.path))
+        base = os.path.join("/sys/class/block", name)
+        if not os.path.exists(self.path) or not os.path.isdir(base):
+            return False
+        if getattr(self, "_sys_path", "") and os.path.realpath(base) != self._sys_path:
+            return False                    # same name, different kernel device
+        state = _read_sysfs(os.path.join(base, "device", "state"))
+        if state and state != "running":
+            return False
+        if self.serial and udev_properties(self.path).get("ID_SERIAL_SHORT", "") != self.serial:
+            return False                    # the name now belongs to another disk
+        return True
 
     def _probe_windows(self) -> None:
         # exact byte length
@@ -232,10 +291,17 @@ class BlockDevice:
                 end = min(end, self.size_bytes)
             raw = self._raw_read(start, end - start)
             return raw[offset - start: offset - start + length]
-        self._fh.seek(offset)
-        return self._fh.read(length)
+        return self._raw_read(offset, length)
 
     def _raw_read(self, offset: int, length: int) -> bytes:
+        """Up to `length` bytes; fewer ONLY at the end of the device.
+
+        One read() on a block device can legitimately return less than asked
+        when the transport fails part-way - on 25 Sep a dying USB bridge
+        returned 6976 KiB of an 8 MiB request with no error, and the old
+        code zero-padded the rest into the evidence hash.  So keep reading:
+        the next read() on a failing device raises, and the caller's error
+        handling takes over instead of a silent pad."""
         if self._handle is not None:
             newpos = ctypes.c_longlong(0)
             if not _w32.SetFilePointerEx(self._handle, ctypes.c_longlong(offset),
@@ -250,7 +316,13 @@ class BlockDevice:
                                   f"WinError {ctypes.get_last_error()}")
             return buf.raw[:got.value]
         self._fh.seek(offset)
-        return self._fh.read(length)
+        buf = bytearray()
+        while len(buf) < length:
+            chunk = self._fh.read(length - len(buf))
+            if not chunk:
+                break                                    # end of device / file
+            buf += chunk
+        return bytes(buf)
 
     def read_blocks(self, block_size: int, start: int = 0,
                     end: Optional[int] = None
@@ -268,15 +340,33 @@ class BlockDevice:
         off = (start // ss) * ss
         while off < end:
             want = min(block_size, end - off)
+            data, err = self._read_block(off, want)
+            yield off, data, err
+            off += want
+
+    def _read_block(self, off: int, want: int) -> tuple[bytes, Optional[str]]:
+        """One block, or DeviceLost.  Bad sectors are isolated only once the
+        device is known to still be there and a retry has not helped."""
+        first: Optional[Exception] = None
+        # Retries only for a real device path: an image file has no bridge to
+        # reset, and a file forced onto the raw path must not stall.
+        retry = self.RETRY_DELAYS if self._looks_raw(self.path) else ()
+        for delay in (0.0,) + retry:
+            if delay:
+                time.sleep(delay)
+            if not self.alive():
+                raise DeviceLost(self.path, off, f"device gone after read error: {first}")
             try:
                 data = self._raw_read(off, want)
                 if len(data) < want:
-                    data += b"\x00" * (want - len(data))
-                yield off, data, None
+                    # read_blocks never asks past the end, so short means the
+                    # device stopped answering - never pad it into the hash
+                    raise OSError(f"short read: {len(data)} of {want} bytes")
+                return data, None
             except Exception as exc:                     # noqa: BLE001
-                data, bad = self._read_degraded(off, want)
-                yield off, data, f"{bad} bad sector(s): {exc}"
-            off += want
+                first = first or exc
+        data, bad = self._read_degraded(off, want)
+        return data, f"{bad} bad sector(s): {first}"
 
     def _read_degraded(self, offset: int, length: int) -> tuple[bytes, int]:
         ss = self.sector_size
@@ -286,8 +376,12 @@ class BlockDevice:
             n = min(ss, offset + length - s)
             try:
                 chunk = self._raw_read(s, n)
-                out += chunk + b"\x00" * (n - len(chunk))
-            except Exception:                            # noqa: BLE001
+                if len(chunk) < n:
+                    raise OSError(f"short read: {len(chunk)} of {n} bytes")
+                out += chunk
+            except Exception as exc:                     # noqa: BLE001
+                if not self.alive():
+                    raise DeviceLost(self.path, s, f"device gone during sector reads: {exc}")
                 out += b"\x00" * n
                 bad += 1
         return bytes(out), bad
@@ -303,9 +397,73 @@ class BlockDevice:
             bus_type=self.bus_type,
             removable=self.removable,
             write_blocked=True,
-            write_block_method=("software:read-only-handle"
+            write_block_method=(_linux_write_block_method(self.path)
                                 if self.is_raw else "n/a:image-file"),
         )
+
+
+def _linux_write_block_method(path: str) -> str:
+    """Name the write block actually in force, not the one we hoped for.
+
+    Opening read-only only protects against *this* process.  The kernel's
+    block-layer flag (`blockdev --setro`) protects against every process -
+    including a desktop auto-mounter - so the report says which one held.
+    Both are software write blocks; neither is a hardware blocker.
+    """
+    if os.name != "posix":
+        return "software:read-only-handle"
+    name = os.path.basename(os.path.realpath(path))
+    ro = _read_sysfs(os.path.join("/sys/class/block", name, "ro"))
+    if ro == "1":
+        return "software:kernel-setro+read-only-handle"
+    if ro == "0":
+        return "software:read-only-handle (kernel ro flag NOT set)"
+    return "software:read-only-handle"
+
+
+def udev_writeblock_rule(serial: str, user: str = "") -> str:
+    """A udev rule that write-blocks one drive, by its own serial, the moment
+    it appears - under whatever name a USB reset gives it.
+
+    `blockdev --setro` does not survive a disconnect, and a flaky USB-SATA
+    bridge disconnects on its own; without this rule the drive comes back
+    writable until someone notices.  Keyed on the serial, never on "every USB
+    disk": a forensic workstation may itself boot from USB.  This function
+    only builds the text - installing it is the examiner's (root) step."""
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", serial or ""):
+        raise ValueError(f"refusing to build a rule for serial {serial!r}")
+    if user and not re.fullmatch(r"[a-z_][a-z0-9_-]*", user):
+        raise ValueError(f"refusing to build a rule for user {user!r}")
+    run = [f'RUN+="/usr/sbin/blockdev --setro /dev/%k"']
+    if user:
+        run.append(f'RUN+="/usr/bin/setfacl -m u:{user}:r /dev/%k"')
+    return ("# PS26150 evidence write block for drive serial " + serial + "\n"
+            "# Install to /run/udev/rules.d/ (gone after reboot) and run\n"
+            "#   udevadm control --reload\n"
+            f'ACTION=="add|change", SUBSYSTEM=="block", ENV{{ID_SERIAL_SHORT}}=="{serial}", '
+            + ", ".join(run) + "\n")
+
+
+def udev_properties(path: str) -> dict[str, str]:
+    """The udev database entry for a block device node ('E:KEY=value' lines
+    in /run/udev/data/b<major>:<minor>).  Empty if unavailable."""
+    if IS_WINDOWS:
+        return {}
+    name = os.path.basename(os.path.realpath(path))
+    dev = _read_sysfs(os.path.join("/sys/class/block", name, "dev"))
+    out: dict[str, str] = {}
+    if not dev:
+        return out
+    try:
+        with open(f"/run/udev/data/b{dev}", "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith("E:") and "=" in line:
+                    k, v = line[2:].rstrip("\n").split("=", 1)
+                    out[k] = v
+    except OSError:
+        pass
+    return out
 
 
 def _read_sysfs(path: str, default: str = "") -> str:
@@ -333,7 +491,9 @@ def list_block_devices_linux() -> list[dict]:
         size = sectors * 512               # sysfs 'size' is always 512B units
         model = _read_sysfs(os.path.join(d, "device/model"))
         vendor = _read_sysfs(os.path.join(d, "device/vendor"))
-        serial = (_read_sysfs(os.path.join(d, "device/serial"))
+        udev = udev_properties(f"/dev/{name}")
+        serial = (udev.get("ID_SERIAL_SHORT")
+                  or _read_sysfs(os.path.join(d, "device/serial"))
                   or _read_sysfs(os.path.join(d, "serial")))
         found.append({
             "index": len(found),

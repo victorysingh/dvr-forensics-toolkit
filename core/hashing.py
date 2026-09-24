@@ -44,6 +44,18 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def sha256_file(path: str, chunk: int = DEFAULT_BLOCK_SIZE) -> str:
+    """SHA-256 of an output file, streamed - extracted clips run to GBs."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while True:
+            data = fh.read(chunk)
+            if not data:
+                break
+            h.update(data)
+    return h.hexdigest()
+
+
 # --------------------------------------------------------------------------
 # Merkle tree over block hashes.
 #
