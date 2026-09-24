@@ -216,7 +216,14 @@ PS_VENDORS = ["Hikvision", "Dahua", "CP Plus", "Honeywell", "TP-Link",
               "Godrej", "Uniview", "Matrix"]
 
 # Which vendors we actually ship a filesystem parser for, today.
-PARSERS_AVAILABLE: set[str] = set()      # populated as plugins land
+#
+# Populated by `parsers/__init__.py` from the plugin registry when that
+# package is imported, so it cannot drift from the plugins that actually
+# exist.  It stays empty for callers that only ever import `detect`, which is
+# the honest answer for them: detection alone parses nothing.  Note that a
+# parser existing says nothing about whether it has been validated - that is
+# `VendorDetection.validation_status`, and the two are deliberately separate.
+PARSERS_AVAILABLE: set[str] = set()
 
 # ---------------------------------------------------------------------------
 # Codec-level markers, handled separately from the byte-signature scan.

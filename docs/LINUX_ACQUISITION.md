@@ -84,6 +84,35 @@ Three caveats that have burned people:
 - `--setro` on the parent device does not automatically mark partitions RO
   in every kernel version. Check `blockdev --getro /dev/sdb1` too.
 
+### Keep it write-blocked across reconnects
+
+A cheap USB-SATA bridge can reset itself mid-read. On 24 Sep 2026 ours (a
+generic `14cd:6116` USB 2.0 bridge) dropped 48.6 GiB into a pass and came
+back three seconds later as **`/dev/sdc` — with the read-only flag gone**.
+Nothing mounted it only because automount and udisks were already off.
+
+So before a long pass, install a **runtime** udev rule keyed on the drive's
+own serial. It re-applies `--setro` (and, optionally, a read-only ACL for the
+examiner) the moment the drive appears, under whatever name it gets:
+
+```bash
+python cli.py writeblock-rule --device /dev/sdb --user "$USER"   # prints the rule
+python cli.py writeblock-rule --device /dev/sdb --user "$USER" \
+  | sudo tee /run/udev/rules.d/70-ps26150-writeblock.rules
+sudo udevadm control --reload
+sudo udevadm test /sys/block/sdb 2>&1 | grep setro     # confirm the rule matches
+```
+
+- `/run/udev/rules.d` is cleared at reboot, so the rule never outlives the
+  case. It is keyed on the serial, **never on "all USB disks"** — the
+  workstation itself may boot from a USB SSD.
+- The serial comes from udev's database (`ID_SERIAL_SHORT`), which most
+  bridges fill from the drive's own ATA IDENTIFY. If it is empty for your
+  bridge, you cannot rely on the rule: stay with the drive and re-apply
+  `--setro` by hand after any reconnect.
+- With the ACL (`--user`), the scan runs as your user with **read** permission
+  only — no root process ever holds the evidence open.
+
 Our tool surfaces the kernel's own flag, so you can confirm it independently:
 
 ```bash
@@ -117,6 +146,24 @@ A triage scan is explicitly marked `complete_pass: false` in the report, and
 its linear hashes cover only the bytes actually read. Never quote a partial
 scan's hash as the drive hash.
 
+For a Dahua-family disk, carve in the same pass. Carving costs CPU, not a
+second multi-hour read, and every frame is labelled against the DHFS index as
+it is carved:
+
+```bash
+systemd-inhibit --what=sleep:idle python cli.py scan --device /dev/sdb \
+    --case CPPLUS-001 --investigator "Shrestha" --carve --reconnect-wait 480
+```
+
+**If the drive drops off the bus mid-pass,** the scan does not treat the
+vanished device as bad sectors. It waits (`--reconnect-wait`, minutes) for a
+device with the same serial and size that **is write-blocked** — it never
+opens one that is not — re-reads block 0 and the last block it hashed, and
+continues only if both match the SHA-256 already recorded. The running
+MD5/SHA-256 then continue from the first unhashed byte, so they equal one
+uninterrupted read. Every step (`device_lost`, `device_reconnected`, or
+`reconnect_refused`) goes into the custody ledger and the report.
+
 **The full pass on a multi-TB drive takes hours over USB.** It is resumable:
 
 ```bash
@@ -134,6 +181,26 @@ enclosure, disable USB autosuspend, and do not let the machine sleep.
 # stop USB autosuspend killing a 4-hour read halfway through
 sudo sh -c 'echo -1 > /sys/module/usbcore/parameters/autosuspend'
 systemd-inhibit --what=sleep:idle sudo python cli.py scan ...
+```
+
+The module parameter only applies to devices enumerated *after* it is set.
+For a drive already attached, check its port directly:
+`cat /sys/bus/usb/devices/<port>/power/control` must print `on`.
+
+Check the speed the bridge actually negotiated before planning the run
+(`lsusb -t`): a USB 2.0 bridge (`480M`) caps a hard disk at about 30 MB/s, so
+1 TB takes roughly nine hours; a USB 3 dock takes under two.
+
+After the pass, everything else works from what the scan wrote, plus small
+targeted reads:
+
+```bash
+python cli.py preserve --device /dev/sdb --out out/CPPLUS-001   # filesystem metadata, ~100 MB
+python cli.py parse    --device /dev/sdb --vendor Dahua --out out/CPPLUS-001
+python cli.py timeline --out out/CPPLUS-001 --tz-offset 330 \
+    --clock-observed "2026-09-25 10:02:13" --clock-reference "2026-09-25 10:00:00"
+python cli.py report   --out out/CPPLUS-001
+python cli.py serve                                            # UI on http://127.0.0.1:8150
 ```
 
 ---
