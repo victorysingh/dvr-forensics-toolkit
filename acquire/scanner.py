@@ -270,9 +270,11 @@ class ScanSession:
           * its kernel read-only flag is set (a udev rule keyed on the serial
             sets it at enumeration; see docs/LINUX_ACQUISITION.md).  A device
             that is not write-blocked is never opened, however long we wait;
-          * block 0 and the last block already hashed read back with exactly
-            the SHA-256 recorded for them - proof it is the same, unchanged
-            drive.
+          * block 0 and the last two blocks already hashed read back with
+            exactly the SHA-256 recorded for them - proof it is the same,
+            unchanged drive, and that nothing hashed just before the drop was
+            corrupted by it.  If they do not match, the pass is refused: its
+            running hashes may already contain bad data.
 
         Then reading resumes at the first byte not yet hashed, feeding the
         SAME running MD5/SHA-256.  The linear hashes are a function of the
@@ -308,7 +310,9 @@ class ScanSession:
                     continue
                 new = BlockDevice(d["path"])
                 checks = []
-                for i in sorted({0, max(0, pos // bs - 1)}):
+                # block 0, and the last two blocks hashed: a failing bridge
+                # corrupts the reads just before it drops, if anything
+                for i in sorted({0, max(0, pos // bs - 2), max(0, pos // bs - 1)}):
                     if i >= len(leaves):
                         continue
                     got = sha256_bytes(new.read_at(i * bs, min(bs, new.size_bytes - i * bs)))

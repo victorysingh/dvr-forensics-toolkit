@@ -291,10 +291,17 @@ class BlockDevice:
                 end = min(end, self.size_bytes)
             raw = self._raw_read(start, end - start)
             return raw[offset - start: offset - start + length]
-        self._fh.seek(offset)
-        return self._fh.read(length)
+        return self._raw_read(offset, length)
 
     def _raw_read(self, offset: int, length: int) -> bytes:
+        """Up to `length` bytes; fewer ONLY at the end of the device.
+
+        One read() on a block device can legitimately return less than asked
+        when the transport fails part-way - on 25 Sep a dying USB bridge
+        returned 6976 KiB of an 8 MiB request with no error, and the old
+        code zero-padded the rest into the evidence hash.  So keep reading:
+        the next read() on a failing device raises, and the caller's error
+        handling takes over instead of a silent pad."""
         if self._handle is not None:
             newpos = ctypes.c_longlong(0)
             if not _w32.SetFilePointerEx(self._handle, ctypes.c_longlong(offset),
@@ -309,7 +316,13 @@ class BlockDevice:
                                   f"WinError {ctypes.get_last_error()}")
             return buf.raw[:got.value]
         self._fh.seek(offset)
-        return self._fh.read(length)
+        buf = bytearray()
+        while len(buf) < length:
+            chunk = self._fh.read(length - len(buf))
+            if not chunk:
+                break                                    # end of device / file
+            buf += chunk
+        return bytes(buf)
 
     def read_blocks(self, block_size: int, start: int = 0,
                     end: Optional[int] = None
@@ -346,7 +359,9 @@ class BlockDevice:
             try:
                 data = self._raw_read(off, want)
                 if len(data) < want:
-                    data += b"\x00" * (want - len(data))
+                    # read_blocks never asks past the end, so short means the
+                    # device stopped answering - never pad it into the hash
+                    raise OSError(f"short read: {len(data)} of {want} bytes")
                 return data, None
             except Exception as exc:                     # noqa: BLE001
                 first = first or exc
@@ -361,7 +376,9 @@ class BlockDevice:
             n = min(ss, offset + length - s)
             try:
                 chunk = self._raw_read(s, n)
-                out += chunk + b"\x00" * (n - len(chunk))
+                if len(chunk) < n:
+                    raise OSError(f"short read: {len(chunk)} of {n} bytes")
+                out += chunk
             except Exception as exc:                     # noqa: BLE001
                 if not self.alive():
                     raise DeviceLost(self.path, s, f"device gone during sector reads: {exc}")

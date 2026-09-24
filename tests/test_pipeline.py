@@ -991,6 +991,96 @@ def test_device_loss(tmp: str) -> None:
         scanner_mod.BlockDevice = saved
 
 
+def test_short_read(tmp: str) -> None:
+    """25 Sep, real media: a dying USB bridge returned 6976 KiB of an 8 MiB
+    read with no error, and the device layer zero-padded the rest into the
+    evidence hash.  A short read must never become padded data."""
+    print("\n[short read at a USB drop]")
+    import acquire.scanner as scanner_mod
+    from acquire.device import DeviceLost
+
+    img = os.path.join(tmp, "short.img")
+    synth_dahua.build(img, seconds=14, seed=26150)
+    size = os.path.getsize(img)
+    with open(img, "rb") as fh:
+        truth = fh.read()
+    fail_at = (2 << 20) + 700_000          # mid-block, like the real one
+
+    class DyingFile:
+        """The kernel's behaviour: one short read with no error, then EIO."""
+        def __init__(self, fh):
+            self.fh, self.pos, self.dead = fh, 0, False
+
+        def seek(self, pos, whence=0):
+            self.pos = self.fh.seek(pos, whence)
+            return self.pos
+
+        def tell(self):
+            return self.fh.tell()
+
+        def read(self, n):
+            if self.dead:
+                raise OSError(5, "Input/output error")
+            if self.pos <= fail_at < self.pos + n:
+                data = self.fh.read(fail_at - self.pos)
+                self.dead = True
+                return data
+            data = self.fh.read(n)
+            self.pos += len(data)
+            return data
+
+        def close(self):
+            self.fh.close()
+
+    class Dying(BlockDevice):
+        RETRY_DELAYS = (0.0,)
+        live = True
+
+        def __init__(self, path, *a, **k):
+            super().__init__(path, *a, **k)
+            if path == img and Dying.live:
+                self._fh = DyingFile(self._fh)
+
+        def alive(self):
+            return not getattr(self._fh, "dead", False)
+
+    yielded = []
+    try:
+        with Dying(img) as dev:
+            for off, data, err in dev.read_blocks(1 << 20):
+                yielded.append((off, data, err))
+        check("a short read at a drop raises DeviceLost", False)
+    except DeviceLost as lost:
+        check("a short read at a drop raises DeviceLost", True)
+        check("the loss is placed at the start of the unfinished block",
+              lost.offset == (fail_at // (1 << 20)) * (1 << 20), hex(lost.offset))
+    check("no block before the drop is padded or altered",
+          all(data == truth[off:off + len(data)] and err is None
+              for off, data, err in yielded))
+
+    renamed = os.path.join(tmp, "short-as-sdc.img")
+    shutil.copyfile(img, renamed)
+    plain = ScanSession(img, os.path.join(tmp, "short-plain"),
+                        CaseInfo(case_id="T-SHORT", investigator="test"),
+                        block_size=1 << 20, quiet=True).run()
+    saved = scanner_mod.BlockDevice
+    scanner_mod.BlockDevice = Dying
+    try:
+        Dying.live = True
+        sess = ScanSession(img, os.path.join(tmp, "short-scan"),
+                           CaseInfo(case_id="T-SHORT", investigator="test"),
+                           block_size=1 << 20, quiet=True,
+                           reconnect_wait_s=5, reconnect_poll_s=0.05)
+        sess.find_devices = lambda: [{"path": renamed, "size_bytes": size,
+                                      "serial": "", "read_only": True}]
+        rep = sess.run()
+        hv = lambda r: sorted((h.algorithm, h.value) for h in r.hashes)
+        check("a pass through the real failure pattern gives the true hashes",
+              hv(rep) == hv(plain) and rep.stats.complete_pass and not rep.bad_regions)
+    finally:
+        scanner_mod.BlockDevice = saved
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1011,6 +1101,7 @@ def main() -> int:
         test_inline_carve(tmp)
         test_plugins(tmp)
         test_device_loss(tmp)
+        test_short_read(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
