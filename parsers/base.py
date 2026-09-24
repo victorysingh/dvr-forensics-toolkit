@@ -1,10 +1,10 @@
 """Vendor filesystem parser plugin SDK.
 
 The problem statement names eight OEMs and asks for five to six.  We hold
-media for exactly one, so the defensible way to answer it is detection across
-all eight plus a documented plugin interface - never an implied claim of full
-support for formats nobody on the team can test.  This module is that
-interface.
+media for two (a Dahua-family CP Plus drive and a Hikvision drive), so the
+defensible way to answer it is detection across all eight plus a documented
+plugin interface - never an implied claim of full support for formats nobody
+on the team can test.  This module is that interface.
 
 A plugin declares which vendor it handles, locates its own structures on the
 platter, and returns contract objects.  It never opens a device itself: it is

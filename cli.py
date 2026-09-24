@@ -83,9 +83,14 @@ def cmd_scan(args) -> int:
     if args.device.startswith("\\\\.\\") and not is_admin():
         print("!! Raw device access needs Administrator. Relaunch elevated.\n")
 
+    taps = []
+    if args.carve:
+        from recover.carver import CarveTap
+        taps.append(CarveTap(tz_offset_min=args.tz_offset))
     session = ScanSession(args.device, out_dir, case,
                           block_size=args.block_size * 1024 * 1024,
-                          resume=args.resume)
+                          resume=args.resume, taps=taps,
+                          reconnect_wait_s=args.reconnect_wait * 60)
     try:
         report = session.run(max_bytes=args.max_mb * 1024 * 1024 if args.max_mb else None)
     except PermissionNeeded as exc:
@@ -405,7 +410,7 @@ def cmd_carve(args) -> int:
     afterwards, to label each carved stream - never to find the frames - so
     the carve stands on its own and the two can be checked against each other.
     """
-    from core.contract import SCHEMA_VERSION, dump_json, to_dict, utc_now
+    from core.contract import dump_json
     from core.hashing import sha256_file
     from parsers import get_parser
     from recover import carver
@@ -426,23 +431,16 @@ def cmd_carve(args) -> int:
             def progress(done, total, live):
                 print(f"    {done / total:6.1%}  {live} live streams", flush=True)
 
-            streams, stats = carver.carve(dev, start, end, progress=progress)
-            vol = None
+            labeler = None
             parser = get_parser("Dahua")
             if not args.no_index and parser.detect(dev):
                 print("  index         DHFS found - used only to LABEL carved streams")
                 parser.parse(dev)
-                vol = next((v for v in parser.volumes if v.data_base is not None), None)
-            xref = carver.cross_reference(dev, streams, vol) if vol else {}
-
+                labeler = carver.IndexLabeler(parser.volumes) or None
+            streams, stats = carver.carve(dev, start, end, progress=progress,
+                                          labeler=labeler)
+            xref = carver.label_streams(streams)
             kept = [s for s in streams if s.frames >= carver.MIN_FRAMES]
-            rows = []
-            for s in kept:
-                rec = carver.to_recording(s, args.tz_offset)
-                x = xref.get(s.sid, {})
-                rows.append({"recording": to_dict(rec), "index_label": x.get("label"),
-                             "index_tally": x.get("tally"), "duplicates_dropped": s.duplicates,
-                             "extents": [[e.offset, e.length] for e in s.extents]})
 
             want = {"none": set(), "all": {s.sid for s in kept},
                     "outside": {s.sid for s in kept
@@ -466,23 +464,9 @@ def cmd_carve(args) -> int:
         print(f"[!] {exc}")
         return 1
 
-    report = {
-        "schema_version": SCHEMA_VERSION, "generated_utc": utc_now(),
-        "tool": "ps26150-forensics carve", "rule": carver.PARSER_RULE,
-        "validation_status": "spec_only",
-        "source_device": info.path, "source_bytes": info.size_bytes,
-        "write_block_method": info.write_block_method,
-        "stats": stats, "index_used_for_labels": vol is not None,
-        "streams": rows, "outputs": outputs,
-        "notes": [
-            "A carved stream is a run of mutually continuous, validated DHAV frames. "
-            "It is not a camera: frames carry no camera number.",
-            "Where continuity was ambiguous the carve split rather than guessed, so one "
-            "camera can span several streams; streams never knowingly mix cameras.",
-            "index_label comes from the DHFS index AFTER carving; 'outside_index' means "
-            "no index record accounts for those frames at their dates.",
-        ],
-    }
+    report = carver.build_report(streams, stats, xref, info, labeler is not None,
+                                 args.tz_offset, outputs)
+    rows = report["streams"]
     path = os.path.join(args.out, "carve_report.json")
     dump_json(report, path)
 
@@ -544,8 +528,202 @@ def cmd_verify(args) -> int:
         print(f"                stored     {stored}")
         if not ok:
             print(f"                recomputed {recomputed}")
-        return 0 if (v["valid"] and ok) else 1
+        return 0 if (v["valid"] and ok and _verify_preserved(out_dir, ledger)) else 1
     return 0 if v["valid"] else 1
+
+
+def _verify_preserved(out_dir: str, ledger: CustodyLedger) -> bool:
+    """Check a preserved-metadata bundle, if the case has one."""
+    from core.hashing import sha256_file
+    from recover.preserve import verify_bundle
+
+    bundle = os.path.join(out_dir, "preserved")
+    if not os.path.exists(os.path.join(bundle, "manifest.json")):
+        return True
+    r = verify_bundle(bundle)
+    recorded = [e["data_hash"] for e in ledger.entries
+                if e["action"] == "metadata_preserved"]
+    in_ledger = bool(recorded) and \
+        recorded[-1] == sha256_file(os.path.join(bundle, "manifest.json"))
+    print(f"preserved     : {'OK' if r['ok'] else 'FAILED'} - {r['blocks']} blocks "
+          f"({r['proven_to_root']} proven to the Merkle root), {r['regions']} regions")
+    print(f"                manifest {'matches' if in_ledger else 'DOES NOT match'} "
+          f"the custody ledger")
+    for prob in r["problems"]:
+        print(f"                [!] {prob}")
+    return r["ok"] and in_ledger
+
+
+def cmd_preserve(args) -> int:
+    """Save every filesystem structure on the drive, tied to the acquisition.
+
+    The drive's video is too large to keep; its metadata is a few megabytes
+    and everything else rests on it.  See recover/preserve.py for why whole
+    scan blocks are saved rather than just the structure bytes.
+    """
+    from core.hashing import sha256_file
+    from recover import preserve
+
+    blockmap = preserve.load_blockmap(args.out)
+    if not blockmap:
+        print(f"[!] no blockmap.jsonl in {args.out} - run `scan` first so the "
+              f"preserved blocks can be tied to an acquisition hash")
+        return 1
+    bundle = os.path.join(args.out, "preserved")
+    print(f"{BANNER} - metadata preservation\n")
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            vendor = args.vendor
+            if not vendor:
+                vendor = "Dahua" if dev.read_at(0, 4) == b"DHFS" else ""
+            print(f"  device        {dev.path}  ({human_size(dev.size_bytes)})")
+            print(f"  write-block   {info.write_block_method}")
+            print(f"  vendor        {vendor or 'unknown - generic head/tail only'}")
+            m = preserve.preserve(dev, bundle, vendor=vendor, blockmap=blockmap)
+    except PermissionNeeded as exc:
+        print(f"[!] {exc}")
+        return 2
+    except DeviceError as exc:
+        print(f"[!] {exc}")
+        return 1
+
+    print(f"\n--- regions {'-' * 47}")
+    for r in m["regions"]:
+        print(f"  {r['name']:<34} 0x{r['start']:>12X}  {human_size(r['length']):>10}")
+    print(f"\n  blocks saved  {len(m['blocks'])}  ({human_size(m['bytes_saved'])})")
+    match = m["all_blocks_match"]
+    print(f"  vs scan       {'every block matches the acquisition hash' if match else 'MISMATCH - see notes'}")
+    print(f"  merkle root   {m['acquisition_merkle_root'] or '(none - scan incomplete)'}")
+    for n in m["notes"]:
+        print(f"  [!] {n}")
+    digest = sha256_file(os.path.join(bundle, "manifest.json"))
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+    ledger.append("metadata_preserved", {
+        "bundle": "preserved/manifest.json", "vendor": vendor or "generic",
+        "regions": len(m["regions"]), "blocks": len(m["blocks"]),
+        "bytes_saved": m["bytes_saved"], "all_blocks_match": match,
+        "write_block_method": info.write_block_method}, data_hash=digest)
+    print(f"  manifest      {digest}  (recorded in the custody ledger)")
+    return 0 if match else 1
+
+
+def cmd_timeline(args) -> int:
+    """Build the camera timeline from a case's parse and carve reports."""
+    from analyse.timeline import ClockModel, build
+    from core.contract import utc_now
+    from core.hashing import sha256_file
+
+    def load(*names):
+        for n in names:
+            path = os.path.join(args.out, n)
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as fh:
+                    return json.load(fh), n
+        return None, None
+
+    parse_rep, pname = load("parse_dahua.json", "parse_hikvision.json")
+    carve_rep, cname = load("carve/carve_report.json")
+    if not parse_rep and not carve_rep:
+        print(f"[!] nothing to build from in {args.out}: run `parse` and/or `scan --carve`")
+        return 1
+    clock = ClockModel.from_observation(args.tz_offset, args.clock_observed,
+                                        args.clock_reference)
+    t = build(parse_rep, carve_rep, clock)
+    t["generated_utc"] = utc_now()
+    t["inputs"] = {n: sha256_file(os.path.join(args.out, n)) for n in (pname, cname) if n}
+    path = os.path.join(args.out, "timeline.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(t, fh, indent=2)
+
+    print(f"{BANNER} - camera timeline\n")
+    print(f"  clock         {t['clock']['rule']}")
+    c = t["counts"]
+    print(f"  events        {c['indexed']} indexed, {c['unindexed']} unindexed (carved), "
+          f"{c['remnant']} remnant")
+    for cam, v in t["cameras"].items():
+        print(f"  {cam:<13} {v['recordings']:4d} files  {v['first_local']} -> "
+              f"{v['last_local']}  {v['covered_s'] / 3600:7.1f} h  {v['gaps']} gap(s)")
+    kinds: dict = {}
+    for x in t["correlations"] + t["anomalies"]:
+        kinds[x["kind"]] = kinds.get(x["kind"], 0) + 1
+    for k, n in sorted(kinds.items()):
+        print(f"  {k:<32} {n}")
+    print(f"\n[+] {path}")
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("timeline_built", {"inputs": t["inputs"], "clock": t["clock"],
+                                         "counts": c}, data_hash=sha256_file(path))
+    return 0
+
+
+def cmd_report(args) -> int:
+    """Write the forensic report (HTML) and the case summary (JSON)."""
+    from core.hashing import sha256_file
+    from report.case import load_case
+    from report.html import render
+
+    case = load_case(args.out)
+    if not case.get("scan"):
+        print(f"[!] {args.out} has no completed scan - a report without a complete "
+              f"acquisition would have no evidence hash to anchor it")
+        return 1
+    html_path = os.path.join(args.out, "report.html")
+    json_path = os.path.join(args.out, "report.json")
+    with open(html_path, "w", encoding="utf-8") as fh:
+        fh.write(render(case, args.notes))
+    with open(json_path, "w", encoding="utf-8") as fh:
+        json.dump(case, fh, indent=2, default=str)
+    hh, jh = sha256_file(html_path), sha256_file(json_path)
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    ledger.actor = ledger.entries[0].get("actor", "unknown")
+    ledger.case_id = ledger.entries[0].get("case_id", "")
+    ledger.append("report_generated", {"html": "report.html", "html_sha256": hh,
+                                       "json": "report.json", "json_sha256": jh},
+                  data_hash=hh)
+    print(f"{BANNER} - report\n")
+    print(f"  [+] {html_path}\n      sha256 {hh}")
+    print(f"  [+] {json_path}\n      sha256 {jh}")
+    print("  both hashes recorded in the custody ledger")
+    return 0
+
+
+def cmd_serve(args) -> int:
+    """Start the local web UI (loopback only, read-only viewer)."""
+    from ui.server import serve
+    serve(args.out, args.port)
+    return 0
+
+
+def cmd_writeblock_rule(args) -> int:
+    """Print a udev rule that keeps one drive write-blocked across reconnects."""
+    from acquire.device import udev_properties, udev_writeblock_rule
+
+    serial = args.serial
+    if not serial and args.device:
+        serial = udev_properties(args.device).get("ID_SERIAL_SHORT", "")
+        if not serial:
+            print(f"[!] udev reports no drive serial for {args.device} - pass --serial")
+            return 1
+    try:
+        rule = udev_writeblock_rule(serial, args.user)
+    except ValueError as exc:
+        print(f"[!] {exc}")
+        return 1
+    print(rule, end="")
+    print(f"\n# install (runtime only, cleared at reboot):\n"
+          f"#   sudo mkdir -p /run/udev/rules.d\n"
+          f"#   python cli.py writeblock-rule --serial {serial}"
+          f"{' --user ' + args.user if args.user else ''} | "
+          f"sudo tee /run/udev/rules.d/70-ps26150-writeblock-{serial}.rules\n"
+          f"#   sudo udevadm control --reload\n"
+          f"#   sudo udevadm test /sys/block/<name> 2>&1 | grep setro   # confirm it matches")
+    return 0
 
 
 def cmd_prove(args) -> int:
@@ -595,6 +773,13 @@ def main() -> int:
     p.add_argument("--max-mb", type=int, default=0,
                    help="stop after N MiB - triage mode, marks the pass incomplete")
     p.add_argument("--resume", action="store_true")
+    p.add_argument("--carve", action="store_true",
+                   help="also carve DHAV streams in the same pass (no second read)")
+    p.add_argument("--tz-offset", type=int, default=None,
+                   help="recorder zone in minutes east of UTC, for carved timestamps")
+    p.add_argument("--reconnect-wait", type=float, default=30,
+                   help="minutes to wait for a drive that drops off USB to come back "
+                        "write-blocked and verified (0 = fail at once)")
     p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("parse", help="parse a vendor filesystem into recordings")
@@ -634,6 +819,39 @@ def main() -> int:
     p.add_argument("--tz-offset", type=int, default=None)
     p.add_argument("--limit", type=int, default=25)
     p.set_defaults(func=cmd_carve)
+
+    p = sub.add_parser("preserve", help="save all filesystem metadata, tied to the scan")
+    p.add_argument("--device", required=True)
+    p.add_argument("--out", required=True, help="case directory holding the scan")
+    p.add_argument("--vendor", default="", help="default: detect from the superblock")
+    p.set_defaults(func=cmd_preserve)
+
+    p = sub.add_parser("timeline", help="normalize timestamps and correlate cameras")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--tz-offset", type=int, default=None,
+                   help="recorder zone, minutes east of UTC (IST = 330); omit if unknown")
+    p.add_argument("--clock-observed", default="",
+                   help="what the DVR displayed at seizure, 'YYYY-MM-DD HH:MM:SS'")
+    p.add_argument("--clock-reference", default="",
+                   help="trusted time at that same instant, same zone")
+    p.set_defaults(func=cmd_timeline)
+
+    p = sub.add_parser("report", help="write the forensic report (HTML + JSON)")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--notes", default="", help="examiner notes to include")
+    p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("serve", help="local web UI over the case directories")
+    p.add_argument("--out", default="out", help="directory holding case folders")
+    p.add_argument("--port", type=int, default=8150)
+    p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("writeblock-rule",
+                       help="print a udev rule that write-blocks a drive across reconnects")
+    p.add_argument("--serial", default="", help="drive serial (ID_SERIAL_SHORT)")
+    p.add_argument("--device", default="", help="or read the serial from this node")
+    p.add_argument("--user", default="", help="also grant this user READ-only access")
+    p.set_defaults(func=cmd_writeblock_rule)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)

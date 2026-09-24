@@ -33,6 +33,7 @@ carve has been byte-matched against a recorder export - so `spec_only`.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Iterator, Optional
 
@@ -85,7 +86,13 @@ class CarvedStream:
     video_frames: int = 0
     i_frames: int = 0
     duplicates: int = 0
-    counters: dict[str, set[int]] = field(default_factory=dict)
+    # Per frame kind: [first counter, last counter, frames].  Repeats are
+    # dropped before `add`, so counters rise strictly and this is exact -
+    # and constant-size, where a set of every counter would not fit in
+    # memory for a whole drive.
+    counters: dict[str, list[int]] = field(default_factory=dict)
+    # Index label tally, filled while carving when an index is supplied.
+    tally: dict[str, int] = field(default_factory=dict)
 
     @property
     def last(self) -> DhavFrame:
@@ -102,7 +109,13 @@ class CarvedStream:
             self.video_frames += 1
         if fr.ftype == TYPE_I:
             self.i_frames += 1
-        self.counters.setdefault(_kind(fr), set()).add(fr.frame_number)
+        c = self.counters.get(_kind(fr))
+        if c is None:
+            self.counters[_kind(fr)] = [fr.frame_number, fr.frame_number, 1]
+        else:
+            c[0] = min(c[0], fr.frame_number)
+            c[1] = max(c[1], fr.frame_number)
+            c[2] += 1
 
     @property
     def span_bytes(self) -> int:
@@ -130,36 +143,42 @@ def iter_region(dev, start: int, end: int) -> Iterator[DhavFrame]:
         pos += want
 
 
-def carve(dev, start: int = 0, end: Optional[int] = None,
-          progress=None) -> tuple[list[CarvedStream], dict]:
-    """Carve DHAV streams out of [start, end).  Returns the streams (all of
-    them, including short ones) and totals for the report."""
-    size = getattr(dev, "size_bytes", 0)
-    end = size if end is None else min(end, size or end)
-    active: list[CarvedStream] = []
-    done: list[CarvedStream] = []
-    stats = {"region_start": start, "region_end": end, "frames": 0,
-             "streams_opened": 0, "repeats_dropped": 0,
-             "joined_by_contiguity": 0, "joined_by_closest": 0,
-             "ambiguous_splits": 0}
-    next_id = 0
-    last_report = start
-    prev: Optional[DhavFrame] = None
-    prev_stream: Optional[CarvedStream] = None
-    for fr in iter_region(dev, start, end):
+class Carver:
+    """The carve as a consumer: frames are pushed in disk order with `add`,
+    so the same logic runs over a device (`carve`) or inside the single
+    acquisition pass (`CarveTap`), where the bytes are already in hand."""
+
+    def __init__(self, start: int = 0, end: int = 0, labeler=None, progress=None):
+        self.active: list[CarvedStream] = []
+        self.done: list[CarvedStream] = []
+        self.stats = {"region_start": start, "region_end": end, "frames": 0,
+                      "streams_opened": 0, "repeats_dropped": 0,
+                      "joined_by_contiguity": 0, "joined_by_closest": 0,
+                      "ambiguous_splits": 0}
+        self.labeler = labeler
+        self.progress = progress
+        self._next_id = 0
+        self._start = start
+        self._last_report = start
+        self._prev: Optional[DhavFrame] = None
+        self._prev_stream: Optional[CarvedStream] = None
+
+    def add(self, fr: DhavFrame) -> None:
+        stats, active = self.stats, self.active
         stats["frames"] += 1
         # Close streams that have gone quiet, so the candidate list stays
         # short and an old stream cannot capture a new recording's frames.
         if active and fr.offset - min(s.last.offset for s in active) > RETIRE_BYTES:
             keep = []
             for s in active:
-                (keep if fr.offset - s.last.offset <= RETIRE_BYTES else done).append(s)
-            active = keep
+                (keep if fr.offset - s.last.offset <= RETIRE_BYTES else self.done).append(s)
+            self.active = active = keep
 
         # 1. Byte contiguity: the recorder writes a stream sequentially, so a
         #    frame starting exactly where the previous one ended, and
         #    continuing its stream, is that stream's.  No contest needed -
         #    and this settles almost every frame inside a cluster.
+        prev, prev_stream = self._prev, self._prev_stream
         target: Optional[CarvedStream] = None
         if (prev is not None and prev_stream is not None
                 and fr.offset == prev.offset + prev.length
@@ -184,23 +203,127 @@ def carve(dev, start: int = 0, end: Optional[int] = None,
             if _is_repeat(target.state, fr):
                 target.duplicates += 1
                 stats["repeats_dropped"] += 1
-                continue
+                return
             target.add(fr)
         else:
-            target = CarvedStream(next_id, Stream(), fr)
-            next_id += 1
+            target = CarvedStream(self._next_id, Stream(), fr)
+            self._next_id += 1
             stats["streams_opened"] += 1
             target.add(fr)
             active.append(target)
-        prev, prev_stream = fr, target
-        if progress and fr.offset - last_report > (1 << 30):
-            last_report = fr.offset
-            progress(fr.offset - start, end - start, len(active))
-    done.extend(active)
-    done.sort(key=lambda s: s.first.offset)
-    stats["streams_kept"] = sum(1 for s in done if s.frames >= MIN_FRAMES)
-    stats["frames_in_short_streams"] = sum(s.frames for s in done if s.frames < MIN_FRAMES)
-    return done, stats
+        if self.labeler is not None:
+            key = self.labeler.label(fr)
+            target.tally[key] = target.tally.get(key, 0) + 1
+        self._prev, self._prev_stream = fr, target
+        if self.progress and fr.offset - self._last_report > (1 << 30):
+            self._last_report = fr.offset
+            self.progress(fr.offset - self._start,
+                          stats["region_end"] - self._start, len(active))
+
+    def finish(self) -> tuple[list[CarvedStream], dict]:
+        done = self.done + self.active
+        self.done, self.active = done, []
+        done.sort(key=lambda s: s.first.offset)
+        self.stats["streams_kept"] = sum(1 for s in done if s.frames >= MIN_FRAMES)
+        self.stats["frames_in_short_streams"] = sum(s.frames for s in done
+                                                   if s.frames < MIN_FRAMES)
+        return done, self.stats
+
+
+def carve(dev, start: int = 0, end: Optional[int] = None,
+          progress=None, labeler=None) -> tuple[list[CarvedStream], dict]:
+    """Carve DHAV streams out of [start, end).  Returns the streams (all of
+    them, including short ones) and totals for the report."""
+    size = getattr(dev, "size_bytes", 0)
+    end = size if end is None else min(end, size or end)
+    c = Carver(start, end, labeler=labeler, progress=progress)
+    for fr in iter_region(dev, start, end):
+        c.add(fr)
+    return c.finish()
+
+
+class FrameFeeder:
+    """`iter_region` for bytes that arrive in order instead of being read.
+
+    Walks exactly the same windows as `iter_region` - headers in
+    [pos, pos + CHUNK), with MAX_FRAME of look-ahead so a frame crossing the
+    window edge is seen whole, once - so a carve fed block by block yields
+    the same frames as a carve that reads the device itself."""
+
+    def __init__(self, start: int, end: int):
+        self.pos = start           # start of the next window
+        self.end = end
+        self.buf = bytearray()     # bytes from self.pos onwards
+
+    def push(self, offset: int, data: bytes) -> Iterator[DhavFrame]:
+        if offset != self.pos + len(self.buf):
+            raise ValueError(f"FrameFeeder: bytes at 0x{offset:X} arrived out of "
+                             f"order (expected 0x{self.pos + len(self.buf):X})")
+        self.buf += data
+        while self.pos < self.end and len(self.buf) >= CHUNK + MAX_FRAME:
+            yield from self._window()
+
+    def close(self) -> Iterator[DhavFrame]:
+        while self.pos < self.end and self.buf:
+            yield from self._window()
+
+    def _window(self) -> Iterator[DhavFrame]:
+        want = min(CHUNK, self.end - self.pos)
+        view = bytes(self.buf[:want + MAX_FRAME])
+        yield from walk_frames(view, self.pos, 0, want)
+        del self.buf[:want]
+        self.pos += want
+
+
+class IndexLabeler:
+    """Which index record, if any, accounts for a frame - by the cluster it
+    physically sits in and the frame's own date.  Works across every volume
+    whose data area was located."""
+
+    def __init__(self, volumes):
+        from parsers.dahua import REC_CONT, REC_HEAD, _seconds
+        self._vols = []
+        for v in volumes:
+            if v.data_base is None or not v.cluster_size:
+                continue
+            windows = []
+            for r in v.records:
+                if r.kind in (REC_HEAD, REC_CONT):
+                    windows.append((_seconds(r.start), _seconds(r.end), r.channel))
+                else:
+                    windows.append(None)
+            self._vols.append((v.data_base, v.start + v.length, v.cluster_size, windows))
+        self._vols.sort()
+
+    def __bool__(self) -> bool:
+        return bool(self._vols)
+
+    def label(self, fr: DhavFrame) -> str:
+        t = fr.seconds
+        for base, vend, cs, windows in self._vols:
+            if base <= fr.offset < vend:
+                c = (fr.offset - base) // cs
+                w = windows[c] if c < len(windows) else None
+                if w is not None and None not in (w[0], w[1], t) and \
+                        w[0] - 5 <= t <= w[1] + 5:
+                    return f"CH{w[2] + 1:02d}"
+                return "outside_index"
+        return "outside_index"
+
+
+def label_streams(streams: list[CarvedStream]) -> dict[int, dict]:
+    """Turn per-stream tallies into labels: the clear majority (90%), or
+    'mixed-evidence' - the minority is reported rather than hidden."""
+    out: dict[int, dict] = {}
+    for s in streams:
+        if not s.tally:
+            continue
+        total = sum(s.tally.values()) or 1
+        top, n = max(s.tally.items(), key=lambda kv: kv[1])
+        out[s.sid] = {"tally": dict(s.tally),
+                      "label": top if n / total >= 0.9 else "mixed-evidence",
+                      "share": round(n / total, 4)}
+    return out
 
 
 def write_stream(dev, s: CarvedStream, sink=None, raw_sink=None) -> tuple[int, str]:
@@ -247,11 +370,8 @@ def to_recording(s: CarvedStream, tz_offset_min: Optional[int] = None) -> Record
                         "not converted; no index corroborates it",
         )
 
-    missing = 0
-    for seen in s.counters.values():
-        if seen:
-            missing += (max(seen) - min(seen) + 1) - len(seen)
-    span = sum((max(v) - min(v) + 1) for v in s.counters.values() if v)
+    span = sum(hi - lo + 1 for lo, hi, _ in s.counters.values())
+    missing = sum(hi - lo + 1 - n for lo, hi, n in s.counters.values())
     completeness = 1 - missing / span if span else 0.0
     # Validated frames, mutually continuous: the stream itself is solid.
     # What is uncertain is whose it is and whether it is whole - so
@@ -313,3 +433,102 @@ def cross_reference(dev, streams: list[CarvedStream], vol) -> dict[int, dict]:
         out[s.sid] = {"tally": tally, "label": top if n / total >= 0.9 else "mixed-evidence",
                       "share": round(n / total, 4)}
     return out
+
+
+def build_report(streams: list[CarvedStream], stats: dict, xref: dict[int, dict],
+                 info, index_used: bool, tz_offset_min: Optional[int] = None,
+                 outputs: Optional[dict] = None, tool: str = "carve") -> dict:
+    """The carve report - one shape whether the carve ran standalone or
+    inside the acquisition pass."""
+    from core.contract import SCHEMA_VERSION, to_dict, utc_now
+
+    rows = []
+    for s in streams:
+        if s.frames < MIN_FRAMES:
+            continue
+        x = xref.get(s.sid, {})
+        rows.append({"recording": to_dict(to_recording(s, tz_offset_min)),
+                     "index_label": x.get("label"), "index_tally": x.get("tally"),
+                     "duplicates_dropped": s.duplicates,
+                     "extents": [[e.offset, e.length] for e in s.extents]})
+    return {
+        "schema_version": SCHEMA_VERSION, "generated_utc": utc_now(),
+        "tool": f"ps26150-forensics {tool}", "rule": PARSER_RULE,
+        "validation_status": "spec_only",
+        "source_device": info.path, "source_bytes": info.size_bytes,
+        "write_block_method": info.write_block_method,
+        "stats": stats, "index_used_for_labels": index_used,
+        "streams": rows, "outputs": outputs or {},
+        "notes": [
+            "A carved stream is a run of mutually continuous, validated DHAV frames. "
+            "It is not a camera: frames carry no camera number.",
+            "Where continuity was ambiguous the carve split rather than guessed, so one "
+            "camera can span several streams; streams never knowingly mix cameras.",
+            "index_label comes from the DHFS index; 'outside_index' means no index "
+            "record accounts for those frames at their dates.",
+        ],
+    }
+
+
+class CarveTap:
+    """Carve inside the acquisition pass: the scan already holds every byte
+    once, so carving there costs CPU instead of a second multi-hour read.
+
+    `prepare` reads the DHFS index (a few MB of random reads) before the
+    pass; each frame is then labelled as it is carved, so no frame is ever
+    read twice.  A tap never touches the hashes: if it fails, the scanner
+    switches it off and the acquisition carries on unchanged."""
+
+    name = "carve"
+
+    def __init__(self, tz_offset_min: Optional[int] = None):
+        self.tz_offset_min = tz_offset_min
+        self.labeler: Optional[IndexLabeler] = None
+        self.feeder: Optional[FrameFeeder] = None
+        self.carver: Optional[Carver] = None
+        self.index_notes: list[str] = []
+
+    def prepare(self, dev, start: int, end: int, log=print) -> None:
+        from parsers.dahua import DahuaParser
+        p = DahuaParser()
+        if p.detect(dev):
+            # Only the index and the data-area calibration are needed to
+            # label frames.  A full `parse` also samples clusters of every
+            # recording - gigabytes of scattered reads on a USB 2 bridge.
+            vols, self.index_notes = p.read_partitions(dev)
+            for v in vols:
+                p.read_volume(dev, v)
+                self.index_notes += v.notes
+            self.labeler = IndexLabeler(vols) or None
+            n = sum(1 for v in vols if v.data_base is not None)
+            log(f"[*] carve    DHFS index read: {len(vols)} volume(s), "
+                f"{n} with a located data area - frames labelled as carved")
+        else:
+            log("[*] carve    no DHFS index - carving unlabelled")
+        self.feeder = FrameFeeder(start, end)
+        self.carver = Carver(start, end, labeler=self.labeler)
+
+    def feed(self, offset: int, data: bytes) -> None:
+        for fr in self.feeder.push(offset, data):
+            self.carver.add(fr)
+
+    def finish(self, out_dir: str, info) -> dict:
+        from core.contract import dump_json
+        from core.hashing import sha256_file
+        for fr in self.feeder.close():
+            self.carver.add(fr)
+        streams, stats = self.carver.finish()
+        report = build_report(streams, stats, label_streams(streams), info,
+                              self.labeler is not None, self.tz_offset_min,
+                              tool="scan --carve (inline)")
+        report["index_notes"] = self.index_notes
+        os.makedirs(os.path.join(out_dir, "carve"), exist_ok=True)
+        path = os.path.join(out_dir, "carve", "carve_report.json")
+        dump_json(report, path)
+        labels: dict[str, int] = {}
+        for r in report["streams"]:
+            k = r["index_label"] or "unlabelled"
+            labels[k] = labels.get(k, 0) + 1
+        return {"report": "carve/carve_report.json", "sha256": sha256_file(path),
+                "frames": stats["frames"], "streams_kept": stats["streams_kept"],
+                "labels": labels}

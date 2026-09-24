@@ -696,6 +696,301 @@ def synth_hik_fields() -> list:
     return hik.MASTER_FIELDS + hik.BTREE_FIELDS
 
 
+def test_preserve(tmp: str) -> None:
+    """Metadata preservation: whole scan blocks, provable to the scan root."""
+    print("\n[preserve]")
+    from core.hashing import merkle_root, sha256_bytes
+    from recover.preserve import preserve, verify_bundle
+
+    img = os.path.join(tmp, "preserve.dd")
+    synth_dahua.build(img, seconds=6)
+    bs = 1 << 20
+    blockmap = []
+    with open(img, "rb") as fh:
+        data = fh.read()
+    for off in range(0, len(data), bs):
+        blockmap.append({"offset": off, "length": len(data[off:off + bs]),
+                         "sha256": sha256_bytes(data[off:off + bs])})
+    root = merkle_root([b["sha256"] for b in blockmap])
+
+    bundle = os.path.join(tmp, "preserved")
+    with BlockDevice(img) as dev:
+        m = preserve(dev, bundle, vendor="Dahua", blockmap=blockmap)
+    names = [r["name"] for r in m["regions"]]
+    check("superblock and volume metadata are both preserved",
+          "superblock_and_partition_tables" in names and "volume1_metadata" in names,
+          str(names))
+    check("every saved block matches the acquisition hash", m["all_blocks_match"] is True)
+    check("the manifest carries the acquisition root", m["acquisition_merkle_root"] == root)
+    check("every saved block carries a Merkle path",
+          all("merkle_path" in b for b in m["blocks"]))
+    check("only the metadata is kept, not the video",
+          m["bytes_saved"] < len(data), f"{m['bytes_saved']} of {len(data)}")
+    vol = next(r for r in m["regions"] if r["name"] == "volume1_metadata")
+    check("volume metadata ends at the data area",
+          vol["end"] == synth_dahua.DATA_BASE, hex(vol["end"]))
+    with open(os.path.join(bundle, vol["file"]), "rb") as fh:
+        check("region bytes equal the platter bytes",
+              fh.read() == data[vol["start"]:vol["end"]])
+    v = verify_bundle(bundle)
+    check("an untouched bundle verifies from its own files",
+          v["ok"] and v["proven_to_root"] == len(m["blocks"]), str(v))
+
+    first = m["blocks"][0]["file"]
+    with open(os.path.join(bundle, first), "r+b") as fh:
+        fh.seek(10)
+        fh.write(b"\xFF")
+    v = verify_bundle(bundle)
+    check("a one-byte edit to a saved block is caught", not v["ok"], str(v))
+
+    lied = [dict(b) for b in blockmap]
+    lied[0]["sha256"] = "0" * 64
+    with BlockDevice(img) as dev:
+        m2 = preserve(dev, os.path.join(tmp, "preserved2"), vendor="Dahua", blockmap=lied)
+    check("a block that differs from the scan is reported, not hidden",
+          m2["all_blocks_match"] is False and any("differs" in n for n in m2["notes"]))
+    with BlockDevice(img) as dev:
+        m3 = preserve(dev, os.path.join(tmp, "preserved3"), vendor="Dahua",
+                      blockmap=blockmap[:2])
+    check("a partial scan issues no Merkle proofs",
+          m3["acquisition_merkle_root"] == "" and
+          not any("merkle_path" in b for b in m3["blocks"]))
+
+
+def test_inline_carve(tmp: str) -> None:
+    """Carving inside the acquisition pass must equal carving by re-reading,
+    and must never change a hash - even when it breaks."""
+    print("\n[inline carve in the acquisition pass]")
+    img = os.path.join(tmp, "inline.img")
+    meta = synth_dahua.build(img, seconds=14, seed=26150)
+    saved = carver.CHUNK
+    carver.CHUNK = 256 << 10     # many windows, so window edges are exercised
+    try:
+        with BlockDevice(img) as dev:
+            p = get_parser("Dahua")
+            p.parse(dev)
+            ref, _ = carver.carve(dev)
+            ref_x = carver.cross_reference(dev, ref, p.volumes[0])
+            inline_lab = carver.IndexLabeler(p.volumes)
+            feeder = carver.FrameFeeder(0, dev.size_bytes)
+            c = carver.Carver(0, dev.size_bytes, labeler=inline_lab)
+            for off, data, _ in dev.read_blocks(100_000):   # odd, unaligned blocks
+                for fr in feeder.push(off, data):
+                    c.add(fr)
+            for fr in feeder.close():
+                c.add(fr)
+            got, _ = c.finish()
+        sig = lambda ss: [(s.frames, [(e.offset, e.length) for e in s.extents]) for s in ss]
+        check("block-fed carve yields the same streams as a device carve",
+              sig(got) == sig(ref), f"{len(got)} vs {len(ref)} streams")
+        got_x = carver.label_streams(got)
+        check("inline labels equal labels from re-reading every frame",
+              all(got_x[a.sid]["tally"] == ref_x[b.sid]["tally"]
+                  for a, b in zip(got, ref)))
+
+        plain = ScanSession(img, os.path.join(tmp, "inl-plain"),
+                            CaseInfo(case_id="T-INL", investigator="test"),
+                            block_size=1 << 20, quiet=True).run()
+        tapped_s = ScanSession(img, os.path.join(tmp, "inl-tap"),
+                               CaseInfo(case_id="T-INL", investigator="test"),
+                               block_size=1 << 20, quiet=True, taps=[carver.CarveTap()])
+        tapped = tapped_s.run()
+        hv = lambda r: sorted((h.algorithm, h.value) for h in r.hashes)
+        check("a carve tap does not change any acquisition hash",
+              hv(plain) == hv(tapped) and plain.merkle_root == tapped.merkle_root)
+        rep_path = os.path.join(tmp, "inl-tap", "carve", "carve_report.json")
+        with open(rep_path, "r", encoding="utf-8") as fh:
+            rep = json.load(fh)
+        labels = {r["index_label"] for r in rep["streams"]}
+        check("inline carve report is written and labelled",
+              rep["index_used_for_labels"] and "outside_index" in labels
+              and any(l.startswith("CH") for l in labels), str(labels))
+        check("the ledger records the inline carve and still verifies",
+              any(e["action"] == "inline_carve_completed" for e in tapped_s.ledger.entries)
+              and tapped_s.ledger.verify()["valid"])
+
+        class Broken(carver.CarveTap):
+            def feed(self, offset, data):
+                if offset:
+                    raise RuntimeError("simulated tap crash")
+                super().feed(offset, data)
+        broken_s = ScanSession(img, os.path.join(tmp, "inl-broken"),
+                               CaseInfo(case_id="T-INL", investigator="test"),
+                               block_size=1 << 20, quiet=True, taps=[Broken()])
+        broken = broken_s.run()
+        check("a crashing tap is switched off and the hashes are unaffected",
+              hv(broken) == hv(plain) and broken.stats.complete_pass
+              and "failed" in broken_s.tap_results["carve"])
+        check("the tap failure is recorded in the custody ledger",
+              any(e["action"] == "inline_carve_failed" for e in broken_s.ledger.entries))
+    finally:
+        carver.CHUNK = saved
+
+
+def test_plugins(tmp: str) -> None:
+    """A new vendor is one file in plugins/ - no edit to the core."""
+    print("\n[drop-in plugins]")
+    import parsers as P
+    from detect import signatures as sig
+
+    pdir = os.path.join(tmp, "plugins")
+    os.makedirs(pdir)
+    with open(os.path.join(pdir, "acme.py"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '"""Acme NVR test plugin."""\n'
+            "from detect.signatures import DETECTED_ONLY, Signature\n"
+            "from parsers.base import ParseResult, VendorParser, register\n"
+            "SIGNATURES = [Signature(id='acme.magic', vendor='Acme', pattern=b'ACMEFS01',"
+            " description='test', source='test', validation_status=DETECTED_ONLY,"
+            " weight=6.0)]\n"
+            "@register\n"
+            "class AcmeParser(VendorParser):\n"
+            "    vendor = 'Acme'\n"
+            "    parser_rule = 'acme.v0'\n"
+            "    def detect(self, dev, hint_offsets=None):\n"
+            "        return dev.read_at(0, 8) == b'ACMEFS01'\n"
+            "    def parse(self, dev, hint_offsets=None):\n"
+            "        return ParseResult(vendor='Acme', parser_rule='acme.v0')\n")
+    with open(os.path.join(pdir, "broken.py"), "w", encoding="utf-8") as fh:
+        fh.write("raise RuntimeError('bad plugin')\n")
+    with open(os.path.join(pdir, "_skipped.py"), "w", encoding="utf-8") as fh:
+        fh.write("raise RuntimeError('must not load')\n")
+    saved_dir, saved_sigs = P.PLUGIN_DIR, list(sig.ALL_SIGNATURES)
+    P.PLUGIN_DIR = pdir
+    try:
+        P._load_plugins()
+        check("a dropped-in plugin registers its parser", "Acme" in P.available_vendors())
+        check("its signatures join the detection catalog", "acme.magic" in sig.BY_ID)
+        check("a broken plugin is reported and skipped, not fatal",
+              "broken.py" in P.PLUGIN_ERRORS)
+        check("underscore files (the template) are never loaded",
+              "_skipped.py" not in P.PLUGIN_ERRORS and "_skipped.py" not in P.LOADED_PLUGINS)
+        img = os.path.join(tmp, "acme.img")
+        with open(img, "wb") as fh:
+            fh.write(b"ACMEFS01" + bytes(1 << 20))
+        from detect.engine import SignatureScanner
+        sc = SignatureScanner()
+        with open(img, "rb") as fh:
+            sc.scan_block(0, fh.read(), 0, "")
+        check("the scan detects the new vendor with no core change",
+              any(d.vendor == "Acme" for d in sc.detections()))
+    finally:
+        P.PLUGIN_DIR = saved_dir
+        P.REGISTRY.pop("Acme", None)
+        P.LOADED_PLUGINS.clear()
+        P.PLUGIN_ERRORS.clear()
+        sig.ALL_SIGNATURES[:] = saved_sigs
+        sig.BY_ID.pop("acme.magic", None)
+
+
+def test_device_loss(tmp: str) -> None:
+    """A device that drops off the bus is never zero-filled as 'bad sectors';
+    a verified reconnect continues the same pass with identical hashes."""
+    print("\n[device loss and reconnect]")
+    import acquire.scanner as scanner_mod
+    from acquire.device import DeviceError, DeviceLost
+
+    img = os.path.join(tmp, "drop.img")
+    synth_dahua.build(img, seconds=14, seed=26150)
+    size = os.path.getsize(img)
+
+    class Gone(BlockDevice):
+        def alive(self):
+            return False
+
+        def _raw_read(self, offset, length):
+            raise OSError(5, "Input/output error")
+    try:
+        with Gone(img) as dev:
+            list(dev.read_blocks(1 << 20))
+        check("a vanished device raises DeviceLost instead of zero-filling", False)
+    except DeviceLost:
+        check("a vanished device raises DeviceLost instead of zero-filling", True)
+
+    plain = ScanSession(img, os.path.join(tmp, "drop-plain"),
+                        CaseInfo(case_id="T-DROP", investigator="test"),
+                        block_size=1 << 20, quiet=True, taps=[carver.CarveTap()]).run()
+    hv = lambda r: sorted((h.algorithm, h.value) for h in r.hashes)
+    with open(os.path.join(tmp, "drop-plain", "carve", "carve_report.json"), encoding="utf-8") as fh:
+        plain_streams = json.load(fh)["streams"]
+
+    class Dropping(BlockDevice):
+        dropped = False
+
+        def _read_block(self, off, want):
+            if not Dropping.dropped and self.path == img and off >= 2 << 20:
+                Dropping.dropped = True
+                raise DeviceLost(self.path, off, "simulated USB bridge reset")
+            return super()._read_block(off, want)
+
+    def session(name, candidate_path, read_only=True, wait=5.0):
+        Dropping.dropped = False
+        sess = ScanSession(img, os.path.join(tmp, name),
+                           CaseInfo(case_id="T-DROP", investigator="test"),
+                           block_size=1 << 20, quiet=True, taps=[carver.CarveTap()],
+                           reconnect_wait_s=wait, reconnect_poll_s=0.05)
+        sess.find_devices = lambda: [{"path": candidate_path, "size_bytes": size,
+                                      "serial": "", "read_only": read_only}]
+        return sess
+
+    renamed = os.path.join(tmp, "drop-as-sdc.img")      # the same drive, new name
+    shutil.copyfile(img, renamed)
+    saved = scanner_mod.BlockDevice
+    scanner_mod.BlockDevice = Dropping
+    try:
+        sess = session("drop-ok", renamed)
+        rep = sess.run()
+        acts = [e["action"] for e in sess.ledger.entries]
+        check("the pass survives a drop and finishes as ONE complete pass",
+              rep.stats.complete_pass and Dropping.dropped)
+        check("MD5/SHA-256 equal an uninterrupted pass", hv(rep) == hv(plain))
+        check("no block is recorded as unreadable", not rep.bad_regions)
+        with open(os.path.join(tmp, "drop-ok", "carve", "carve_report.json"),
+                  encoding="utf-8") as fh:
+            check("the inline carve is identical across the drop",
+                  json.load(fh)["streams"] == plain_streams)
+        check("the ledger discloses the loss and the verified reconnect",
+              "device_lost" in acts and "device_reconnected" in acts
+              and sess.ledger.verify()["valid"])
+        from report.case import load_case
+        from report.html import render
+        page = render(load_case(os.path.join(tmp, "drop-ok")))
+        check("the report discloses the interruption",
+              "Interruptions during acquisition" in page and "device_reconnected" in page)
+
+        changed = os.path.join(tmp, "drop-changed.img")
+        shutil.copyfile(img, changed)
+        with open(changed, "r+b") as fh:
+            fh.seek(100)
+            fh.write(b"\xEE")
+        sess = session("drop-changed", changed)
+        try:
+            sess.run()
+            check("a returning disk with different content is refused", False)
+        except DeviceError:
+            check("a returning disk with different content is refused",
+                  any(e["action"] == "reconnect_refused" for e in sess.ledger.entries))
+
+        opened = []
+
+        class Watch(Dropping):
+            def __init__(self, path, *a, **k):
+                opened.append(path)
+                super().__init__(path, *a, **k)
+        scanner_mod.BlockDevice = Watch
+        sess = session("drop-writable", renamed, read_only=False, wait=0.3)
+        try:
+            sess.run()
+            check("a returning disk that is not write-blocked is never opened", False)
+        except DeviceError:
+            check("a returning disk that is not write-blocked is never opened",
+                  renamed not in opened and any(
+                      e["action"] == "reconnect_waiting_for_write_block"
+                      for e in sess.ledger.entries))
+    finally:
+        scanner_mod.BlockDevice = saved
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -712,6 +1007,10 @@ def main() -> int:
         test_dahua_parser(tmp)
         test_dahua_robustness(tmp)
         test_carver(tmp)
+        test_preserve(tmp)
+        test_inline_carve(tmp)
+        test_plugins(tmp)
+        test_device_loss(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
