@@ -39,6 +39,9 @@ CLOCK_DISAGREE_S = 5
 CLOCK_DEFAULT_YEAR = 2000
 # An interruption at the same time of day on at least this many days is a pattern.
 RECUR_MIN_DAYS = 3
+# In a resolution group of carved footage, shorter holes are mostly where the
+# carver split a stream; only longer ones are listed as "no footage recovered".
+GROUP_GAP_MIN_S = 3600
 
 
 def parse_local(raw_value: str) -> Optional[datetime]:
@@ -161,11 +164,14 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
         s0 = parse_local(row.get("time_first_local") or "")
         s1 = parse_local(row.get("time_last_local") or "")
         if s0 and s1:
-            rec = {"id": row["id"], "camera_id": "UNKNOWN", "confidence": 0.5,
+            from recover.pscarve import resolution
+            res = resolution(row)
+            group = f"{res} group" if res else "UNKNOWN"
+            rec = {"id": row["id"], "camera_id": group, "confidence": 0.5,
                    "offset": row["offset"], "length": row["bytes"]}
             event(rec, "unindexed", s0, s1, "hk_descriptor",
                   {"note": "MPEG-PS footage carved without an index; time from the stream "
-                           "map's HK descriptor"})
+                           "map's HK descriptor", "group": bool(res)})
     for row in (carve_report or {}).get("streams", []):
         if row.get("index_label") == "mixed-evidence":
             anomalies.append({"kind": "mixed_evidence_stream", "id": row["recording"]["id"],
@@ -174,9 +180,13 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
     events.sort(key=lambda e: (e["start_local"] or "", e["camera"]))
 
     # -- per camera: coverage and gaps -----------------------------------
+    # Lanes: cameras from the index; where there is no index, carved PS
+    # footage grouped by resolution. A group is NOT a camera (two cameras can
+    # share a resolution), and its gaps mean "no footage recovered", which
+    # includes footage that was recorded and later overwritten.
     cams: dict[str, list[dict]] = {}
     for e in events:
-        if e["kind"] == "indexed":
+        if e["kind"] == "indexed" or e.get("group"):
             cams.setdefault(e["camera"], []).append(e)
     cameras = {}
     gaps: list[dict] = []
@@ -184,17 +194,21 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
         evs.sort(key=lambda e: e["start_local"])
         covered = 0.0
         cur_end: Optional[datetime] = None
+        is_group = cam.endswith(" group")
+        min_gap = GROUP_GAP_MIN_S if is_group else GAP_MIN_S
         for e in evs:
             s, en = parse_local(e["start_local"]), parse_local(e["end_local"])
-            if cur_end is not None and s < cur_end - timedelta(seconds=GAP_MIN_S):
+            if not is_group and cur_end is not None and s < cur_end - timedelta(seconds=GAP_MIN_S):
                 anomalies.append({"kind": "overlapping_recordings", "camera": cam,
                                   "id": e["id"],
                                   "detail": f"starts {fmt(s)}, before the previous file "
                                             f"ends at {fmt(cur_end)}"})
-            if cur_end is not None and (s - cur_end).total_seconds() > GAP_MIN_S:
+            if cur_end is not None and (s - cur_end).total_seconds() > min_gap:
                 gaps.append({"camera": cam, "start_local": fmt(cur_end), "end_local": fmt(s),
                              "start_utc": clock.to_utc(cur_end), "end_utc": clock.to_utc(s),
-                             "duration_s": (s - cur_end).total_seconds()})
+                             "duration_s": (s - cur_end).total_seconds(),
+                             "meaning": ("no footage recovered" if is_group
+                                         else "no indexed footage")})
             covered += max(0.0, (en - s).total_seconds())
             cur_end = en if cur_end is None else max(cur_end, en)
         cameras[cam] = {"recordings": len(evs), "first_local": evs[0]["start_local"],
@@ -219,15 +233,19 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
                 key = (g["start_local"][:16])
                 if key not in seen:
                     seen.add(key)
-                    correlated.append({"kind": "system_wide_gap", "start_local": g["start_local"],
-                                       "end_local": g["end_local"],
-                                       "detail": "no indexed footage on any camera"})
+                    grp = g["camera"].endswith(" group")
+                    correlated.append({
+                        "kind": "no_footage_recovered" if grp else "system_wide_gap",
+                        "start_local": g["start_local"], "end_local": g["end_local"],
+                        "detail": ("no footage recovered in any resolution group - not "
+                                   "recorded, or recorded and overwritten" if grp
+                                   else "no indexed footage on any camera")})
     # Interruptions that recur at the same time of day on different days -
     # single-camera gaps and index/frame disagreements - point at something
     # scheduled (a camera reboot, a time sync) rather than at an incident.
     marks: dict[int, list[tuple[str, str, str]]] = {}
     for g in gaps:
-        if not g.get("system_wide"):
+        if not g.get("system_wide") and not g["camera"].endswith(" group"):
             d = parse_local(g["start_local"])
             marks.setdefault(d.hour * 6 + d.minute // 10, []).append(
                 (g["start_local"][:10], g["camera"], "gap"))
@@ -251,7 +269,8 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
                           f"the pattern of a scheduled task such as a camera reboot or a time "
                           f"sync; not established"})
 
-    unindexed = [e for e in events if e["kind"] in ("unindexed", "remnant")]
+    unindexed = [e for e in events if e["kind"] in ("unindexed", "remnant")
+                 and not e.get("group")]
     for u in unindexed:
         us, ue = parse_local(u["start_local"]), parse_local(u["end_local"])
         hits = [g["camera"] for g in gaps
@@ -300,6 +319,10 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
         "notes": [
             "Every camera on one recorder shares one clock, so ordering across cameras "
             "holds even where no UTC is asserted.",
+            "Lanes named '<width>x<height> group' are carved footage grouped by "
+            "resolution because no index survives to name the camera; a group may hold "
+            "more than one camera, and its gaps mean no footage was recovered - "
+            "including footage recorded and later overwritten.",
             "A gap means no indexed footage for that period. Motion-only recording, "
             "power loss, overwrite and deletion all produce gaps; the timeline does not "
             "say which.",
