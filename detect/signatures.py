@@ -65,6 +65,18 @@ HIKVISION = [
         weight=8.0,
     ),
     Signature(
+        id="hik.ps_hk_descriptor",
+        vendor="Hikvision",
+        pattern=b"\x40\x0e\x48\x4b\x01\x00",
+        description="Hikvision private 'HK' descriptor (tag 0x40) in an MPEG-PS stream "
+                    "map - marks Hikvision-recorded Program Stream footage, including "
+                    "footage left behind when the drive was reformatted",
+        source="observed: ST1000VX005 s/n Z9C2632A (formatted by a Dahua-family "
+               "recorder; Hikvision footage underneath)",
+        validation_status=SPEC_ONLY,
+        weight=6.0,
+    ),
+    Signature(
         id="hik.offset",
         vendor="Hikvision",
         pattern=b"OFFSET",
