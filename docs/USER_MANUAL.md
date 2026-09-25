@@ -94,6 +94,7 @@ systemd-inhibit --what=sleep:idle python cli.py scan --device /dev/sdX \
 | Option | Meaning |
 |---|---|
 | `--carve` | also recover footage in the same pass (Dahua-family disks). Costs CPU, not time |
+| `--carve-ps` | also recover MPEG Program Stream footage (Hikvision and others), dated from Hikvision's `HK` stream maps — including footage under a drive another recorder reformatted |
 | `--reconnect-wait N` | if the drive drops off USB, wait up to N minutes for it to come back write-blocked and verified, then continue the same hashes. `0` fails at once |
 | `--max-mb N` | triage: stop after N MiB. The pass is marked incomplete and its hashes must not be quoted |
 | `--resume` | continue an interrupted scan. The Merkle root is valid; the linear MD5/SHA-256 are not |
@@ -115,6 +116,8 @@ python cli.py report   --out out/CASE-001 --notes "..."
 python cli.py verify   --out out/CASE-001                          # again, now covering preserved blocks
 ```
 
+- `extract-carved --format ps` saves MPEG-PS streams unmodified as playable `.ps` files
+  (the default `auto` picks PS when the DHAV carve found nothing).
 - `extract-carved` defaults to `--label outside_index`. Use `--label CH02` for
   one camera's carved footage, `--label all`, or `--ids carve-00012,carve-00019`.
 - `timeline --clock-observed/--clock-reference`: at seizure, write down what
