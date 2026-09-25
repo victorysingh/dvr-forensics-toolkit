@@ -1,0 +1,4 @@
+# Optional analytics layer only. The forensic core needs nothing from here.
+onnxruntime==1.30.0
+numpy>=2.0
+# plus the ffmpeg binary (system package or bundled), per docs/TECH_STACK.md

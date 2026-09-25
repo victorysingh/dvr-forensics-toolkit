@@ -134,7 +134,17 @@ the checksum holds *and* the trailer repeats the length.
 camera is 1920×1080 H.265 at 25 fps, with 8 kHz A-law audio.
 
 **Payload** is Annex-B. I-frames open with a VPS NAL (`00 00 00 01 40 01`), so
-the extracted elementary stream plays directly.
+the extracted elementary stream should play directly. Its structure is
+checked (parameter sets and an IDR repeating, P-frames between); playback has
+not yet been verified with a decoder on the team's workstation.
+
+**Auxiliary frames (type `0xF1`)** carry a `TEXT` block holding the channel
+title. On this unit every camera's title is the default `CPPlusIPCam` —
+17,557 occurrences in the first 20 GiB — which puts the CP Plus name on the
+platter itself (signature `cpplus.osd_title`). It does not separate cameras
+here, because the titles are identical; on a recorder whose channels are
+named, it could attribute carved footage. Found by `cli.py survey`, which
+flagged `TEXT` as a candidate header.
 
 ---
 

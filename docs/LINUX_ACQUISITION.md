@@ -65,13 +65,25 @@ sudo blockdev --setro /dev/sdb
 blockdev --getro /dev/sdb          # MUST print 1
 ```
 
-Prove it actually blocks writes. Do this once, on the first acquisition, so
-you can state in the validation report that it was tested rather than assumed:
+Prove it actually blocks writes — once per workstation and kernel, so you
+can state in the validation report that it was tested rather than assumed.
+**Do this on a sacrificial device, never on evidence:** if the flag were not
+in effect, the test itself would overwrite sector 0 of the drive. A loop
+device over a scratch file tests the same kernel mechanism:
 
 ```bash
-sudo dd if=/dev/zero of=/dev/sdb bs=512 count=1
-# expected: dd: failed to open '/dev/sdb': Read-only file system
+head -c 16M /dev/urandom > wb_test.img && sha256sum wb_test.img
+LOOP=$(sudo losetup --find --show wb_test.img)
+sudo blockdev --setro $LOOP && blockdev --getro $LOOP        # 1
+sudo dd if=/dev/zero of=$LOOP bs=512 count=1 conv=fsync      # must fail
+sudo dd if=/dev/zero of=$LOOP bs=512 count=1 oflag=direct    # must fail
+sudo losetup -d $LOOP && sha256sum wb_test.img                # must be unchanged
 ```
+
+The error text depends on the kernel: `Read-only file system` on older
+kernels, `Operation not permitted` on 7.1 (tested 25 Sep 2026). Either is a
+pass; any bytes written is a fail. The result is recorded in
+`docs/VALIDATION_REPORT.md`.
 
 Three caveats that have burned people:
 

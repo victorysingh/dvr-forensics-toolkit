@@ -421,28 +421,77 @@ def _linux_write_block_method(path: str) -> str:
     return "software:read-only-handle"
 
 
-def udev_writeblock_rule(serial: str, user: str = "") -> str:
-    """A udev rule that write-blocks one drive, by its own serial, the moment
-    it appears - under whatever name a USB reset gives it.
+def udev_writeblock_rule(serial: str = "", user: str = "", usb_id: str = "") -> str:
+    """A udev rule that write-blocks evidence the moment it appears - under
+    whatever name a USB reset gives it.
 
     `blockdev --setro` does not survive a disconnect, and a flaky USB-SATA
     bridge disconnects on its own; without this rule the drive comes back
-    writable until someone notices.  Keyed on the serial, never on "every USB
-    disk": a forensic workstation may itself boot from USB.  This function
-    only builds the text - installing it is the examiner's (root) step."""
+    writable until someone notices.  Key it on either
+
+      * `serial`  - one drive, by its own serial (ID_SERIAL_SHORT), or
+      * `usb_id`  - every disk behind one evidence adapter ("vvvv:pppp"), for
+                    a drive whose serial is not known before it is attached.
+
+    Never on "every USB disk": a forensic workstation may itself boot from
+    USB.  This function only builds the text - installing it is the
+    examiner's (root) step."""
     import re
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", serial or ""):
+    if bool(serial) == bool(usb_id):
+        raise ValueError("give exactly one of serial or usb_id")
+    if serial and not re.fullmatch(r"[A-Za-z0-9._-]+", serial):
         raise ValueError(f"refusing to build a rule for serial {serial!r}")
+    if usb_id and not re.fullmatch(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{4}", usb_id):
+        raise ValueError(f"refusing to build a rule for USB id {usb_id!r}")
     if user and not re.fullmatch(r"[a-z_][a-z0-9_-]*", user):
         raise ValueError(f"refusing to build a rule for user {user!r}")
-    run = [f'RUN+="/usr/sbin/blockdev --setro /dev/%k"']
+    if serial:
+        what = f"drive serial {serial}"
+        match = f'ENV{{ID_SERIAL_SHORT}}=="{serial}"'
+    else:
+        vid, pid = usb_id.lower().split(":")
+        what = f"every disk behind USB adapter {vid}:{pid}"
+        match = f'ENV{{ID_USB_VENDOR_ID}}=="{vid}", ENV{{ID_USB_MODEL_ID}}=="{pid}"'
+    run = ['RUN+="/usr/sbin/blockdev --setro /dev/%k"']
     if user:
         run.append(f'RUN+="/usr/bin/setfacl -m u:{user}:r /dev/%k"')
-    return ("# PS26150 evidence write block for drive serial " + serial + "\n"
+    return ("# PS26150 evidence write block for " + what + "\n"
             "# Install to /run/udev/rules.d/ (gone after reboot) and run\n"
             "#   udevadm control --reload\n"
-            f'ACTION=="add|change", SUBSYSTEM=="block", ENV{{ID_SERIAL_SHORT}}=="{serial}", '
+            f'ACTION=="add|change", SUBSYSTEM=="block", {match}, '
             + ", ".join(run) + "\n")
+
+
+def mounted_disks() -> set[str]:
+    """Whole-disk device paths ("/dev/sda") that hold a mounted filesystem -
+    the workstation's own disks, never evidence."""
+    disks: set[str] = set()
+    try:
+        with open("/proc/mounts", "r", encoding="utf-8") as fh:
+            devs = {line.split()[0] for line in fh if line.startswith("/dev/")}
+    except OSError:
+        return disks
+    for dev in devs:
+        name = os.path.basename(os.path.realpath(dev))
+        sys_path = os.path.realpath(os.path.join("/sys/class/block", name))
+        if not os.path.exists(sys_path):
+            continue
+        # a partition's sysfs directory sits inside its disk's
+        is_part = os.path.exists(os.path.join(sys_path, "partition"))
+        disk = os.path.basename(os.path.dirname(sys_path)) if is_part else name
+        disks.add(f"/dev/{disk}")
+    return disks
+
+
+def usb_ids_of_mounted_disks() -> set[str]:
+    """USB ids ("vvvv:pppp") of adapters holding any mounted filesystem - the
+    workstation's own disks, which a write-block rule must never cover."""
+    ids: set[str] = set()
+    for disk in mounted_disks():
+        u = udev_properties(disk)
+        if u.get("ID_USB_VENDOR_ID"):
+            ids.add(f"{u['ID_USB_VENDOR_ID']}:{u['ID_USB_MODEL_ID']}".lower())
+    return ids
 
 
 def udev_properties(path: str) -> dict[str, str]:
@@ -498,7 +547,11 @@ def list_block_devices_linux() -> list[dict]:
         found.append({
             "index": len(found),
             "path": f"/dev/{name}",
-            "model": " ".join(x for x in (vendor, model) if x),
+            # the drive's own model where the bridge passes it through,
+            # rather than the bridge's "Mass Storage Device"
+            "model": (udev.get("ID_MODEL", "").replace("_", " ").strip()
+                      if udev.get("ID_BUS") == "ata" else "")
+                     or " ".join(x for x in (vendor, model) if x),
             "serial": serial,
             "bus_type": "USB" if "usb" in os.path.realpath(d) else "",
             "size_bytes": size,

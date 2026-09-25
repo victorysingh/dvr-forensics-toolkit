@@ -170,6 +170,13 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                          "labels": labels, "outside_index": outside[:recordings_limit],
                          "outside_total": len(outside), "outputs": carve.get("outputs", {}),
                          "notes": carve.get("notes", [])}
+        ex = _load(j("carve", "extracted.json"))
+        if ex:
+            case["carve"]["extracted"] = {
+                "sha256": _hashed(j("carve", "extracted.json")),
+                "streams": {k: {x: v[x] for x in ("label", "frames_written", "frames_carved",
+                                                   "frames_match", "codec", "files")}
+                            for k, v in ex.get("streams", {}).items()}}
 
     t = _load(j("timeline.json"))
     if t:
@@ -177,6 +184,33 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                                                   "anomalies", "counts", "notes", "inputs")}
         case["timeline"]["sha256"] = _hashed(j("timeline.json"))
         case["timeline"]["events"] = t.get("events", [])[:2000]
+
+    act = _load(j("activity.json"))
+    if act:
+        case["activity"] = {
+            "sha256": _hashed(j("activity.json")), "rule": act.get("rule"),
+            "status": act.get("status"), "notes": act.get("notes", []),
+            "peak_factor": act.get("peak_factor"),
+            "cameras": {k: {"minutes": v["minutes"],
+                            "median_p_bytes_per_minute": v["median_p_bytes_per_minute"]}
+                        for k, v in act.get("cameras", {}).items()},
+            "peaks": sorted(act.get("peaks", []), key=lambda p: -p["local_index"])[:200],
+            "peaks_total": len(act.get("peaks", [])),
+            "multi_camera_peaks": act.get("multi_camera_peaks", [])[:200]}
+
+    an = _load(j("analytics", "analytics.json"))
+    if an:
+        hits = [dict(h, clip=c["clip"]) for c in an.get("clips", []) for h in c["detections"]]
+        hits.sort(key=lambda h: -max(d["score"] for d in h["detections"]))
+        case["analytics"] = {
+            "sha256": _hashed(j("analytics", "analytics.json")), "status": an.get("status"),
+            "models": an.get("models"), "thresholds": an.get("thresholds"),
+            "notes": an.get("notes", []), "totals": an.get("frames_with_totals", {}),
+            "clips": len(an.get("clips", [])),
+            "frames_analysed": sum(c["frames_analysed"] for c in an.get("clips", [])),
+            "top": hits[:100],
+            "thumbnails": [dict(t, clip=c["clip"]) for c in an.get("clips", [])
+                           for t in c.get("thumbnails", [])][:60]}
 
     case["vendors"] = vendor_matrix((scan or {}).get("detections"))
     case["files"] = {n: _hashed(j(n)) for n in ("scan_report.json", "blockmap.jsonl",

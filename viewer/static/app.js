@@ -48,7 +48,8 @@ function renderPipeline() {
       c.carve ? "done" : prog ? "run" : ""],
     ["Timeline", c.timeline ? `${Object.keys(c.timeline.cameras || {}).length} cameras` : "pending", st(c.timeline)],
     ["Report", scan ? "ready to generate" : "needs acquisition", scan ? "done" : ""],
-    ["Analytics", "optional add-on · not installed", "addon"],
+    ["Analytics", c.activity ? `motion: ${c.activity.peaks_total} peaks (lead)` : "motion from frame sizes; AI add-on pending",
+      c.activity ? "part" : "addon"],
   ];
   $("#pipeline").innerHTML = stages.map(([t, d, cls], i) =>
     `<div class="stage ${cls}"><div class="t">${i + 1}. ${t}</div><div class="d">${esc(d)}</div></div>`).join("");
@@ -193,6 +194,15 @@ function viewRec() {
         [`<code>${esc(r.id)}</code>`, `<code>${hex(r.offset)}</code>`, r.frame_count.toLocaleString(), esc(localOf(r.timestamps[0])),
           esc(localOf(r.timestamps[1])), hms(r.duration_s), r.confidence.toFixed(2)]), true);
   }
+  const an = state.case?.analytics;
+  if (an) {
+    h += `<h2>Faces and objects in recovered clips <span class="pill s-synthetic_only">lead, not evidence</span></h2>
+      <div class="note warn">Face <b>detection</b> only — nobody is identified. Scores are the models' own confidence. Each item is a moment to review in the footage.</div>
+      <p class="muted">${an.clips} clips, ${an.frames_analysed.toLocaleString()} frames analysed · frames with: ${Object.entries(an.totals).map(([k, v]) => `${esc(k)} ${v}`).join(", ") || "none"}</p>`;
+    if (an.thumbnails.length) {
+      h += `<div class="grid">${an.thumbnails.map((t) => `<div class="card"><img src="/thumb/${encodeURIComponent(state.case.id)}/${encodeURIComponent(t.file)}" alt="${esc(t.clip)} at ${t.t_s}s" style="width:100%;border-radius:6px"><p class="muted">${esc(t.clip)} · ${t.t_s}s</p></div>`).join("")}</div>`;
+    }
+  }
   if (p?.remnants_total) {
     h += `<h2>Remnants in reused clusters (${p.remnants_total})</h2><div class="note">Older footage found by the index-guided parser at the tail of clusters since reassigned to a newer recording.</div>` +
       table(["ID", "Offset", "Frames", "First frame (recorder clock)", "Duration"], p.remnants.map((r) =>
@@ -220,6 +230,17 @@ function viewTl() {
   h += `<h2>Anomalies</h2>` + table(["Kind", "Item", "Detail"], (t.anomalies || []).map((x) =>
     [esc(x.kind), esc(x.id || x.camera), esc(x.detail)]), true);
   h += t.notes.map((n) => `<div class="note">${esc(n)}</div>`).join("");
+  const a = state.case?.activity;
+  if (a) {
+    h += `<h2>Motion activity <span class="pill s-synthetic_only">lead, not evidence</span></h2>
+      <div class="note warn">From compressed frame sizes (P-frame bytes per camera per minute); no video decoded. Low-light noise, lighting or infrared changes, rain and camera shake also raise it. A peak marks footage to review.</div>`;
+    h += `<h3>Minutes with peaks on several cameras</h3>` + table(["Minute (recorder clock)", "Cameras", "Local index"],
+      a.multi_camera_peaks.map((x) => [esc(x.minute), esc(x.cameras.join(", ")),
+        esc(Object.entries(x.local_indices).map(([k, v]) => `${k} ${v.toFixed(1)}x`).join(", "))]), true);
+    h += `<h3>Strongest peaks (${a.peaks_total} camera-minutes)</h3>` + table(["Camera", "Minute", "Local index", "vs whole period"],
+      a.peaks.slice(0, 50).map((p) => [esc(p.camera), esc(p.minute), p.local_index.toFixed(1) + "x",
+        p.index == null ? "-" : p.index.toFixed(1) + "x"]), true);
+  }
   return h;
 }
 

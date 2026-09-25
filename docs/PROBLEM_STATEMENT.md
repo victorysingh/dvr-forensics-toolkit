@@ -85,8 +85,8 @@ produce reliable and legally defensible forensic results.
 | File System & Format Parsing | `parsers/`, `plugins/` | Dahua DHFS on real media (`spec_only`); Hikvision `synthetic_only`; drop-in plugins for new vendors |
 | Recovery | `parsers/dahua.py` remnants; `recover/carver.py` | Dahua remnants + indexless DHAV carver on real media (`spec_only`), run inside the acquisition pass |
 | Timeline Analysis | `analyse/timeline.py` | working: zone + measured clock error, gaps, cross-camera correlation |
-| Reporting | `report/`, `ui/` | working: HTML + JSON report, local UI |
-| Machine Learning | — | not started (optional add-on; needs a video decoder) |
+| Reporting | `report/`, `viewer/` | working: HTML + JSON report, dependency-free viewer |
+| Machine Learning | `analyse/activity.py` | motion activity from compressed frame sizes (lead, not evidence); face/object detection not started — needs the optional decode + ONNX layer |
 
 ## Named deliverables not yet started
 
