@@ -67,6 +67,17 @@ short-read failure; the survey tool; and the real-media checks:
 | Indexless carve: streams with mixed camera evidence | none |
 | Indexless carve: cameras recovered | all three, comparable volume |
 
+### Full drive (all four volumes)
+
+| Check | Result |
+|---|---|
+| Recordings indexed | 2,029 across three cameras (volume 1: 513, 2: 504, 3: 511, 4: 501) |
+| Period held | 27 Aug 2026 19:00 → 23 Sep 2026 16:55 (recorder clock), continuous apart from the gaps below; ~642 h per camera |
+| Recording order | circular across volumes 4 → 1 → 2 → 3; the oldest files (27 Aug 19:00–22:18) survive at the tail of volume 3, not yet overwritten |
+| Broken index chains | volumes 1, 2, 4: 0; volume 3: 3 — the volume holding the last recordings, consistent with files open when recording stopped (not established) |
+| Data-area calibration | volumes 1, 2: mean timing error 1.13 s and 1.17 s; volumes 3, 4: 2.56 s and 2.45 s — above the 2 s bar, so flagged "weak", though each is 3–5 s clear of the next candidate and chain continuity is 8/8 |
+| Field provenance | 28 decoded fields, 0 resting only on the synthetic fixture |
+
 ## 4. Write blocking
 
 **Mechanism test** (`LINUX_ACQUISITION §2`), 25 Sep 2026, on a sacrificial
@@ -205,6 +216,29 @@ taken at seizure, so the timeline asserts no UTC.
 The same frame carries the camera's title, **"Parking"**, burned into the
 image. Reading it (on-screen text OCR, planned in `TECH_STACK.md`) is a route
 to attributing carved footage to a camera, which the frame headers cannot.
+
+### Timeline of the full drive
+
+No UTC is asserted (zone unknown; no clock reading taken at seizure). On the
+recorder's clock:
+
+- **6 recorder-wide gaps** (every camera silent at once): 3 Sep 08:25 (1.3 min),
+  21 Sep 18:59 (1 min), and on 23 Sep 13:03–14:08 (65 min), 14:54–16:48
+  (114 min) and 16:50–16:51. Recording ends at 16:55:45 on 23 Sep, the day
+  the drive was removed. Whether the 23 Sep gaps are the team's own handling
+  of the unit is to be confirmed and recorded.
+- **A recurring interruption**: 10 one-camera interruptions on 10 different
+  nights, all between 02:00 and 02:09, across all three cameras; all 6
+  index-vs-first-frame disagreements over 5 s are among them. The pattern of
+  a scheduled task (a camera reboot, a time sync) — not established.
+- **2 carved streams dated 2000-01-01 05:30** — the recorder's clock at its
+  default at some point, e.g. after power loss with a flat clock battery.
+  Their real time is unknown. The *05:30* is itself a clue: a clock reset to
+  2000-01-01 00:00 UTC and displayed at UTC+05:30 shows exactly that, which
+  suggests the recorder's zone is set to IST. An inference only — confirm it
+  from the unit's settings before passing `--tz-offset 330`.
+- **Footage outside every index** dates from March to 26 Aug 2026 — the
+  previous recording cycle, surviving at the tails of reused clusters.
 
 ## 8a. Analytics (optional layer — leads, not evidence)
 

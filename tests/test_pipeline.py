@@ -1215,6 +1215,31 @@ def test_timeline_clock_default() -> None:
           any(a["kind"] == "clock_at_default" for a in t["anomalies"]))
 
 
+def test_timeline_recurring() -> None:
+    print("\n[timeline: recurring interruptions]")
+    from analyse.timeline import ClockModel, build
+
+    def rec(i, cam, s, e):
+        return {"id": f"r{i}", "camera_id": cam, "offset": 0, "length": 0, "confidence": 0.9,
+                "timestamps": [{"source": "index", "raw_value": f"0x0 = {s} recorder-local"},
+                               {"source": "index", "raw_value": f"0x0 = {e} recorder-local"}]}
+    recs = []
+    n = 0
+    for day in (1, 2, 3, 4):
+        for cam in ("CH01", "CH02"):
+            # one camera drops for a minute at 02:00 on days 1, 3 and 4
+            if cam == "CH01" and day in (1, 3, 4):
+                recs.append(rec(n, cam, f"2026-09-0{day} 00:00:00", f"2026-09-0{day} 02:00:10"))
+                recs.append(rec(n + 1, cam, f"2026-09-0{day} 02:01:30", f"2026-09-0{day} 23:59:59"))
+            else:
+                recs.append(rec(n, cam, f"2026-09-0{day} 00:00:00", f"2026-09-0{day} 23:59:59"))
+            n += 2
+    t = build({"recordings": recs}, None, ClockModel())
+    r = [c for c in t["correlations"] if c["kind"] == "recurring_interruption"]
+    check("a gap at the same time on three days is reported as a pattern",
+          len(r) == 1 and r[0]["start_local"] == "02:00" and len(r[0]["days"]) == 3, str(r))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1239,6 +1264,7 @@ def main() -> int:
         test_survey(tmp)
         test_activity(tmp)
         test_timeline_clock_default()
+        test_timeline_recurring()
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
