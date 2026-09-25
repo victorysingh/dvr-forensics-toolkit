@@ -1202,6 +1202,19 @@ def test_activity(tmp: str) -> None:
           and any(e["action"] == "inline_activity_completed" for e in sess.ledger.entries))
 
 
+def test_timeline_clock_default() -> None:
+    print("\n[timeline: recorder clock at its default]")
+    from analyse.timeline import ClockModel, build
+    rec = {"id": "carve-00001", "camera_id": "UNKNOWN", "offset": 0, "length": 0,
+           "confidence": 0.5, "duration_s": 60,
+           "timestamps": [{"source": "container", "raw_value": "0x0 = 2000-01-01 00:03:10 recorder-local"},
+                          {"source": "container", "raw_value": "0x0 = 2000-01-01 00:04:10 recorder-local"}]}
+    t = build(None, {"streams": [{"index_label": "outside_index", "recording": rec,
+                                  "extents": []}]}, ClockModel())
+    check("footage dated at the DHAV epoch is flagged as an unset clock",
+          any(a["kind"] == "clock_at_default" for a in t["anomalies"]))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1225,6 +1238,7 @@ def main() -> int:
         test_short_read(tmp)
         test_survey(tmp)
         test_activity(tmp)
+        test_timeline_clock_default()
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

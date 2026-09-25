@@ -35,6 +35,8 @@ _LOCAL_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 GAP_MIN_S = 60
 # Index and first-frame dates further apart than this are listed.
 CLOCK_DISAGREE_S = 5
+# DHAV dates count from 2000; footage dated in that year means an unset clock.
+CLOCK_DEFAULT_YEAR = 2000
 
 
 def parse_local(raw_value: str) -> Optional[datetime]:
@@ -220,6 +222,18 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
                                "detail": "footage exists for a period the index has no "
                                          "recording for; which camera it came from is "
                                          "not established"})
+    # A recorder whose clock was never set (or lost it with a flat RTC battery)
+    # stamps footage with its epoch default - 2000-01-01 for DHAV.  That is a
+    # finding about the recorder, and those times say nothing about when the
+    # footage was recorded.
+    for e in events:
+        s0 = parse_local(e["start_local"])
+        if s0 and s0.year <= CLOCK_DEFAULT_YEAR:
+            anomalies.append({"kind": "clock_at_default", "id": e["id"],
+                              "camera": e["camera"],
+                              "detail": f"dated {fmt(s0)} - the recorder's clock was at its "
+                                        f"default (unset, or reset by power loss); this "
+                                        f"footage's real time is unknown"})
     dated = [parse_local(e["start_local"]) for e in events if e["kind"] == "indexed"]
     if dated:
         lo, hi = min(dated), max(dated)

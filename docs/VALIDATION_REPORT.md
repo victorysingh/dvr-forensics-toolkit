@@ -12,9 +12,6 @@ Two different things are validated here, and they must not be confused:
   what the recorder itself produces? That is the `validated` status, and it
   has **not** been reached for any vendor (§9).
 
-> Sections marked **PENDING** are filled in when the full acquisition of the
-> CP Plus drive (attempt 4) completes.
-
 ---
 
 ## 1. Summary
@@ -24,12 +21,12 @@ Two different things are validated here, and they must not be confused:
 | Automated tests | 234 pass, 0 fail: 226 on generated data with known ground truth, 8 on real media |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
-| Reproducibility of reads | every block shared by 4 independent reads over 2 days is identical, apart from one block corrupted by a since-fixed bug |
+| Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
 | Analytics (optional) | runs on recovered clips; detections reviewed by eye as plausible leads; no accuracy claimed |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts |
-| Full-drive acquisition | **PENDING** |
+| Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
 | Vendor formats | none `validated`; Dahua/CP Plus `spec_only`, Hikvision `synthetic_only` |
 
 ## 2. Environment
@@ -111,11 +108,17 @@ they overlap:
 | 20 GiB image (23 Sep) vs attempt 3 | 2,560 | 0 |
 | attempt 1 vs attempt 3 | 3,078 | 0 |
 | attempt 2 (before its failure) vs attempt 3 | 3,808 | 1 — block 3807, see §6.2 |
-| attempt 4 vs all earlier reads | **PENDING** | |
+| attempt 4 (full pass) vs the 20 GiB image | 2,560 | 0 |
+| attempt 4 vs attempt 1 | 3,078 | 0 |
+| attempt 4 vs attempt 2 (before its failure) | 6,223 | 1 — block 6222 |
+| attempt 4 vs attempt 3 | 3,808 | 1 — block 3807 |
 
 Independent reads of the same drive through the same flaky adapter, days
-apart, agree bit for bit. The single difference is explained, reproduced and
-fixed.
+apart, agree bit for bit. The two differences are the last block attempt 2
+and attempt 3 each read as their adapter died, and both are the same bug
+(§6.2): attempt 2's block 6222 equals the true block truncated at 400 KiB
+plus zeros; attempt 3's block 3807, truncated at 6976 KiB plus zeros. The
+drive re-read today matches attempt 4 for both.
 
 ## 6. Failures found on real hardware
 
@@ -143,7 +146,10 @@ with zeros and hashed it as data. This code predates the work on the
 reconnect logic.
 
 It was caught by the reconnect verification: after the drive returned, block
-3807 re-read with a different SHA-256, and the scan refused to continue.
+3807 re-read with a different SHA-256, and the scan refused to continue. The
+same bug had struck attempt 2 at its own drop, unnoticed at the time: its
+block 6222 is the true data truncated at 400 KiB plus zeros (found when the
+full pass was compared against every earlier read, §5).
 Diagnosis: the recorded hash equals the true block truncated at 6976 KiB
 plus zeros (matched exactly); the true block re-reads identically three
 times; neighbouring blocks match.
@@ -177,7 +183,7 @@ the same hashes continued from the first unhashed byte. Recorded as
 | `extract-carved`, outside-index footage | real, 20 GiB | 49 streams, 42,638 frames, 209 MB; every frame count equals the carve's |
 | Extracted H.265 structure | real | Annex-B; VPS/SPS/PPS and an IDR repeating, P-frames between |
 | Extracted H.265 decode (ffmpeg 8.1.2) | real, 20 GiB | HEVC Main, 1920×1080. 13,706 of 20,773 video frames decode (66%). 4,980 precede their stream's first surviving keyframe — the keyframe was overwritten, so they cannot decode alone; the other 2,087 most likely follow a reference frame lost mid-stream (not yet verified). 4 streams have no keyframe at all |
-| Full drive: carve labels, extraction | real, 1 TB | **PENDING** |
+| Full-drive carve, inside the acquisition pass | real, 931.5 GiB | 349,519,550 validated frames; 3,523 streams kept; 1,196 ambiguous boundaries split, never guessed. Labels: CH01 478, CH02 578, CH03 221 streams (~115.8 M frames each), **outside every index 2,246 streams, 1.99 M frames, 5.4 GiB**, first-frame dates from March to late August 2026 |
 
 ## 8. Timestamps
 
@@ -231,7 +237,6 @@ here with both files' SHA-256.
 
 ## 10. Open items
 
-- Full-drive results (§1, §5, §7) — PENDING.
 - Why 2,087 frames after a keyframe still do not decode (suspected: a lost reference frame).
 - A native export for the validation in §9.
 - Hikvision drive acquisition and parser check.
