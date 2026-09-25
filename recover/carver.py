@@ -532,3 +532,69 @@ class CarveTap:
         return {"report": "carve/carve_report.json", "sha256": sha256_file(path),
                 "frames": stats["frames"], "streams_kept": stats["streams_kept"],
                 "labels": labels}
+
+
+@dataclass
+class ReportedStream:
+    """A carved stream as the carve report recorded it: enough to copy its
+    frames out again (`write_stream` needs only the extents)."""
+    sid: str
+    extents: list[Extent]
+    frames: int
+    label: Optional[str]
+
+
+def streams_from_report(report: dict, label: Optional[str] = None,
+                        ids: Optional[set[str]] = None) -> list[ReportedStream]:
+    out = []
+    for row in report.get("streams", []):
+        rec = row["recording"]
+        if label and row.get("index_label") != label:
+            continue
+        if ids and rec["id"] not in ids:
+            continue
+        out.append(ReportedStream(rec["id"], [Extent(o, n) for o, n in row["extents"]],
+                                  rec["frame_count"], row.get("index_label")))
+    return out
+
+
+def extract_from_report(dev, streams: list[ReportedStream], out_dir: str,
+                        manifest_path: str, log=print) -> dict:
+    """Write each stream's frames to <id>.dav and its bare video to
+    <id>.h265/.h264, reading only the stream's own extents - a targeted read,
+    never a second pass over the drive.
+
+    The manifest is rewritten after every stream, so an extraction that
+    stops (a USB drop) keeps what it finished and a re-run skips it.  Every
+    frame is re-validated on the way out; the frame count written is checked
+    against the count the carve recorded, and a mismatch is reported."""
+    from core.hashing import sha256_file
+    import json
+
+    os.makedirs(out_dir, exist_ok=True)
+    manifest = {"streams": {}}
+    if os.path.exists(manifest_path):
+        with open(manifest_path, "r", encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    done = manifest["streams"]
+    for i, s in enumerate(streams):
+        if s.sid in done and all(os.path.exists(os.path.join(out_dir, f))
+                                 for f in done[s.sid]["files"]):
+            continue
+        base = os.path.join(out_dir, s.sid)
+        with open(base + ".dav", "wb") as dav, open(base + ".es", "wb") as es:
+            n, codec = write_stream(dev, s, dav, es)
+        es_path = base + (f".{codec}" if codec in ("h264", "h265") else ".es")
+        os.replace(base + ".es", es_path)
+        files = {os.path.basename(p): {"bytes": os.path.getsize(p), "sha256": sha256_file(p)}
+                 for p in (base + ".dav", es_path)}
+        done[s.sid] = {"label": s.label, "frames_written": n, "frames_carved": s.frames,
+                       "frames_match": n == s.frames, "codec": codec,
+                       "extents": [[e.offset, e.length] for e in s.extents],
+                       "files": files}
+        with open(manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2)
+        log(f"  [{i + 1}/{len(streams)}] {s.sid}  {n:,} frames  "
+            f"{sum(f['bytes'] for f in files.values()) / 2**20:,.1f} MiB"
+            + ("" if n == s.frames else f"  (!) carve recorded {s.frames:,}"))
+    return manifest

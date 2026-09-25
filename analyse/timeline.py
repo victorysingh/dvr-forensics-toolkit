@@ -35,6 +35,10 @@ _LOCAL_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 GAP_MIN_S = 60
 # Index and first-frame dates further apart than this are listed.
 CLOCK_DISAGREE_S = 5
+# DHAV dates count from 2000; footage dated in that year means an unset clock.
+CLOCK_DEFAULT_YEAR = 2000
+# An interruption at the same time of day on at least this many days is a pattern.
+RECUR_MIN_DAYS = 3
 
 
 def parse_local(raw_value: str) -> Optional[datetime]:
@@ -207,6 +211,35 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
                     correlated.append({"kind": "system_wide_gap", "start_local": g["start_local"],
                                        "end_local": g["end_local"],
                                        "detail": "no indexed footage on any camera"})
+    # Interruptions that recur at the same time of day on different days -
+    # single-camera gaps and index/frame disagreements - point at something
+    # scheduled (a camera reboot, a time sync) rather than at an incident.
+    marks: dict[int, list[tuple[str, str, str]]] = {}
+    for g in gaps:
+        if not g.get("system_wide"):
+            d = parse_local(g["start_local"])
+            marks.setdefault(d.hour * 6 + d.minute // 10, []).append(
+                (g["start_local"][:10], g["camera"], "gap"))
+    for a in anomalies:
+        if a["kind"] == "index_frame_disagreement":
+            d = parse_local(a["detail"].split("index start ", 1)[-1][:19])
+            if d:
+                marks.setdefault(d.hour * 6 + d.minute // 10, []).append(
+                    (d.strftime("%Y-%m-%d"), a.get("camera", "?"), "late first frame"))
+    for bucket, ms in sorted(marks.items()):
+        days = sorted({m[0] for m in ms})
+        if len(days) >= RECUR_MIN_DAYS:
+            hh, mm = divmod(bucket, 6)
+            correlated.append({
+                "kind": "recurring_interruption",
+                "start_local": f"{hh:02d}:{mm * 10:02d}", "end_local": f"{hh:02d}:{mm * 10 + 9:02d}",
+                "days": days, "cameras": sorted({m[1] for m in ms}),
+                "events": len(ms),
+                "detail": f"{len(ms)} interruptions on {len(days)} different days, all between "
+                          f"{hh:02d}:{mm * 10:02d} and {hh:02d}:{mm * 10 + 9:02d} (recorder clock) - "
+                          f"the pattern of a scheduled task such as a camera reboot or a time "
+                          f"sync; not established"})
+
     unindexed = [e for e in events if e["kind"] in ("unindexed", "remnant")]
     for u in unindexed:
         us, ue = parse_local(u["start_local"]), parse_local(u["end_local"])
@@ -220,6 +253,18 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
                                "detail": "footage exists for a period the index has no "
                                          "recording for; which camera it came from is "
                                          "not established"})
+    # A recorder whose clock was never set (or lost it with a flat RTC battery)
+    # stamps footage with its epoch default - 2000-01-01 for DHAV.  That is a
+    # finding about the recorder, and those times say nothing about when the
+    # footage was recorded.
+    for e in events:
+        s0 = parse_local(e["start_local"])
+        if s0 and s0.year <= CLOCK_DEFAULT_YEAR:
+            anomalies.append({"kind": "clock_at_default", "id": e["id"],
+                              "camera": e["camera"],
+                              "detail": f"dated {fmt(s0)} - the recorder's clock was at its "
+                                        f"default (unset, or reset by power loss); this "
+                                        f"footage's real time is unknown"})
     dated = [parse_local(e["start_local"]) for e in events if e["kind"] == "indexed"]
     if dated:
         lo, hi = min(dated), max(dated)

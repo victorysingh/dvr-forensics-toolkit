@@ -18,6 +18,7 @@ pin the parser to what was observed on real media.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -805,6 +806,33 @@ def test_inline_carve(tmp: str) -> None:
         check("inline carve report is written and labelled",
               rep["index_used_for_labels"] and "outside_index" in labels
               and any(l.startswith("CH") for l in labels), str(labels))
+        from report.case import load_case as _lc
+        rows = rep["streams"]
+        out_sel = carver.streams_from_report(rep, label="outside_index")
+        ex_dir = os.path.join(tmp, "inl-tap", "carve", "streams")
+        man = os.path.join(tmp, "inl-tap", "carve", "extracted.json")
+        with BlockDevice(img) as dev:
+            m = carver.extract_from_report(dev, out_sel, ex_dir, man, log=lambda *_: None)
+            direct = {}
+            for s_ in ref:
+                if any(s_.extents[0].offset == r["extents"][0][0] and
+                       r["index_label"] == "outside_index" for r in rows):
+                    sink = io.BytesIO()
+                    carver.write_stream(dev, s_, sink)
+                    direct[s_.extents[0].offset] = sink.getvalue()
+        ok = bool(m["streams"]) and all(v["frames_match"] for v in m["streams"].values())
+        for sid, v in m["streams"].items():
+            with open(os.path.join(ex_dir, sid + ".dav"), "rb") as fh:
+                got_bytes = fh.read()
+            ok = ok and direct[v["extents"][0][0]] == got_bytes
+        check("streams extracted from the report equal a direct carve's output", ok,
+              f"{len(m['streams'])} streams")
+        before = os.path.getmtime(man)
+        with BlockDevice(img) as dev:
+            carver.extract_from_report(dev, out_sel, ex_dir, man, log=lambda *_: None)
+        check("re-running extraction skips finished streams", os.path.getmtime(man) == before)
+        check("the case view lists the extracted files",
+              bool(_lc(os.path.join(tmp, "inl-tap"))["carve"].get("extracted")))
         check("the ledger records the inline carve and still verifies",
               any(e["action"] == "inline_carve_completed" for e in tapped_s.ledger.entries)
               and tapped_s.ledger.verify()["valid"])
@@ -1081,6 +1109,137 @@ def test_short_read(tmp: str) -> None:
         scanner_mod.BlockDevice = saved
 
 
+def test_survey(tmp: str) -> None:
+    """The survey must rediscover a format it was not told about, and must
+    not invent headers in noise."""
+    print("\n[survey of an unknown disk]")
+    import random
+    from detect.survey import diff_blockmaps, survey
+
+    img = os.path.join(tmp, "survey-dahua.img")
+    synth_dahua.build(img, seconds=14, seed=26150)
+    with BlockDevice(img) as dev:
+        r = survey(dev)
+    h = {x["token"]: x for x in r["header_candidates"]}
+    check("the DHAV frame header is found without being named", "DHAV" in h,
+          str(list(h)))
+    if "DHAV" in h:
+        check("its length field is located at +0x0C",
+              h["DHAV"].get("length_field", {}).get("offset") == 0x0C, str(h["DHAV"]))
+        check("its date field is located at +0x10",
+              any(f["offset"] == 0x10 for f in h["DHAV"]["date_fields"]))
+    check("draft signatures are only ever 'candidate'",
+          all(d["validation_status"] == "candidate" for d in r["draft_signatures"]))
+
+    noise = os.path.join(tmp, "survey-noise.img")
+    rng = random.Random(7)
+    with open(noise, "wb") as fh:
+        fh.write(bytes(rng.getrandbits(8) for _ in range(4 << 20)))
+    with BlockDevice(noise) as dev:
+        rn = survey(dev)
+    check("random data yields no candidate headers", not rn["header_candidates"],
+          str([x["token"] for x in rn["header_candidates"]]))
+
+    a = [{"offset": i << 20, "length": 1 << 20, "sha256": f"{i:064x}"} for i in range(10)]
+    b = [dict(x) for x in a]
+    for i in (3, 4, 8):
+        b[i]["sha256"] = "f" * 64
+    d = diff_blockmaps(a, b)
+    check("a block-map diff finds exactly the changed regions",
+          d["blocks_changed"] == 3 and [(g["start"], g["end"]) for g in d["changed_regions"]]
+          == [(3 << 20, 5 << 20), (8 << 20, 9 << 20)], str(d["changed_regions"]))
+
+
+def test_activity(tmp: str) -> None:
+    """Motion activity from frame sizes: a burst is found against its own
+    surroundings, busy hours are not, and it is never called evidence."""
+    print("\n[motion activity from frame sizes]")
+    from analyse.activity import ActivityCounter, ActivityTap
+
+    class Lab:
+        def __init__(self, cam):
+            self.cam = cam
+
+        def label(self, fr):
+            return self.cam
+
+    def minute(h, m):
+        return synth_dahua.pack_date(datetime(2026, 9, 3, h, m, 0))
+
+    from datetime import datetime
+    counters = {}
+    for cam in ("CH01", "CH02"):
+        c = ActivityCounter(Lab(cam))
+        for m in range(180):
+            h, mm = 12 + m // 60, m % 60
+            base = 2000 if m < 90 else 4000         # a busier second half, gradually
+            size_ = base * (8 if (m == 40 or (cam == "CH01" and m == 130)) else 1)
+            for _ in range(150):
+                c.add(dahua.DhavFrame(0, dahua.TYPE_P, 0, size_, minute(h, mm), 0, 0))
+        counters[cam] = c
+    merged = ActivityCounter()
+    for c in counters.values():
+        merged.cells.update(c.cells)
+    r = merged.result()
+    peaks = {(p["camera"], p["minute"][11:]) for p in r["peaks"]}
+    check("a burst is found against its surroundings",
+          ("CH01", "12:40") in peaks and ("CH02", "12:40") in peaks
+          and ("CH01", "14:10") in peaks, str(sorted(peaks)))
+    check("a busier hour on its own is not a peak", len(peaks) == 3, str(sorted(peaks)))
+    check("peaks in the same minute on two cameras are reported together",
+          [x["minute"][11:] for x in r["multi_camera_peaks"]] == ["12:40"])
+    check("the output calls itself a lead, not evidence",
+          r["status"] == "lead, not evidence")
+
+    img = os.path.join(tmp, "act.img")
+    synth_dahua.build(img, seconds=14, seed=26150)
+    sess = ScanSession(img, os.path.join(tmp, "act-scan"),
+                       CaseInfo(case_id="T-ACT", investigator="test"),
+                       block_size=1 << 20, quiet=True, taps=[ActivityTap()])
+    sess.run()
+    check("the activity tap runs inside the scan and is ledgered",
+          os.path.exists(os.path.join(tmp, "act-scan", "activity.json"))
+          and any(e["action"] == "inline_activity_completed" for e in sess.ledger.entries))
+
+
+def test_timeline_clock_default() -> None:
+    print("\n[timeline: recorder clock at its default]")
+    from analyse.timeline import ClockModel, build
+    rec = {"id": "carve-00001", "camera_id": "UNKNOWN", "offset": 0, "length": 0,
+           "confidence": 0.5, "duration_s": 60,
+           "timestamps": [{"source": "container", "raw_value": "0x0 = 2000-01-01 00:03:10 recorder-local"},
+                          {"source": "container", "raw_value": "0x0 = 2000-01-01 00:04:10 recorder-local"}]}
+    t = build(None, {"streams": [{"index_label": "outside_index", "recording": rec,
+                                  "extents": []}]}, ClockModel())
+    check("footage dated at the DHAV epoch is flagged as an unset clock",
+          any(a["kind"] == "clock_at_default" for a in t["anomalies"]))
+
+
+def test_timeline_recurring() -> None:
+    print("\n[timeline: recurring interruptions]")
+    from analyse.timeline import ClockModel, build
+
+    def rec(i, cam, s, e):
+        return {"id": f"r{i}", "camera_id": cam, "offset": 0, "length": 0, "confidence": 0.9,
+                "timestamps": [{"source": "index", "raw_value": f"0x0 = {s} recorder-local"},
+                               {"source": "index", "raw_value": f"0x0 = {e} recorder-local"}]}
+    recs = []
+    n = 0
+    for day in (1, 2, 3, 4):
+        for cam in ("CH01", "CH02"):
+            # one camera drops for a minute at 02:00 on days 1, 3 and 4
+            if cam == "CH01" and day in (1, 3, 4):
+                recs.append(rec(n, cam, f"2026-09-0{day} 00:00:00", f"2026-09-0{day} 02:00:10"))
+                recs.append(rec(n + 1, cam, f"2026-09-0{day} 02:01:30", f"2026-09-0{day} 23:59:59"))
+            else:
+                recs.append(rec(n, cam, f"2026-09-0{day} 00:00:00", f"2026-09-0{day} 23:59:59"))
+            n += 2
+    t = build({"recordings": recs}, None, ClockModel())
+    r = [c for c in t["correlations"] if c["kind"] == "recurring_interruption"]
+    check("a gap at the same time on three days is reported as a pattern",
+          len(r) == 1 and r[0]["start_local"] == "02:00" and len(r[0]["days"]) == 3, str(r))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1102,6 +1261,10 @@ def main() -> int:
         test_plugins(tmp)
         test_device_loss(tmp)
         test_short_read(tmp)
+        test_survey(tmp)
+        test_activity(tmp)
+        test_timeline_clock_default()
+        test_timeline_recurring()
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

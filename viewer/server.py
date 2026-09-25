@@ -1,4 +1,8 @@
-"""Local web UI - standard library only, bound to 127.0.0.1.
+"""Dependency-free case viewer - standard library only, bound to 127.0.0.1.
+
+This is the fallback viewer that runs on a bare Python install.  The
+planned product UI (docs/TECH_STACK.md: FastAPI in api/, React in ui/)
+wraps the same seam: report/case.py::load_case.
 
 The UI is a viewer.  It reads what the pipeline wrote and never touches an
 evidence device: there is no route that opens a block device, and nothing
@@ -35,9 +39,9 @@ ONBOARDING = [
     {"step": "Carve", "what": "Vendor-agnostic recovery: DHAV today, raw H.264/H.265 next - "
                               "footage out before any parser exists.",
      "tool": "scan --carve", "state": "built (DHAV)"},
-    {"step": "Survey", "what": "Recurring magic strings, record strides, timestamp candidates "
-                               "and a before/after image diff, to draft the layout.",
-     "tool": "survey", "state": "planned"},
+    {"step": "Survey", "what": "Recurring headers, self-describing length fields, date fields, "
+                               "codec and strings from samples; a before/after block-map diff.",
+     "tool": "survey", "state": "built"},
     {"step": "Plugin", "what": "One file in plugins/: signatures + a parser on the SDK. Loaded "
                                "automatically; cannot open a device for writing.",
      "tool": "plugins/*.py", "state": "built"},
@@ -95,6 +99,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(409, b"acquisition not complete - no report yet",
                                       "text/plain")
                 return self._send(200, render(case).encode(), "text/html; charset=utf-8")
+            if path.startswith("/thumb/"):
+                # /thumb/<case>/<file>: analytics thumbnails only, by basename
+                parts = path[len("/thumb/"):].split("/")
+                d = _case_dir(self.out_root, parts[0]) if len(parts) == 2 else None
+                f = os.path.join(d, "analytics", "thumbnails",
+                                 os.path.basename(unquote(parts[1]))) if d else ""
+                if f and f.endswith(".jpg") and os.path.isfile(f):
+                    with open(f, "rb") as fh:
+                        return self._send(200, fh.read(), "image/jpeg")
+                return self._send(404, b"not found", "text/plain")
             name = "index.html" if path in ("/", "") else os.path.basename(path)
             f = os.path.join(STATIC, name)
             if os.path.isfile(f):

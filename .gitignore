@@ -9,3 +9,5 @@ out/
 *.img
 # fixtures are regenerable from a seed - never committed
 .DS_Store
+# analytics models are fetched and hash-checked, not committed (see analytics/README.md)
+analytics/models/*.onnx

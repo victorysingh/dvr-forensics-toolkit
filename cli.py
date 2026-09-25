@@ -40,13 +40,22 @@ def cmd_devices(args) -> int:
     is_win = sys.platform == "win32"
     privilege = "Administrator" if is_win else "root"
     print(f"{BANNER} - attached block devices\n")
-    if not is_admin():
-        print(f"!! Not running as {privilege}. Raw device reads will be denied.")
-        print(f"   {'Relaunch elevated' if is_win else 'Re-run under sudo'} to acquire.\n")
     drives = list_physical_drives(args.max_index)
     if not drives:
         print("No physical drives enumerated.")
         return 1
+    system = set()
+    if not is_win:
+        from acquire.device import mounted_disks
+        system = mounted_disks()
+    if not is_admin():
+        readable = [d["path"] for d in drives if d.get("path") not in system
+                    and not is_win and os.access(d["path"], os.R_OK)]
+        if readable:
+            print(f"   Not {privilege}; readable through an ACL: {', '.join(readable)}\n")
+        else:
+            print(f"!! Not running as {privilege}. Raw device reads will be denied.")
+            print(f"   {'Relaunch elevated' if is_win else 'Re-run under sudo, or grant a read-only ACL (writeblock-rule --user)'} to acquire.\n")
     print(f"{'idx':<4} {'path':<20} {'size':>10}  {'bus':<6} {'sect':>5} "
           f"{'wblock':<8} model / serial")
     print("-" * 94)
@@ -58,7 +67,9 @@ def cmd_devices(args) -> int:
         # On Linux the kernel tells us whether the device is genuinely
         # read-only. On Windows there is no such flag - the read-only handle
         # is the block - so we say "handle" rather than implying more.
-        if "read_only" in d:
+        if d["path"] in system:
+            wb = "system"                  # holds a mounted filesystem: this workstation
+        elif "read_only" in d:
             wb = "RO(kernel)" if d["read_only"] else "RW !!"
         else:
             wb = "handle"
@@ -66,7 +77,8 @@ def cmd_devices(args) -> int:
               f"{d['bus_type']:<6} {d['sector_size']:>5} {wb:<8} "
               f"{d['model']} {('/ ' + d['serial']) if d['serial'] else ''}")
 
-    if any(d.get("read_only") is False and d.get("bus_type") == "USB" for d in drives):
+    if any(d.get("read_only") is False and d.get("bus_type") == "USB"
+           and d["path"] not in system for d in drives):
         print("\n!! A USB device is writable (RW). Before acquiring, write-block it:")
         print("     sudo blockdev --setro /dev/sdX && blockdev --getro /dev/sdX")
     print("\nNote: a DVR drive usually shows NO recognisable partitions - the whole")
@@ -87,6 +99,9 @@ def cmd_scan(args) -> int:
     if args.carve:
         from recover.carver import CarveTap
         taps.append(CarveTap(tz_offset_min=args.tz_offset))
+    if args.activity:
+        from analyse.activity import ActivityTap
+        taps.append(ActivityTap())
     session = ScanSession(args.device, out_dir, case,
                           block_size=args.block_size * 1024 * 1024,
                           resume=args.resume, taps=taps,
@@ -281,6 +296,18 @@ def cmd_parse(args) -> int:
             "errors": result.errors,
         }, path)
         print(f"\n[+] {path}")
+        ledger_path = os.path.join(args.out, "custody_ledger.jsonl")
+        if os.path.exists(ledger_path):
+            from core.hashing import sha256_file
+            ledger = CustodyLedger(ledger_path)
+            ledger.actor = ledger.entries[0].get("actor", "unknown")
+            ledger.case_id = ledger.entries[0].get("case_id", "")
+            ledger.append("filesystem_parsed", {
+                "report": os.path.basename(path), "vendor": result.vendor,
+                "recordings": len(result.recordings), "remnants": len(remnants),
+                "validation_status": result.validation_status,
+                "write_block_method": info.write_block_method},
+                data_hash=sha256_file(path))
     return 0
 
 
@@ -695,34 +722,272 @@ def cmd_report(args) -> int:
 
 def cmd_serve(args) -> int:
     """Start the local web UI (loopback only, read-only viewer)."""
-    from ui.server import serve
+    from viewer.server import serve
     serve(args.out, args.port)
     return 0
 
 
 def cmd_writeblock_rule(args) -> int:
     """Print a udev rule that keeps one drive write-blocked across reconnects."""
-    from acquire.device import udev_properties, udev_writeblock_rule
+    from acquire.device import (udev_properties, udev_writeblock_rule,
+                                usb_ids_of_mounted_disks)
 
     serial = args.serial
-    if not serial and args.device:
+    if not serial and args.device and not args.usb_id:
         serial = udev_properties(args.device).get("ID_SERIAL_SHORT", "")
         if not serial:
-            print(f"[!] udev reports no drive serial for {args.device} - pass --serial")
+            print(f"[!] udev reports no drive serial for {args.device} - pass --serial, "
+                  f"or --usb-id to cover every disk behind the evidence adapter")
             return 1
+    if args.usb_id and args.usb_id.lower() in usb_ids_of_mounted_disks():
+        print(f"[!] refusing: USB adapter {args.usb_id} holds a MOUNTED filesystem on this "
+              f"workstation - a rule for it would make the workstation's own disk read-only")
+        return 1
     try:
-        rule = udev_writeblock_rule(serial, args.user)
+        rule = udev_writeblock_rule(serial, args.user, args.usb_id)
     except ValueError as exc:
         print(f"[!] {exc}")
         return 1
+    key = serial or args.usb_id.replace(":", "-")
+    flag = f"--serial {serial}" if serial else f"--usb-id {args.usb_id}"
     print(rule, end="")
     print(f"\n# install (runtime only, cleared at reboot):\n"
           f"#   sudo mkdir -p /run/udev/rules.d\n"
-          f"#   python cli.py writeblock-rule --serial {serial}"
+          f"#   python cli.py writeblock-rule {flag}"
           f"{' --user ' + args.user if args.user else ''} | "
-          f"sudo tee /run/udev/rules.d/70-ps26150-writeblock-{serial}.rules\n"
+          f"sudo tee /run/udev/rules.d/70-ps26150-writeblock-{key}.rules\n"
           f"#   sudo udevadm control --reload\n"
           f"#   sudo udevadm test /sys/block/<name> 2>&1 | grep setro   # confirm it matches")
+    return 0
+
+
+def cmd_extract_carved(args) -> int:
+    """Save carved streams as files, from the scan's carve report."""
+    import shutil
+    from acquire.device import DeviceLost
+    from core.hashing import sha256_file
+    from recover import carver
+
+    rpath = os.path.join(args.out, "carve", "carve_report.json")
+    if not os.path.exists(rpath):
+        print(f"[!] no carve report in {args.out} - run `scan --carve` first")
+        return 1
+    with open(rpath, "r", encoding="utf-8") as fh:
+        report = json.load(fh)
+    ids = set(args.ids.split(",")) if args.ids else None
+    label = None if args.label == "all" else args.label
+    streams = carver.streams_from_report(report, label=label, ids=ids)
+    need = sum(e.length for s in streams for e in s.extents)
+    out_dir = os.path.join(args.out, "carve", "streams")
+    os.makedirs(out_dir, exist_ok=True)
+    free = shutil.disk_usage(out_dir).free
+    print(f"{BANNER} - extract carved streams\n")
+    print(f"  selected      {len(streams)} stream(s), label {args.label}"
+          f"{', ids ' + args.ids if args.ids else ''}")
+    print(f"  size          up to {human_size(need * 2)} (.dav + bare video); "
+          f"{human_size(free)} free")
+    if need * 2 > free - (5 << 30):
+        print("[!] not enough free space (keeping 5 GB spare) - narrow the selection "
+              "with --ids or --label")
+        return 1
+    manifest_path = os.path.join(args.out, "carve", "extracted.json")
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            print(f"  device        {dev.path}  ({info.write_block_method})\n")
+            if dev.size_bytes != report.get("source_bytes"):
+                print(f"[!] {dev.path} is {dev.size_bytes} bytes; the carve was of a "
+                      f"{report.get('source_bytes')}-byte device - wrong drive?")
+                return 1
+            m = carver.extract_from_report(dev, streams, out_dir, manifest_path)
+    except DeviceLost as exc:
+        print(f"\n[!] {exc}\n    finished streams are kept; re-run with the drive's new "
+              f"device path to continue")
+        return 3
+    except PermissionNeeded as exc:
+        print(f"[!] {exc}")
+        return 2
+    except DeviceError as exc:
+        print(f"[!] {exc}")
+        return 1
+    m.update({"source_device": info.path, "write_block_method": info.write_block_method,
+              "carve_report_sha256": sha256_file(rpath)})
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        json.dump(m, fh, indent=2)
+    bad = [k for k, v in m["streams"].items() if not v["frames_match"]]
+    total = sum(f["bytes"] for v in m["streams"].values() for f in v["files"].values())
+    print(f"\n  [+] {len(m['streams'])} stream(s), {human_size(total)} in {out_dir}")
+    if bad:
+        print(f"  [!] {len(bad)} stream(s) wrote a different frame count than the carve "
+              f"recorded: {', '.join(bad[:10])}")
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("carved_streams_extracted", {
+            "manifest": "carve/extracted.json", "streams": len(m["streams"]),
+            "bytes": total, "frame_count_mismatches": bad,
+            "write_block_method": info.write_block_method},
+            data_hash=sha256_file(manifest_path))
+        print("  manifest SHA-256 recorded in the custody ledger")
+    return 0 if not bad else 1
+
+
+def cmd_survey(args) -> int:
+    """Draft the layout of an unknown disk: headers, length and date fields."""
+    from detect.survey import diff_blockmaps, sample_offsets, survey
+
+    if args.diff:
+        a, b = args.diff
+        maps = []
+        for d in (a, b):
+            path = d if d.endswith(".jsonl") else os.path.join(d, "blockmap.jsonl")
+            with open(path, "r", encoding="utf-8") as fh:
+                maps.append([json.loads(l) for l in fh if l.strip()])
+        r = diff_blockmaps(*maps)
+        print(f"{BANNER} - block-map diff\n")
+        print(f"  compared      {r['blocks_compared']:,} blocks of {human_size(r['block_size'])}")
+        print(f"  changed       {r['blocks_changed']:,} blocks in {len(r['changed_regions'])} region(s)")
+        for g in r["changed_regions"][:args.limit]:
+            print(f"    0x{g['start']:>12X} - 0x{g['end']:>12X}  {human_size(g['bytes']):>10}")
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(r, fh, indent=2)
+            print(f"\n[+] {args.json}")
+        return 0
+    if not args.device:
+        print("[!] --device, or --diff A B")
+        return 1
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            offs = sample_offsets(dev.size_bytes, n=args.samples)
+            print(f"{BANNER} - survey\n")
+            print(f"  device        {dev.path}  ({human_size(dev.size_bytes)}, "
+                  f"{info.write_block_method})")
+            print(f"  sampling      {len(offs)} x 1 MiB spread over the disk")
+            r = survey(dev, offsets=offs)
+    except PermissionNeeded as exc:
+        print(f"[!] {exc}")
+        return 2
+    except DeviceError as exc:
+        print(f"[!] {exc}")
+        return 1
+    st = r["structure"]
+    print(f"  structure     " + ", ".join(f"{k} {v}" for k, v in sorted(st.items())))
+    c = r["codec"]
+    print(f"  codec         {c['likely'] or 'none seen'} ({c['start_codes']:,} start codes, "
+          f"{c['hevc_ps']} HEVC / {c['sps']} H.264 parameter sets)")
+    print(f"  known vendors " + (", ".join(f"{k} ({v})" for k, v in r["known_signatures"].items())
+                                 or "none"))
+    print(f"\n--- candidate headers {'-' * 37}")
+    for h in r["header_candidates"]:
+        line = f"  {h['token']}  x{h['occurrences_sampled']:<6} in {h['samples_with_token']} samples"
+        if h.get("length_field"):
+            lf = h["length_field"]
+            line += f"  length u32 @+0x{lf['offset']:X} ({lf['matches_distance_to_next']:.0%})"
+        if h.get("date_fields"):
+            df = h["date_fields"][0]
+            line += f"  date @+0x{df['offset']:X} {df['encoding']}"
+            if h.get("date_note"):
+                line += " (ambiguous: another encoding fits too)"
+        print(line)
+    if not r["header_candidates"]:
+        print("  none - try more samples, or the data may be encrypted/compressed")
+    print(f"\n--- strings {'-' * 47}")
+    for x in r["strings"][:args.limit]:
+        print(f"  {x['count']:6d}  {x['text']}")
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump(r, fh, indent=2)
+        print(f"\n[+] {args.json}")
+    print("\n  leads for a researcher, not a format: draft signatures are 'candidate'")
+    return 0
+
+
+def cmd_activity(args) -> int:
+    """Motion activity per camera per minute from compressed frame sizes."""
+    from analyse.activity import ActivityTap
+    from core.hashing import DEFAULT_BLOCK_SIZE
+
+    tap = ActivityTap()
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            print(f"{BANNER} - motion activity (lead, not evidence)\n")
+            print(f"  device        {dev.path}  ({human_size(dev.size_bytes)}, "
+                  f"{info.write_block_method})")
+            if dev.is_raw:
+                print("  note          this reads the whole device; on a live drive, "
+                      "prefer `scan --activity` in the acquisition pass")
+            tap.prepare(dev, 0, dev.size_bytes, log=lambda m: print("  " + m.lstrip("[*] ")))
+            for off, data, err in dev.read_blocks(DEFAULT_BLOCK_SIZE):
+                tap.feed(off, data)
+            res = tap.finish(args.out, info)
+    except PermissionNeeded as exc:
+        print(f"[!] {exc}")
+        return 2
+    except DeviceError as exc:
+        print(f"[!] {exc}")
+        return 1
+    with open(os.path.join(args.out, "activity.json"), "r", encoding="utf-8") as fh:
+        r = json.load(fh)
+    for cam, v in r["cameras"].items():
+        print(f"  {cam:<14} {v['minutes']:6d} minutes, median "
+              f"{human_size(v['median_p_bytes_per_minute'])}/min of P-frames")
+    print(f"  peaks         {len(r['peaks'])} camera-minutes at >= {r['peak_factor']}x the "
+          f"surrounding {r['local_window_min']} min either side; "
+          f"{len(r['multi_camera_peaks'])} minutes with peaks on several cameras")
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("activity_measured", res, data_hash=res["sha256"])
+    print(f"\n[+] {os.path.join(args.out, 'activity.json')}  - a lead for review, not evidence")
+    return 0
+
+
+def cmd_analyse_video(args) -> int:
+    """Optional layer: faces and objects in extracted clips (lead, not evidence)."""
+    import glob
+    try:
+        from analytics.detect import run
+    except ImportError as exc:
+        print(f"[!] the optional analytics layer is not installed ({exc}).")
+        print("    It needs ffmpeg, numpy and onnxruntime - see analytics/README.md.")
+        print("    The forensic core does not need it.")
+        return 2
+    from core.hashing import sha256_file
+
+    src = os.path.join(args.out, "carve", "streams")
+    clips = sorted(glob.glob(os.path.join(src, "*.h265")) + glob.glob(os.path.join(src, "*.h264")))
+    if args.ids:
+        want = set(args.ids.split(","))
+        clips = [c for c in clips if os.path.splitext(os.path.basename(c))[0] in want]
+    if not clips:
+        print(f"[!] no extracted clips in {src} - run `extract-carved` first")
+        return 1
+    out_dir = os.path.join(args.out, "analytics")
+    print(f"{BANNER} - video analytics (lead, not evidence)\n")
+    print(f"  clips         {len(clips)} from {src}, sampled at {args.fps} fps")
+    try:
+        r = run(clips, out_dir, fps=args.fps, log=print)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    tot = r["frames_with_totals"]
+    print(f"\n  frames with   " + (", ".join(f"{k} {v}" for k, v in sorted(tot.items())) or "no detections"))
+    path = os.path.join(out_dir, "analytics.json")
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("video_analytics_run", {
+            "report": "analytics/analytics.json", "clips": len(clips), "fps": args.fps,
+            "models": {k: v["sha256"] for k, v in r["models"].items()},
+            "frames_with": tot, "status": "lead, not evidence"},
+            data_hash=sha256_file(path))
+    print(f"\n[+] {path}\n  every detection is a lead for review; face DETECTION, never identification")
     return 0
 
 
@@ -775,6 +1040,8 @@ def main() -> int:
     p.add_argument("--resume", action="store_true")
     p.add_argument("--carve", action="store_true",
                    help="also carve DHAV streams in the same pass (no second read)")
+    p.add_argument("--activity", action="store_true",
+                   help="also measure motion activity from frame sizes (lead, not evidence)")
     p.add_argument("--tz-offset", type=int, default=None,
                    help="recorder zone in minutes east of UTC, for carved timestamps")
     p.add_argument("--reconnect-wait", type=float, default=30,
@@ -849,9 +1116,43 @@ def main() -> int:
     p = sub.add_parser("writeblock-rule",
                        help="print a udev rule that write-blocks a drive across reconnects")
     p.add_argument("--serial", default="", help="drive serial (ID_SERIAL_SHORT)")
+    p.add_argument("--usb-id", default="",
+                   help="or every disk behind this evidence adapter, vvvv:pppp")
     p.add_argument("--device", default="", help="or read the serial from this node")
     p.add_argument("--user", default="", help="also grant this user READ-only access")
     p.set_defaults(func=cmd_writeblock_rule)
+
+    p = sub.add_parser("extract-carved",
+                       help="save carved streams as files, from the scan's carve report")
+    p.add_argument("--device", required=True)
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--label", default="outside_index",
+                   help="index label to extract: outside_index (default), CH01.., "
+                        "mixed-evidence, or all")
+    p.add_argument("--ids", default="", help="comma-separated stream ids instead")
+    p.set_defaults(func=cmd_extract_carved)
+
+    p = sub.add_parser("survey", help="draft the layout of an unknown disk, or diff two scans")
+    p.add_argument("--device", default="")
+    p.add_argument("--samples", type=int, default=64, help="1 MiB samples between the ends")
+    p.add_argument("--diff", nargs=2, metavar=("A", "B"),
+                   help="compare two scans' block maps (case dirs or blockmap.jsonl)")
+    p.add_argument("--json", default="", help="write the full result here")
+    p.add_argument("--limit", type=int, default=15)
+    p.set_defaults(func=cmd_survey)
+
+    p = sub.add_parser("activity",
+                       help="motion activity per camera per minute from frame sizes")
+    p.add_argument("--device", required=True)
+    p.add_argument("--out", required=True, help="case directory")
+    p.set_defaults(func=cmd_activity)
+
+    p = sub.add_parser("analyse-video",
+                       help="optional: faces and objects in extracted clips (lead, not evidence)")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--fps", type=float, default=1.0, help="frames analysed per second of video")
+    p.add_argument("--ids", default="", help="comma-separated clip ids (default: all extracted)")
+    p.set_defaults(func=cmd_analyse_video)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)

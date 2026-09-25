@@ -222,6 +222,17 @@ def render(case: dict, examiner_notes: str = "") -> str:
                     r["timestamps"][0]["raw_value"].split(" = ", 1)[-1] if r.get("timestamps") else "",
                     hms(r.get("duration_s"))]
                    for r in c["outside_index"][:100]]))
+        ex = (c.get("extracted") or {}).get("streams", {})
+        if ex:
+            add("<h3>Recovered footage saved as files</h3>")
+            add("<p>Each stream's frames were copied out from its own disk extents, "
+                "re-validated frame by frame, and hashed. <code>.dav</code> keeps the "
+                "recorder's container; the second file is the bare video stream.</p>")
+            add(table(["Stream", "Label", "Frames", "File", "Size", "SHA-256"],
+                      [[k, v["label"], f"{v['frames_written']:,}" +
+                        ("" if v["frames_match"] else f" (carve: {v['frames_carved']:,})"),
+                        fname, size(f["bytes"]), mono(f["sha256"])]
+                       for k, v in sorted(ex.items()) for fname, f in v["files"].items()]))
         if c["outside_total"] > 100:
             add(f"<p class='muted'>&hellip; {c['outside_total'] - 100} more in the carve report "
                 f"(SHA-256 {e(c['sha256'])}).</p>")
@@ -253,6 +264,50 @@ def render(case: dict, examiner_notes: str = "") -> str:
                        for x in t["anomalies"][:200]]))
         for n in t.get("notes", []):
             add(f"<p class='muted'>&bull; {e(n)}</p>")
+
+    a = case.get("activity")
+    if a:
+        add("<h2>6a. Motion activity — lead, not evidence</h2>")
+        add("<div class='box warn'>Computed from compressed frame sizes (P-frame bytes per "
+            "camera per minute); no video was decoded. P-frames also grow with low-light "
+            "noise, lighting changes, infrared switching, rain and camera shake. A peak "
+            "marks footage worth reviewing. It is <b>not</b> evidence that anything "
+            "happened.</div>")
+        add(table(["Camera", "Minutes", "Median P-frame bytes / minute"],
+                  [[k, v["minutes"], size(v["median_p_bytes_per_minute"])]
+                   for k, v in sorted(a["cameras"].items())]))
+        if a["multi_camera_peaks"]:
+            add("<h3>Minutes with peaks on several cameras</h3><p class='muted'>Seen from "
+                "several viewpoints at once — or a recorder-wide cause such as a lighting "
+                "or infrared change. Stated as a coincidence, not an explanation.</p>")
+            add(table(["Minute (recorder clock)", "Cameras", "Local index"],
+                      [[x["minute"], ", ".join(x["cameras"]),
+                        ", ".join(f"{k} {v:.1f}x" for k, v in x["local_indices"].items())]
+                       for x in a["multi_camera_peaks"][:50]]))
+        add(f"<h3>Strongest peaks ({a['peaks_total']} camera-minutes at "
+            f"&ge; {a['peak_factor']}x the surrounding hour)</h3>")
+        add(table(["Camera", "Minute (recorder clock)", "Local index", "vs whole period"],
+                  [[p["camera"], p["minute"], f"{p['local_index']:.1f}x",
+                    f"{p['index']:.1f}x" if p.get("index") is not None else "-"]
+                   for p in a["peaks"][:25]]))
+
+    an = case.get("analytics")
+    if an:
+        add("<h2>6b. Video analytics — leads, not evidence</h2>")
+        add("<div class='box warn'>Optional layer, run on extracted clips: face "
+            "<b>detection</b> (no identification — there is no face recognition in this "
+            "tool) and object detection. Scores are the models' own confidence, not the "
+            "probability a detection is correct. Each row is a moment to review in the "
+            "footage itself.</div>")
+        add(table(["Model", "Licence", "SHA-256"],
+                  [[m["name"], m["license"], mono(m["sha256"])] for m in an["models"].values()]))
+        add(f"<p>{an['clips']} clips, {an['frames_analysed']:,} frames analysed. Frames with: "
+            + (", ".join(f"{e(k)} {v}" for k, v in sorted(an["totals"].items())) or "none")
+            + ".</p>")
+        add(table(["Clip", "Offset in clip (s)", "Detections"],
+                  [[h["clip"], h["t_s"], ", ".join(f"{d['label']} {d['score']:.2f}"
+                                                  for d in h["detections"])]
+                   for h in an["top"][:30]]))
 
     # -- custody ---------------------------------------------------------
     add("<h2>7. Chain of custody</h2>")
@@ -289,6 +344,12 @@ def render(case: dict, examiner_notes: str = "") -> str:
             inputs[case[k].get("file", k)] = case[k]["sha256"]
     if pr:
         inputs["preserved/manifest.json"] = pr["manifest_sha256"]
+    if c and c.get("extracted"):
+        inputs["carve/extracted.json"] = c["extracted"]["sha256"]
+    if a:
+        inputs["activity.json"] = a["sha256"]
+    if an:
+        inputs["analytics/analytics.json"] = an["sha256"]
     add(table(["File", "SHA-256"], [[k, mono(v)] for k, v in inputs.items()]))
     add("<footer>Section 63 (Bharatiya Sakshya Adhiniyam, 2023) certificate: the prescribed "
         "format is being confirmed and is not generated by this version.</footer>")
