@@ -145,6 +145,18 @@ OTHER_OEMS = [
         weight=4.0,
     ),
     Signature(
+        id="cpplus.osd_title",
+        vendor="CP Plus",
+        pattern=b"CPPlusIPCam",
+        description="default channel title in the TEXT block of DHAV auxiliary "
+                    "(0xF1) frames - on-platter evidence of CP Plus cameras. A user "
+                    "can rename channels, so absence proves nothing",
+        source="observed: ST1000VX013 s/n WWD4A3NX (CP Plus unit), 17,557 occurrences "
+               "in the first 20 GiB, found by detect/survey.py",
+        validation_status=SPEC_ONLY,
+        weight=4.0,
+    ),
+    Signature(
         id="tplink.brand",
         vendor="TP-Link",
         pattern=b"TP-LINK",

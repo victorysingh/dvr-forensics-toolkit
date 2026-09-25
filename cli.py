@@ -40,13 +40,22 @@ def cmd_devices(args) -> int:
     is_win = sys.platform == "win32"
     privilege = "Administrator" if is_win else "root"
     print(f"{BANNER} - attached block devices\n")
-    if not is_admin():
-        print(f"!! Not running as {privilege}. Raw device reads will be denied.")
-        print(f"   {'Relaunch elevated' if is_win else 'Re-run under sudo'} to acquire.\n")
     drives = list_physical_drives(args.max_index)
     if not drives:
         print("No physical drives enumerated.")
         return 1
+    system = set()
+    if not is_win:
+        from acquire.device import mounted_disks
+        system = mounted_disks()
+    if not is_admin():
+        readable = [d["path"] for d in drives if d.get("path") not in system
+                    and not is_win and os.access(d["path"], os.R_OK)]
+        if readable:
+            print(f"   Not {privilege}; readable through an ACL: {', '.join(readable)}\n")
+        else:
+            print(f"!! Not running as {privilege}. Raw device reads will be denied.")
+            print(f"   {'Relaunch elevated' if is_win else 'Re-run under sudo, or grant a read-only ACL (writeblock-rule --user)'} to acquire.\n")
     print(f"{'idx':<4} {'path':<20} {'size':>10}  {'bus':<6} {'sect':>5} "
           f"{'wblock':<8} model / serial")
     print("-" * 94)
@@ -58,7 +67,9 @@ def cmd_devices(args) -> int:
         # On Linux the kernel tells us whether the device is genuinely
         # read-only. On Windows there is no such flag - the read-only handle
         # is the block - so we say "handle" rather than implying more.
-        if "read_only" in d:
+        if d["path"] in system:
+            wb = "system"                  # holds a mounted filesystem: this workstation
+        elif "read_only" in d:
             wb = "RO(kernel)" if d["read_only"] else "RW !!"
         else:
             wb = "handle"
@@ -66,7 +77,8 @@ def cmd_devices(args) -> int:
               f"{d['bus_type']:<6} {d['sector_size']:>5} {wb:<8} "
               f"{d['model']} {('/ ' + d['serial']) if d['serial'] else ''}")
 
-    if any(d.get("read_only") is False and d.get("bus_type") == "USB" for d in drives):
+    if any(d.get("read_only") is False and d.get("bus_type") == "USB"
+           and d["path"] not in system for d in drives):
         print("\n!! A USB device is writable (RW). Before acquiring, write-block it:")
         print("     sudo blockdev --setro /dev/sdX && blockdev --getro /dev/sdX")
     print("\nNote: a DVR drive usually shows NO recognisable partitions - the whole")
@@ -707,32 +719,40 @@ def cmd_report(args) -> int:
 
 def cmd_serve(args) -> int:
     """Start the local web UI (loopback only, read-only viewer)."""
-    from ui.server import serve
+    from viewer.server import serve
     serve(args.out, args.port)
     return 0
 
 
 def cmd_writeblock_rule(args) -> int:
     """Print a udev rule that keeps one drive write-blocked across reconnects."""
-    from acquire.device import udev_properties, udev_writeblock_rule
+    from acquire.device import (udev_properties, udev_writeblock_rule,
+                                usb_ids_of_mounted_disks)
 
     serial = args.serial
-    if not serial and args.device:
+    if not serial and args.device and not args.usb_id:
         serial = udev_properties(args.device).get("ID_SERIAL_SHORT", "")
         if not serial:
-            print(f"[!] udev reports no drive serial for {args.device} - pass --serial")
+            print(f"[!] udev reports no drive serial for {args.device} - pass --serial, "
+                  f"or --usb-id to cover every disk behind the evidence adapter")
             return 1
+    if args.usb_id and args.usb_id.lower() in usb_ids_of_mounted_disks():
+        print(f"[!] refusing: USB adapter {args.usb_id} holds a MOUNTED filesystem on this "
+              f"workstation - a rule for it would make the workstation's own disk read-only")
+        return 1
     try:
-        rule = udev_writeblock_rule(serial, args.user)
+        rule = udev_writeblock_rule(serial, args.user, args.usb_id)
     except ValueError as exc:
         print(f"[!] {exc}")
         return 1
+    key = serial or args.usb_id.replace(":", "-")
+    flag = f"--serial {serial}" if serial else f"--usb-id {args.usb_id}"
     print(rule, end="")
     print(f"\n# install (runtime only, cleared at reboot):\n"
           f"#   sudo mkdir -p /run/udev/rules.d\n"
-          f"#   python cli.py writeblock-rule --serial {serial}"
+          f"#   python cli.py writeblock-rule {flag}"
           f"{' --user ' + args.user if args.user else ''} | "
-          f"sudo tee /run/udev/rules.d/70-ps26150-writeblock-{serial}.rules\n"
+          f"sudo tee /run/udev/rules.d/70-ps26150-writeblock-{key}.rules\n"
           f"#   sudo udevadm control --reload\n"
           f"#   sudo udevadm test /sys/block/<name> 2>&1 | grep setro   # confirm it matches")
     return 0
@@ -808,6 +828,78 @@ def cmd_extract_carved(args) -> int:
             data_hash=sha256_file(manifest_path))
         print("  manifest SHA-256 recorded in the custody ledger")
     return 0 if not bad else 1
+
+
+def cmd_survey(args) -> int:
+    """Draft the layout of an unknown disk: headers, length and date fields."""
+    from detect.survey import diff_blockmaps, sample_offsets, survey
+
+    if args.diff:
+        a, b = args.diff
+        maps = []
+        for d in (a, b):
+            path = d if d.endswith(".jsonl") else os.path.join(d, "blockmap.jsonl")
+            with open(path, "r", encoding="utf-8") as fh:
+                maps.append([json.loads(l) for l in fh if l.strip()])
+        r = diff_blockmaps(*maps)
+        print(f"{BANNER} - block-map diff\n")
+        print(f"  compared      {r['blocks_compared']:,} blocks of {human_size(r['block_size'])}")
+        print(f"  changed       {r['blocks_changed']:,} blocks in {len(r['changed_regions'])} region(s)")
+        for g in r["changed_regions"][:args.limit]:
+            print(f"    0x{g['start']:>12X} - 0x{g['end']:>12X}  {human_size(g['bytes']):>10}")
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(r, fh, indent=2)
+            print(f"\n[+] {args.json}")
+        return 0
+    if not args.device:
+        print("[!] --device, or --diff A B")
+        return 1
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            offs = sample_offsets(dev.size_bytes, n=args.samples)
+            print(f"{BANNER} - survey\n")
+            print(f"  device        {dev.path}  ({human_size(dev.size_bytes)}, "
+                  f"{info.write_block_method})")
+            print(f"  sampling      {len(offs)} x 1 MiB spread over the disk")
+            r = survey(dev, offsets=offs)
+    except PermissionNeeded as exc:
+        print(f"[!] {exc}")
+        return 2
+    except DeviceError as exc:
+        print(f"[!] {exc}")
+        return 1
+    st = r["structure"]
+    print(f"  structure     " + ", ".join(f"{k} {v}" for k, v in sorted(st.items())))
+    c = r["codec"]
+    print(f"  codec         {c['likely'] or 'none seen'} ({c['start_codes']:,} start codes, "
+          f"{c['hevc_ps']} HEVC / {c['sps']} H.264 parameter sets)")
+    print(f"  known vendors " + (", ".join(f"{k} ({v})" for k, v in r["known_signatures"].items())
+                                 or "none"))
+    print(f"\n--- candidate headers {'-' * 37}")
+    for h in r["header_candidates"]:
+        line = f"  {h['token']}  x{h['occurrences_sampled']:<6} in {h['samples_with_token']} samples"
+        if h.get("length_field"):
+            lf = h["length_field"]
+            line += f"  length u32 @+0x{lf['offset']:X} ({lf['matches_distance_to_next']:.0%})"
+        if h.get("date_fields"):
+            df = h["date_fields"][0]
+            line += f"  date @+0x{df['offset']:X} {df['encoding']}"
+            if h.get("date_note"):
+                line += " (ambiguous: another encoding fits too)"
+        print(line)
+    if not r["header_candidates"]:
+        print("  none - try more samples, or the data may be encrypted/compressed")
+    print(f"\n--- strings {'-' * 47}")
+    for x in r["strings"][:args.limit]:
+        print(f"  {x['count']:6d}  {x['text']}")
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump(r, fh, indent=2)
+        print(f"\n[+] {args.json}")
+    print("\n  leads for a researcher, not a format: draft signatures are 'candidate'")
+    return 0
 
 
 def cmd_prove(args) -> int:
@@ -933,6 +1025,8 @@ def main() -> int:
     p = sub.add_parser("writeblock-rule",
                        help="print a udev rule that write-blocks a drive across reconnects")
     p.add_argument("--serial", default="", help="drive serial (ID_SERIAL_SHORT)")
+    p.add_argument("--usb-id", default="",
+                   help="or every disk behind this evidence adapter, vvvv:pppp")
     p.add_argument("--device", default="", help="or read the serial from this node")
     p.add_argument("--user", default="", help="also grant this user READ-only access")
     p.set_defaults(func=cmd_writeblock_rule)
@@ -946,6 +1040,15 @@ def main() -> int:
                         "mixed-evidence, or all")
     p.add_argument("--ids", default="", help="comma-separated stream ids instead")
     p.set_defaults(func=cmd_extract_carved)
+
+    p = sub.add_parser("survey", help="draft the layout of an unknown disk, or diff two scans")
+    p.add_argument("--device", default="")
+    p.add_argument("--samples", type=int, default=64, help="1 MiB samples between the ends")
+    p.add_argument("--diff", nargs=2, metavar=("A", "B"),
+                   help="compare two scans' block maps (case dirs or blockmap.jsonl)")
+    p.add_argument("--json", default="", help="write the full result here")
+    p.add_argument("--limit", type=int, default=15)
+    p.set_defaults(func=cmd_survey)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)

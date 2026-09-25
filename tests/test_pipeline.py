@@ -1109,6 +1109,47 @@ def test_short_read(tmp: str) -> None:
         scanner_mod.BlockDevice = saved
 
 
+def test_survey(tmp: str) -> None:
+    """The survey must rediscover a format it was not told about, and must
+    not invent headers in noise."""
+    print("\n[survey of an unknown disk]")
+    import random
+    from detect.survey import diff_blockmaps, survey
+
+    img = os.path.join(tmp, "survey-dahua.img")
+    synth_dahua.build(img, seconds=14, seed=26150)
+    with BlockDevice(img) as dev:
+        r = survey(dev)
+    h = {x["token"]: x for x in r["header_candidates"]}
+    check("the DHAV frame header is found without being named", "DHAV" in h,
+          str(list(h)))
+    if "DHAV" in h:
+        check("its length field is located at +0x0C",
+              h["DHAV"].get("length_field", {}).get("offset") == 0x0C, str(h["DHAV"]))
+        check("its date field is located at +0x10",
+              any(f["offset"] == 0x10 for f in h["DHAV"]["date_fields"]))
+    check("draft signatures are only ever 'candidate'",
+          all(d["validation_status"] == "candidate" for d in r["draft_signatures"]))
+
+    noise = os.path.join(tmp, "survey-noise.img")
+    rng = random.Random(7)
+    with open(noise, "wb") as fh:
+        fh.write(bytes(rng.getrandbits(8) for _ in range(4 << 20)))
+    with BlockDevice(noise) as dev:
+        rn = survey(dev)
+    check("random data yields no candidate headers", not rn["header_candidates"],
+          str([x["token"] for x in rn["header_candidates"]]))
+
+    a = [{"offset": i << 20, "length": 1 << 20, "sha256": f"{i:064x}"} for i in range(10)]
+    b = [dict(x) for x in a]
+    for i in (3, 4, 8):
+        b[i]["sha256"] = "f" * 64
+    d = diff_blockmaps(a, b)
+    check("a block-map diff finds exactly the changed regions",
+          d["blocks_changed"] == 3 and [(g["start"], g["end"]) for g in d["changed_regions"]]
+          == [(3 << 20, 5 << 20), (8 << 20, 9 << 20)], str(d["changed_regions"]))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1130,6 +1171,7 @@ def main() -> int:
         test_plugins(tmp)
         test_device_loss(tmp)
         test_short_read(tmp)
+        test_survey(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
