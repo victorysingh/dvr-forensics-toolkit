@@ -99,6 +99,9 @@ def cmd_scan(args) -> int:
     if args.carve:
         from recover.carver import CarveTap
         taps.append(CarveTap(tz_offset_min=args.tz_offset))
+    if args.activity:
+        from analyse.activity import ActivityTap
+        taps.append(ActivityTap())
     session = ScanSession(args.device, out_dir, case,
                           block_size=args.block_size * 1024 * 1024,
                           resume=args.resume, taps=taps,
@@ -902,6 +905,48 @@ def cmd_survey(args) -> int:
     return 0
 
 
+def cmd_activity(args) -> int:
+    """Motion activity per camera per minute from compressed frame sizes."""
+    from analyse.activity import ActivityTap
+    from core.hashing import DEFAULT_BLOCK_SIZE
+
+    tap = ActivityTap()
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            print(f"{BANNER} - motion activity (lead, not evidence)\n")
+            print(f"  device        {dev.path}  ({human_size(dev.size_bytes)}, "
+                  f"{info.write_block_method})")
+            if dev.is_raw:
+                print("  note          this reads the whole device; on a live drive, "
+                      "prefer `scan --activity` in the acquisition pass")
+            tap.prepare(dev, 0, dev.size_bytes, log=lambda m: print("  " + m.lstrip("[*] ")))
+            for off, data, err in dev.read_blocks(DEFAULT_BLOCK_SIZE):
+                tap.feed(off, data)
+            res = tap.finish(args.out, info)
+    except PermissionNeeded as exc:
+        print(f"[!] {exc}")
+        return 2
+    except DeviceError as exc:
+        print(f"[!] {exc}")
+        return 1
+    with open(os.path.join(args.out, "activity.json"), "r", encoding="utf-8") as fh:
+        r = json.load(fh)
+    for cam, v in r["cameras"].items():
+        print(f"  {cam:<14} {v['minutes']:6d} minutes, median "
+              f"{human_size(v['median_p_bytes_per_minute'])}/min of P-frames")
+    print(f"  peaks         {len(r['peaks'])} camera-minutes at >= {r['peak_factor']}x the "
+          f"surrounding {r['local_window_min']} min either side; "
+          f"{len(r['multi_camera_peaks'])} minutes with peaks on several cameras")
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("activity_measured", res, data_hash=res["sha256"])
+    print(f"\n[+] {os.path.join(args.out, 'activity.json')}  - a lead for review, not evidence")
+    return 0
+
+
 def cmd_prove(args) -> int:
     """Produce a Merkle inclusion proof for the block containing an offset.
 
@@ -951,6 +996,8 @@ def main() -> int:
     p.add_argument("--resume", action="store_true")
     p.add_argument("--carve", action="store_true",
                    help="also carve DHAV streams in the same pass (no second read)")
+    p.add_argument("--activity", action="store_true",
+                   help="also measure motion activity from frame sizes (lead, not evidence)")
     p.add_argument("--tz-offset", type=int, default=None,
                    help="recorder zone in minutes east of UTC, for carved timestamps")
     p.add_argument("--reconnect-wait", type=float, default=30,
@@ -1049,6 +1096,12 @@ def main() -> int:
     p.add_argument("--json", default="", help="write the full result here")
     p.add_argument("--limit", type=int, default=15)
     p.set_defaults(func=cmd_survey)
+
+    p = sub.add_parser("activity",
+                       help="motion activity per camera per minute from frame sizes")
+    p.add_argument("--device", required=True)
+    p.add_argument("--out", required=True, help="case directory")
+    p.set_defaults(func=cmd_activity)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)

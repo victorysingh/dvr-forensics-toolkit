@@ -50,6 +50,7 @@ flowchart LR
 | Recovery | `recover/carver.py` | Indexless DHAV carve: streams by byte contiguity and stream continuity; splits rather than guesses |
 | | `recover/preserve.py` | Filesystem metadata kept as whole scan blocks, provable to the Merkle root |
 | Analysis | `analyse/timeline.py` | Recorder clock → UTC on stated inputs; gaps; cross-camera correlation |
+| | `analyse/activity.py` | Motion activity from P-frame sizes per camera per minute — a tap or a standalone pass; a lead, not evidence |
 | Reporting | `report/` | One case view (`load_case`) for everything that presents a case; HTML + JSON report |
 | Presentation | `viewer/` | Dependency-free local viewer over `load_case` |
 | CLI | `cli.py` | Every capability; nothing is UI-only |
@@ -163,7 +164,7 @@ against the hashes taken at acquisition.
 | Recorder timestamps stay recorder-local unless the zone and clock error are stated, and the rule used is printed | `analyse/timeline.py::ClockModel` |
 | Gaps are "no indexed footage", never "deleted"; carved footage outside the index has no camera | `analyse/timeline.py`, `recover/carver.py` |
 | High-entropy regions are "detected, not parsed", never "encrypted" | `detect/engine.py` |
-| AI output, when added, is a lead, not evidence | planned `analytics/` |
+| Analytics are leads, not evidence — motion activity says so in its output, report and viewer | `analyse/activity.py` |
 
 ---
 

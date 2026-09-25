@@ -1150,6 +1150,58 @@ def test_survey(tmp: str) -> None:
           == [(3 << 20, 5 << 20), (8 << 20, 9 << 20)], str(d["changed_regions"]))
 
 
+def test_activity(tmp: str) -> None:
+    """Motion activity from frame sizes: a burst is found against its own
+    surroundings, busy hours are not, and it is never called evidence."""
+    print("\n[motion activity from frame sizes]")
+    from analyse.activity import ActivityCounter, ActivityTap
+
+    class Lab:
+        def __init__(self, cam):
+            self.cam = cam
+
+        def label(self, fr):
+            return self.cam
+
+    def minute(h, m):
+        return synth_dahua.pack_date(datetime(2026, 9, 3, h, m, 0))
+
+    from datetime import datetime
+    counters = {}
+    for cam in ("CH01", "CH02"):
+        c = ActivityCounter(Lab(cam))
+        for m in range(180):
+            h, mm = 12 + m // 60, m % 60
+            base = 2000 if m < 90 else 4000         # a busier second half, gradually
+            size_ = base * (8 if (m == 40 or (cam == "CH01" and m == 130)) else 1)
+            for _ in range(150):
+                c.add(dahua.DhavFrame(0, dahua.TYPE_P, 0, size_, minute(h, mm), 0, 0))
+        counters[cam] = c
+    merged = ActivityCounter()
+    for c in counters.values():
+        merged.cells.update(c.cells)
+    r = merged.result()
+    peaks = {(p["camera"], p["minute"][11:]) for p in r["peaks"]}
+    check("a burst is found against its surroundings",
+          ("CH01", "12:40") in peaks and ("CH02", "12:40") in peaks
+          and ("CH01", "14:10") in peaks, str(sorted(peaks)))
+    check("a busier hour on its own is not a peak", len(peaks) == 3, str(sorted(peaks)))
+    check("peaks in the same minute on two cameras are reported together",
+          [x["minute"][11:] for x in r["multi_camera_peaks"]] == ["12:40"])
+    check("the output calls itself a lead, not evidence",
+          r["status"] == "lead, not evidence")
+
+    img = os.path.join(tmp, "act.img")
+    synth_dahua.build(img, seconds=14, seed=26150)
+    sess = ScanSession(img, os.path.join(tmp, "act-scan"),
+                       CaseInfo(case_id="T-ACT", investigator="test"),
+                       block_size=1 << 20, quiet=True, taps=[ActivityTap()])
+    sess.run()
+    check("the activity tap runs inside the scan and is ledgered",
+          os.path.exists(os.path.join(tmp, "act-scan", "activity.json"))
+          and any(e["action"] == "inline_activity_completed" for e in sess.ledger.entries))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1172,6 +1224,7 @@ def main() -> int:
         test_device_loss(tmp)
         test_short_read(tmp)
         test_survey(tmp)
+        test_activity(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

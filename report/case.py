@@ -185,6 +185,19 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
         case["timeline"]["sha256"] = _hashed(j("timeline.json"))
         case["timeline"]["events"] = t.get("events", [])[:2000]
 
+    act = _load(j("activity.json"))
+    if act:
+        case["activity"] = {
+            "sha256": _hashed(j("activity.json")), "rule": act.get("rule"),
+            "status": act.get("status"), "notes": act.get("notes", []),
+            "peak_factor": act.get("peak_factor"),
+            "cameras": {k: {"minutes": v["minutes"],
+                            "median_p_bytes_per_minute": v["median_p_bytes_per_minute"]}
+                        for k, v in act.get("cameras", {}).items()},
+            "peaks": sorted(act.get("peaks", []), key=lambda p: -p["local_index"])[:200],
+            "peaks_total": len(act.get("peaks", [])),
+            "multi_camera_peaks": act.get("multi_camera_peaks", [])[:200]}
+
     case["vendors"] = vendor_matrix((scan or {}).get("detections"))
     case["files"] = {n: _hashed(j(n)) for n in ("scan_report.json", "blockmap.jsonl",
                                                 "custody_ledger.jsonl")

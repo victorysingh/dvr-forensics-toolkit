@@ -54,7 +54,7 @@ python cli.py survey --device unknown.img    # draft the layout of an unknown ve
 python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, preserved blocks
 python cli.py prove  --out out/CASE-001 --offset 8388608
 
-python tests/test_pipeline.py               # 226 regression tests, no hardware
+python tests/test_pipeline.py               # 231 regression tests, no hardware
 python demo/tamper_demo.py                  # 2-minute stage demo
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
@@ -109,7 +109,8 @@ demo/      tamper_demo.py
 | Report (HTML + JSON) and local UI | working |
 | Drop-in vendor plugins | working |
 | Unknown-vendor survey | working |
-| Video decode, AI analytics | not started (optional add-on) |
+| Motion activity from frame sizes (lead, not evidence) | working |
+| Video decode, face/object detection | not started (optional layer) |
 | BSA s.63 certificate, CASE/UCO export | not started |
 
 Nothing is `validated`: that needs a byte-match between recovered footage and

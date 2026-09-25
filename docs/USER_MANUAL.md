@@ -23,7 +23,8 @@ to it:
   inputs you state;
 - writes a report and keeps a hash-chained chain of custody.
 
-It does **not** yet: decode video to MP4, run face/object detection, read the
+It measures motion activity from compressed frame sizes (§3.4a) as a lead for
+review. It does **not** yet: decode video to MP4, run face/object detection, read the
 on-screen clock, sign reports, or generate the BSA s.63 certificate. Nothing
 it produces is labelled `validated` — see §6.
 
@@ -122,6 +123,21 @@ python cli.py verify   --out out/CASE-001                          # again, now 
   Without `--tz-offset`, no UTC is asserted at all.
 - To reassemble one indexed recording rather than carved footage:
   `python cli.py extract --device /dev/sdX --vendor Dahua --recording dhfs-v1-c002120 --out clips/`.
+
+### 3.4a Motion activity (a lead, not evidence)
+
+```bash
+python cli.py activity --device image.dd --out out/CASE-001    # over an image
+# or, on a live drive, in the acquisition pass itself:  scan ... --carve --activity
+```
+
+P-frame bytes per camera per minute, from the frame headers — no video is
+decoded. A peak is a minute at 3x or more the median of the 30 minutes either
+side on that camera; minutes where several cameras peak together are listed
+separately. Low-light noise, lighting or infrared changes, rain and camera
+shake also produce peaks: on the CP Plus drive the strongest cluster is every
+camera at once around dusk. Use it to decide what footage to watch first,
+never as a finding.
 
 ### 3.5 Look at the results
 
