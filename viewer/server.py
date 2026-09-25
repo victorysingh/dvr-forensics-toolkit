@@ -99,6 +99,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(409, b"acquisition not complete - no report yet",
                                       "text/plain")
                 return self._send(200, render(case).encode(), "text/html; charset=utf-8")
+            if path.startswith("/thumb/"):
+                # /thumb/<case>/<file>: analytics thumbnails only, by basename
+                parts = path[len("/thumb/"):].split("/")
+                d = _case_dir(self.out_root, parts[0]) if len(parts) == 2 else None
+                f = os.path.join(d, "analytics", "thumbnails",
+                                 os.path.basename(unquote(parts[1]))) if d else ""
+                if f and f.endswith(".jpg") and os.path.isfile(f):
+                    with open(f, "rb") as fh:
+                        return self._send(200, fh.read(), "image/jpeg")
+                return self._send(404, b"not found", "text/plain")
             name = "index.html" if path in ("/", "") else os.path.basename(path)
             f = os.path.join(STATIC, name)
             if os.path.isfile(f):

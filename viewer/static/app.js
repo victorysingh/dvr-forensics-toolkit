@@ -194,6 +194,15 @@ function viewRec() {
         [`<code>${esc(r.id)}</code>`, `<code>${hex(r.offset)}</code>`, r.frame_count.toLocaleString(), esc(localOf(r.timestamps[0])),
           esc(localOf(r.timestamps[1])), hms(r.duration_s), r.confidence.toFixed(2)]), true);
   }
+  const an = state.case?.analytics;
+  if (an) {
+    h += `<h2>Faces and objects in recovered clips <span class="pill s-synthetic_only">lead, not evidence</span></h2>
+      <div class="note warn">Face <b>detection</b> only — nobody is identified. Scores are the models' own confidence. Each item is a moment to review in the footage.</div>
+      <p class="muted">${an.clips} clips, ${an.frames_analysed.toLocaleString()} frames analysed · frames with: ${Object.entries(an.totals).map(([k, v]) => `${esc(k)} ${v}`).join(", ") || "none"}</p>`;
+    if (an.thumbnails.length) {
+      h += `<div class="grid">${an.thumbnails.map((t) => `<div class="card"><img src="/thumb/${encodeURIComponent(state.case.id)}/${encodeURIComponent(t.file)}" alt="${esc(t.clip)} at ${t.t_s}s" style="width:100%;border-radius:6px"><p class="muted">${esc(t.clip)} · ${t.t_s}s</p></div>`).join("")}</div>`;
+    }
+  }
   if (p?.remnants_total) {
     h += `<h2>Remnants in reused clusters (${p.remnants_total})</h2><div class="note">Older footage found by the index-guided parser at the tail of clusters since reassigned to a newer recording.</div>` +
       table(["ID", "Offset", "Frames", "First frame (recorder clock)", "Duration"], p.remnants.map((r) =>

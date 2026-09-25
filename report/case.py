@@ -198,6 +198,20 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
             "peaks_total": len(act.get("peaks", [])),
             "multi_camera_peaks": act.get("multi_camera_peaks", [])[:200]}
 
+    an = _load(j("analytics", "analytics.json"))
+    if an:
+        hits = [dict(h, clip=c["clip"]) for c in an.get("clips", []) for h in c["detections"]]
+        hits.sort(key=lambda h: -max(d["score"] for d in h["detections"]))
+        case["analytics"] = {
+            "sha256": _hashed(j("analytics", "analytics.json")), "status": an.get("status"),
+            "models": an.get("models"), "thresholds": an.get("thresholds"),
+            "notes": an.get("notes", []), "totals": an.get("frames_with_totals", {}),
+            "clips": len(an.get("clips", [])),
+            "frames_analysed": sum(c["frames_analysed"] for c in an.get("clips", [])),
+            "top": hits[:100],
+            "thumbnails": [dict(t, clip=c["clip"]) for c in an.get("clips", [])
+                           for t in c.get("thumbnails", [])][:60]}
+
     case["vendors"] = vendor_matrix((scan or {}).get("detections"))
     case["files"] = {n: _hashed(j(n)) for n in ("scan_report.json", "blockmap.jsonl",
                                                 "custody_ledger.jsonl")

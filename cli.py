@@ -947,6 +947,50 @@ def cmd_activity(args) -> int:
     return 0
 
 
+def cmd_analyse_video(args) -> int:
+    """Optional layer: faces and objects in extracted clips (lead, not evidence)."""
+    import glob
+    try:
+        from analytics.detect import run
+    except ImportError as exc:
+        print(f"[!] the optional analytics layer is not installed ({exc}).")
+        print("    It needs ffmpeg, numpy and onnxruntime - see analytics/README.md.")
+        print("    The forensic core does not need it.")
+        return 2
+    from core.hashing import sha256_file
+
+    src = os.path.join(args.out, "carve", "streams")
+    clips = sorted(glob.glob(os.path.join(src, "*.h265")) + glob.glob(os.path.join(src, "*.h264")))
+    if args.ids:
+        want = set(args.ids.split(","))
+        clips = [c for c in clips if os.path.splitext(os.path.basename(c))[0] in want]
+    if not clips:
+        print(f"[!] no extracted clips in {src} - run `extract-carved` first")
+        return 1
+    out_dir = os.path.join(args.out, "analytics")
+    print(f"{BANNER} - video analytics (lead, not evidence)\n")
+    print(f"  clips         {len(clips)} from {src}, sampled at {args.fps} fps")
+    try:
+        r = run(clips, out_dir, fps=args.fps, log=print)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    tot = r["frames_with_totals"]
+    print(f"\n  frames with   " + (", ".join(f"{k} {v}" for k, v in sorted(tot.items())) or "no detections"))
+    path = os.path.join(out_dir, "analytics.json")
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("video_analytics_run", {
+            "report": "analytics/analytics.json", "clips": len(clips), "fps": args.fps,
+            "models": {k: v["sha256"] for k, v in r["models"].items()},
+            "frames_with": tot, "status": "lead, not evidence"},
+            data_hash=sha256_file(path))
+    print(f"\n[+] {path}\n  every detection is a lead for review; face DETECTION, never identification")
+    return 0
+
+
 def cmd_prove(args) -> int:
     """Produce a Merkle inclusion proof for the block containing an offset.
 
@@ -1102,6 +1146,13 @@ def main() -> int:
     p.add_argument("--device", required=True)
     p.add_argument("--out", required=True, help="case directory")
     p.set_defaults(func=cmd_activity)
+
+    p = sub.add_parser("analyse-video",
+                       help="optional: faces and objects in extracted clips (lead, not evidence)")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--fps", type=float, default=1.0, help="frames analysed per second of video")
+    p.add_argument("--ids", default="", help="comma-separated clip ids (default: all extracted)")
+    p.set_defaults(func=cmd_analyse_video)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)

@@ -25,6 +25,7 @@ Two different things are validated here, and they must not be confused:
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 4 independent reads over 2 days is identical, apart from one block corrupted by a since-fixed bug |
+| Analytics (optional) | runs on recovered clips; detections reviewed by eye as plausible leads; no accuracy claimed |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts |
@@ -175,15 +176,44 @@ the same hashes continued from the first unhashed byte. Recorded as
 | Hashes with the carve tap on vs off | synthetic | identical |
 | `extract-carved`, outside-index footage | real, 20 GiB | 49 streams, 42,638 frames, 209 MB; every frame count equals the carve's |
 | Extracted H.265 structure | real | Annex-B; VPS/SPS/PPS and an IDR repeating, P-frames between |
-| Extracted H.265 playback | real | **not verified** — no decoder on the workstation |
+| Extracted H.265 decode (ffmpeg 8.1.2) | real, 20 GiB | HEVC Main, 1920×1080. 13,706 of 20,773 video frames decode (66%). 4,980 precede their stream's first surviving keyframe — the keyframe was overwritten, so they cannot decode alone; the other 2,087 most likely follow a reference frame lost mid-stream (not yet verified). 4 streams have no keyframe at all |
 | Full drive: carve labels, extraction | real, 1 TB | **PENDING** |
 
 ## 8. Timestamps
+
+**Decoding checked against the picture itself.** Cameras burn their own
+clock into the image. For carved stream `carve-00000` (footage no index
+accounts for), decoded frame 100 shows **01/05/2026 01:20:26 PM** on screen.
+That frame's own DHAV header (video frame 101; the decoder starts at the
+first keyframe, frame 1) decodes to **2026-05-01 13:20:26**. Two independent
+clocks — the one burned into the image and the one in the container — agree
+to the second, which confirms the packed-date decoding (and that the
+on-screen format is DD/MM/YYYY). It also dates this recovered footage to 1 May 2026 —
+over four months before anything the index still describes.
 
 Index start vs first-frame date for the 42 recordings with footage in the
 first 20 GiB: within 2 s for 40, 3 s and 5 s for the other two. Both are the
 recorder's own clock; the zone is unknown and no clock-error reading was
 taken at seizure, so the timeline asserts no UTC.
+
+The same frame carries the camera's title, **"Parking"**, burned into the
+image. Reading it (on-screen text OCR, planned in `TECH_STACK.md`) is a route
+to attributing carved footage to a camera, which the frame headers cannot.
+
+## 8a. Analytics (optional layer — leads, not evidence)
+
+Run on the 45 decodable outside-index clips of the 20 GiB image at 1 frame
+per second (UltraFace RFB-320 and SSD-MobileNet v1, hashes pinned):
+frames with a person 5, with a car 3, faces 0. Two thumbnails reviewed by
+eye: the strongest person detection (0.61) boxes a figure standing beside an
+auto-rickshaw — plausibly correct; a car detection (0.50) marks a small
+distant red object at the end of a road — possibly a vehicle, too small to
+confirm. All scores sit near the thresholds, which is why the output is a
+list of moments to watch and nothing more. These clips' on-screen clocks read
+**9 August 2026** — a month before anything the index describes — and the
+cameras' burned-in titles are *Parking*, *Road View 1* and *Road View 2*.
+
+No systematic accuracy measurement has been made; none is claimed.
 
 ## 9. Vendor format status
 
@@ -202,7 +232,7 @@ here with both files' SHA-256.
 ## 10. Open items
 
 - Full-drive results (§1, §5, §7) — PENDING.
-- Playback of extracted video with a decoder.
+- Why 2,087 frames after a keyframe still do not decode (suspected: a lost reference frame).
 - A native export for the validation in §9.
 - Hikvision drive acquisition and parser check.
 - Kaitai `.ksy` compiled and checked against the image.
