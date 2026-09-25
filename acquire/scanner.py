@@ -230,7 +230,7 @@ class ScanSession:
                     self.tap_results[tap.name] = res
                     self.ledger.append(f"inline_{tap.name}_completed", res,
                                        data_hash=res.get("sha256", ""))
-                    self._log(f"[+] {tap.name:<8} {json.dumps(res.get('labels', {}))}")
+                    self._log(f"[+] {tap.name:<8} " + json.dumps({k: v for k, v in res.items() if k not in ("report", "sha256")}))
                 except Exception as exc:                 # noqa: BLE001
                     self._tap_failed(tap, "finish", exc)
 

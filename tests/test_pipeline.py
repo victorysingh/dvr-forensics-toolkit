@@ -1240,6 +1240,123 @@ def test_timeline_recurring() -> None:
           len(r) == 1 and r[0]["start_local"] == "02:00" and len(r[0]["days"]) == 3, str(r))
 
 
+def _ps_recording(rng, t0, seconds: int, scr0: int) -> bytes:
+    """A synthetic Hikvision-style Program Stream: one pack + stream map per
+    second (keyframe), 24 more packs of video per second."""
+    def pack_header(scr):
+        b = bytearray(14)
+        b[0:4] = b"\x00\x00\x01\xba"
+        b[4] = 0x44 | ((scr >> 30) & 0x07) << 3 | ((scr >> 28) & 0x03)
+        b[5] = (scr >> 20) & 0xFF
+        b[6] = ((scr >> 15) & 0x1F) << 3 | 0x04 | ((scr >> 13) & 0x03)
+        b[7] = (scr >> 5) & 0xFF
+        b[8] = (scr & 0x1F) << 3 | 0x04
+        b[9], b[10], b[11], b[12], b[13] = 0x01, 0x89, 0xC3, 0xF8, 0xF8
+        return bytes(b)
+
+    def pes(sid, payload):
+        return b"\x00\x00\x01" + bytes([sid]) + struct.pack(">H", len(payload)) + payload
+
+    def psm(t):
+        v = (t.month << 28) | (t.day << 23) | (t.hour << 18) | (t.minute << 12) | (t.second << 6) | 32
+        hk = b"\x40\x0e" + b"HK\x01\x00" + bytes([t.year - 2000]) + v.to_bytes(4, "big") + b"\x00\xff\xff\xff"
+        es = b"\x1b\xe0\x00\x00"
+        body = b"\xf8\xff" + struct.pack(">H", len(hk)) + hk + struct.pack(">H", len(es)) + es + b"\x00\x00\x00\x00"
+        return pes(0xBC, body)
+
+    from datetime import timedelta
+    out = bytearray()
+    scr = scr0
+    for sec in range(seconds):
+        for f in range(25):
+            pkt = pack_header(scr)
+            if f == 0:
+                pkt += psm(t0 + timedelta(seconds=sec))
+            pkt += pes(0xE0, bytes(rng.getrandbits(8) for _ in range(rng.randint(200, 900))))
+            out += pkt
+            scr += 3600                                  # 25 fps at 90 kHz
+    return bytes(out)
+
+
+def test_ps_carver(tmp: str) -> None:
+    """MPEG-PS footage carved by structure: exact extents, split at a clock
+    jump, dates from the HK descriptor, no false streams from noise."""
+    print("\n[MPEG-PS carver]")
+    import random
+    from datetime import datetime
+    from recover import pscarve
+
+    rng = random.Random(3)
+    noise = bytes(rng.getrandbits(8) for _ in range(300_000))
+    fake = b"\x00\x00\x01\xba" + bytes(40)                 # a pack header going nowhere
+    a = _ps_recording(rng, datetime(2021, 4, 23, 7, 40, 7), 6, 1_000_000)
+    b = _ps_recording(rng, datetime(2021, 4, 25, 18, 2, 0), 4, 90_000_000)  # clock jump
+    img_bytes = noise[:100_000] + fake + noise[:50_000] + a + b + fake + noise
+    img = os.path.join(tmp, "ps.img")
+    with open(img, "wb") as fh:
+        fh.write(img_bytes)
+    a_at = 100_000 + len(fake) + 50_000
+
+    with BlockDevice(img) as dev:
+        streams, stats = pscarve.carve(dev)
+        rows = [x.to_row() for x in streams]
+        check("two recordings found, split at the clock jump", len(rows) == 2
+              and stats["scr_splits"] == 1, str(stats))
+        check("extents are exact", len(rows) == 2 and rows[0]["extents"] == [[a_at, len(a)]]
+              and rows[1]["extents"] == [[a_at + len(a), len(b)]], str([r["extents"] for r in rows]))
+        check("recorder time decoded from the HK descriptor",
+              len(rows) == 2 and rows[0]["time_first_local"] == "2021-04-23 07:40:07"
+              and rows[0]["time_last_local"] == "2021-04-23 07:40:12"
+              and rows[1]["time_first_local"] == "2021-04-25 18:02:00")
+        check("stream type read from the stream map",
+              rows and rows[0]["streams"][0]["type"] == "h264")
+        feeder, c = pscarve.PackFeeder(0), pscarve.PsCarver()
+        for off, data, _ in dev.read_blocks(65_536):
+            for p in feeder.push(off, data):
+                c.add(p)
+        for p in feeder.close():
+            c.add(p)
+        fed, _ = c.finish()
+        check("block-fed carve equals a device carve",
+              [x.extents for x in fed] == [x.extents for x in streams])
+        m = pscarve.extract(dev, rows, os.path.join(tmp, "ps-out"),
+                            os.path.join(tmp, "ps-out", "m.json"), log=lambda *_: None)
+    with open(os.path.join(tmp, "ps-out", "ps-00000.ps"), "rb") as fh:
+        check("an extracted stream is the original bytes, unmodified", fh.read() == a)
+
+    sess = ScanSession(img, os.path.join(tmp, "ps-scan"),
+                       CaseInfo(case_id="T-PS", investigator="test"),
+                       block_size=1 << 16, quiet=True, taps=[pscarve.PsCarveTap()])
+    rep = sess.run()
+    plain = ScanSession(img, os.path.join(tmp, "ps-plain"),
+                        CaseInfo(case_id="T-PS", investigator="test"),
+                        block_size=1 << 16, quiet=True).run()
+    hv = lambda r: sorted((h.algorithm, h.value) for h in r.hashes)
+    with open(os.path.join(tmp, "ps-scan", "carve", "ps_report.json"), encoding="utf-8") as fh:
+        pr = json.load(fh)
+    check("the PS tap finds the same streams inside the scan, hashes unchanged",
+          hv(rep) == hv(plain) and [r["extents"] for r in pr["streams"]] == [r["extents"] for r in rows])
+
+
+def test_static_detections() -> None:
+    """A detection that never moves (a steel pot taken for a face, on real
+    footage) is flagged static and not counted; a moving one is not."""
+    print("\n[analytics: static detections]")
+    from analytics.static import flag_static
+    hits = []
+    for i in range(20):
+        dets = [{"label": "face", "score": 0.85, "box": [0.56, 0.41, 0.62, 0.50]}]
+        if i % 4 == 0:                                  # a person crossing the frame
+            x = 0.05 * i
+            dets.append({"label": "person", "score": 0.7, "box": [x, 0.3, x + 0.1, 0.8]})
+        hits.append({"t_s": i * 5, "detections": dets})
+    flag_static(hits, 20)
+    faces = [d for h in hits for d in h["detections"] if d["label"] == "face"]
+    people = [d for h in hits for d in h["detections"] if d["label"] == "person"]
+    check("a detection fixed in place through the clip is static", all(d["static"] for d in faces))
+    check("a moving detection is not static", not any(d["static"] for d in people))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1265,6 +1382,8 @@ def main() -> int:
         test_activity(tmp)
         test_timeline_clock_default()
         test_timeline_recurring()
+        test_ps_carver(tmp)
+        test_static_detections()
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

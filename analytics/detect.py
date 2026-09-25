@@ -29,6 +29,8 @@ from typing import Optional
 import numpy as np
 import onnxruntime as ort
 
+from analytics.static import STATIC_IOU, STATIC_MIN_FRAMES, STATIC_SHARE, flag_static
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS = {
     "face": {"file": "ultraface_rfb320.onnx",
@@ -82,7 +84,8 @@ def decode(path: str, fps: float, codec: str = "hevc"):
     """Yield (seconds from the first decoded frame, RGB frame) at `fps`."""
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg not found - install it to use the analytics layer")
-    cmd = ["ffmpeg", "-v", "quiet", "-f", codec, "-i", path,
+    fmt = ["-f", codec] if codec else []          # PS: let ffmpeg detect the container
+    cmd = ["ffmpeg", "-v", "quiet", *fmt, "-i", path,
            "-vf", f"fps={fps},scale={DECODE_W}:{DECODE_H}",
            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     n = DECODE_W * DECODE_H * 3
@@ -168,16 +171,24 @@ def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
         dets = faces(models["face"], rgb) + objects(models["objects"], rgb)
         if dets:
             hits.append({"t_s": round(t, 2), "detections": dets, "_rgb": rgb})
+    flag_static(hits, frames)
     counts: dict[str, int] = {}
+    static: dict[str, int] = {}
     for h in hits:
-        for label in {d["label"] for d in h["detections"]}:
+        for label in {d["label"] for d in h["detections"] if not d["static"]}:
             counts[label] = counts.get(label, 0) + 1
-    # thumbnails for the strongest frames, one per distinct second
-    hits.sort(key=lambda h: -max(d["score"] for d in h["detections"]))
+        for label in {d["label"] for d in h["detections"] if d["static"]}:
+            static[label] = static.get(label, 0) + 1
+    # thumbnails for the strongest frames with something that is not static
+    hits = [h for h in hits if any(not d["static"] for d in h["detections"])] + \
+        [h for h in hits if all(d["static"] for d in h["detections"])]
+    moving = [h for h in hits if any(not d["static"] for d in h["detections"])]
+    moving.sort(key=lambda h: -max(d["score"] for d in h["detections"] if not d["static"]))
+    hits = moving + [h for h in hits if h not in moving]
     thumbs = []
     if thumbs_dir:
         os.makedirs(thumbs_dir, exist_ok=True)
-        for h in hits[:max_thumbs]:
+        for h in moving[:max_thumbs]:
             name = f"{os.path.splitext(os.path.basename(path))[0]}_t{h['t_s']:07.1f}.jpg"
             _thumbnail(h["_rgb"], h["detections"], os.path.join(thumbs_dir, name))
             thumbs.append({"file": name, "t_s": h["t_s"],
@@ -187,7 +198,8 @@ def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
     hits.sort(key=lambda h: h["t_s"])
     return {"clip": os.path.basename(path), "clip_sha256": sha256_file(path),
             "frames_analysed": frames, "sample_fps": fps,
-            "frames_with": counts, "detections": hits, "thumbnails": thumbs}
+            "frames_with": counts, "static_frames": static,
+            "detections": hits, "thumbnails": thumbs}
 
 
 def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print) -> dict:
@@ -195,21 +207,27 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print) -> dict:
     thumbs = os.path.join(out_dir, "thumbnails")
     results = []
     for i, c in enumerate(clips):
-        codec = "h264" if c.endswith(".h264") else "hevc"
+        codec = "h264" if c.endswith(".h264") else ("" if c.endswith(".ps") else "hevc")
         r = analyse_clip(models, c, fps, thumbs, codec=codec)
         results.append(r)
         log(f"  [{i + 1}/{len(clips)}] {r['clip']}  {r['frames_analysed']} frames  "
             + (", ".join(f"{k} {v}" for k, v in sorted(r["frames_with"].items())) or "nothing"))
     totals: dict[str, int] = {}
+    static_totals: dict[str, int] = {}
     for r in results:
         for k, v in r["frames_with"].items():
             totals[k] = totals.get(k, 0) + v
+        for k, v in r["static_frames"].items():
+            static_totals[k] = static_totals.get(k, 0) + v
     out = {
         "rule": ANALYTICS_RULE, "status": "lead, not evidence",
         "models": {k: {x: m[x] for x in ("name", "source", "license", "sha256")}
                    for k, m in MODELS.items()},
         "thresholds": {"face": FACE_MIN, "objects": OBJECT_MIN},
         "sample_fps": fps, "clips": results, "frames_with_totals": totals,
+        "static_totals": static_totals,
+        "static_rule": f"same label, box IoU >= {STATIC_IOU}, in >= {STATIC_MIN_FRAMES} frames "
+                       f"and >= {STATIC_SHARE:.0%} of a clip's analysed frames",
         "notes": [
             "Face DETECTION only: it marks that a face appears and where. Nobody is "
             "identified; there is no face recognition in this tool.",
@@ -219,6 +237,10 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print) -> dict:
             "t_s is seconds from the first decodable frame of the clip, not a "
             "recorder timestamp.",
             "Every detection is a lead for an examiner to review in the footage itself.",
+            "Detections that stay in the same place through most of a clip are flagged "
+            "'static' and not counted: on real footage a steel pot was repeatedly detected "
+            "as a face. Static flags an object - or something that did not move - not a "
+            "person to review.",
         ],
     }
     os.makedirs(out_dir, exist_ok=True)

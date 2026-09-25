@@ -102,6 +102,9 @@ def cmd_scan(args) -> int:
     if args.activity:
         from analyse.activity import ActivityTap
         taps.append(ActivityTap())
+    if args.carve_ps:
+        from recover.pscarve import PsCarveTap
+        taps.append(PsCarveTap())
     session = ScanSession(args.device, out_dir, case,
                           block_size=args.block_size * 1024 * 1024,
                           resume=args.resume, taps=taps,
@@ -654,14 +657,15 @@ def cmd_timeline(args) -> int:
 
     parse_rep, pname = load("parse_dahua.json", "parse_hikvision.json")
     carve_rep, cname = load("carve/carve_report.json")
-    if not parse_rep and not carve_rep:
+    ps_rep, psname = load("carve/ps_report.json")
+    if not parse_rep and not carve_rep and not ps_rep:
         print(f"[!] nothing to build from in {args.out}: run `parse` and/or `scan --carve`")
         return 1
     clock = ClockModel.from_observation(args.tz_offset, args.clock_observed,
                                         args.clock_reference)
-    t = build(parse_rep, carve_rep, clock)
+    t = build(parse_rep, carve_rep, clock, ps_report=ps_rep)
     t["generated_utc"] = utc_now()
-    t["inputs"] = {n: sha256_file(os.path.join(args.out, n)) for n in (pname, cname) if n}
+    t["inputs"] = {n: sha256_file(os.path.join(args.out, n)) for n in (pname, cname, psname) if n}
     path = os.path.join(args.out, "timeline.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(t, fh, indent=2)
@@ -761,6 +765,76 @@ def cmd_writeblock_rule(args) -> int:
     return 0
 
 
+def _has_dhav_streams(out: str) -> bool:
+    path = os.path.join(out, "carve", "carve_report.json")
+    if not os.path.exists(path):
+        return False
+    with open(path, "r", encoding="utf-8") as fh:
+        return bool(json.load(fh).get("streams"))
+
+
+def _extract_ps(args) -> int:
+    """Save carved MPEG-PS streams unmodified as playable .ps files."""
+    import shutil
+    from acquire.device import DeviceLost
+    from core.hashing import sha256_file
+    from recover import pscarve
+
+    rpath = os.path.join(args.out, "carve", "ps_report.json")
+    if not os.path.exists(rpath):
+        print(f"[!] no MPEG-PS carve report in {args.out} - run `scan --carve-ps` first")
+        return 1
+    with open(rpath, "r", encoding="utf-8") as fh:
+        report = json.load(fh)
+    rows = report["streams"]
+    if args.ids:
+        want = set(args.ids.split(","))
+        rows = [r for r in rows if r["id"] in want]
+    need = sum(r["bytes"] for r in rows)
+    out_dir = os.path.join(args.out, "carve", "ps_streams")
+    os.makedirs(out_dir, exist_ok=True)
+    free = shutil.disk_usage(out_dir).free
+    print(f"{BANNER} - extract carved MPEG-PS streams\n")
+    print(f"  selected      {len(rows)} stream(s){', ids ' + args.ids if args.ids else ''}")
+    print(f"  size          {human_size(need)}; {human_size(free)} free")
+    if need > free - (5 << 30):
+        print("[!] not enough free space (keeping 5 GB spare) - narrow the selection with --ids")
+        return 1
+    manifest_path = os.path.join(args.out, "carve", "ps_extracted.json")
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            print(f"  device        {dev.path}  ({info.write_block_method})\n")
+            if dev.size_bytes != report.get("source_bytes"):
+                print(f"[!] {dev.path} is not the size of the carved device - wrong drive?")
+                return 1
+            m = pscarve.extract(dev, rows, out_dir, manifest_path)
+    except DeviceLost as exc:
+        print(f"\n[!] {exc}\n    finished streams are kept; re-run to continue")
+        return 3
+    except (DeviceError, IOError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    m.update({"source_device": info.path, "write_block_method": info.write_block_method,
+              "report_sha256": sha256_file(rpath)})
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        json.dump(m, fh, indent=2)
+    bad = [k for k, v in m["streams"].items() if not v["bytes_match"]]
+    total = sum(v["bytes"] for v in m["streams"].values())
+    print(f"\n  [+] {len(m['streams'])} stream(s), {human_size(total)} in {out_dir}")
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("ps_streams_extracted", {
+            "manifest": "carve/ps_extracted.json", "streams": len(m["streams"]),
+            "bytes": total, "size_mismatches": bad,
+            "write_block_method": info.write_block_method},
+            data_hash=sha256_file(manifest_path))
+        print("  manifest SHA-256 recorded in the custody ledger")
+    return 0 if not bad else 1
+
+
 def cmd_extract_carved(args) -> int:
     """Save carved streams as files, from the scan's carve report."""
     import shutil
@@ -768,6 +842,12 @@ def cmd_extract_carved(args) -> int:
     from core.hashing import sha256_file
     from recover import carver
 
+    fmt = args.format
+    if fmt == "auto":
+        fmt = "ps" if (os.path.exists(os.path.join(args.out, "carve", "ps_report.json"))
+                       and not _has_dhav_streams(args.out)) else "dhav"
+    if fmt == "ps":
+        return _extract_ps(args)
     rpath = os.path.join(args.out, "carve", "carve_report.json")
     if not os.path.exists(rpath):
         print(f"[!] no carve report in {args.out} - run `scan --carve` first")
@@ -960,7 +1040,8 @@ def cmd_analyse_video(args) -> int:
     from core.hashing import sha256_file
 
     src = os.path.join(args.out, "carve", "streams")
-    clips = sorted(glob.glob(os.path.join(src, "*.h265")) + glob.glob(os.path.join(src, "*.h264")))
+    clips = sorted(glob.glob(os.path.join(src, "*.h265")) + glob.glob(os.path.join(src, "*.h264"))
+                   + glob.glob(os.path.join(args.out, "carve", "ps_streams", "*.ps")))
     if args.ids:
         want = set(args.ids.split(","))
         clips = [c for c in clips if os.path.splitext(os.path.basename(c))[0] in want]
@@ -975,6 +1056,21 @@ def cmd_analyse_video(args) -> int:
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"[!] {exc}")
         return 1
+    # Hikvision PS streams carry the recorder's clock (HK descriptor): put a
+    # recorder-local time on each detection, from the stream's first keyframe.
+    psr = os.path.join(args.out, "carve", "ps_report.json")
+    if os.path.exists(psr):
+        from datetime import datetime, timedelta
+        with open(psr, "r", encoding="utf-8") as fh:
+            t0 = {x["id"]: x.get("time_first_local") for x in json.load(fh)["streams"]}
+        for c in r["clips"]:
+            start = t0.get(os.path.splitext(c["clip"])[0])
+            if start:
+                s0 = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+                for h in c["detections"]:
+                    h["time_local"] = (s0 + timedelta(seconds=h["t_s"])).strftime("%Y-%m-%d %H:%M:%S")
+        with open(os.path.join(out_dir, "analytics.json"), "w", encoding="utf-8") as fh:
+            json.dump(r, fh, indent=1)
     tot = r["frames_with_totals"]
     print(f"\n  frames with   " + (", ".join(f"{k} {v}" for k, v in sorted(tot.items())) or "no detections"))
     path = os.path.join(out_dir, "analytics.json")
@@ -1042,6 +1138,8 @@ def main() -> int:
                    help="also carve DHAV streams in the same pass (no second read)")
     p.add_argument("--activity", action="store_true",
                    help="also measure motion activity from frame sizes (lead, not evidence)")
+    p.add_argument("--carve-ps", action="store_true",
+                   help="also carve MPEG Program Stream footage (Hikvision and others)")
     p.add_argument("--tz-offset", type=int, default=None,
                    help="recorder zone in minutes east of UTC, for carved timestamps")
     p.add_argument("--reconnect-wait", type=float, default=30,
@@ -1130,6 +1228,8 @@ def main() -> int:
                    help="index label to extract: outside_index (default), CH01.., "
                         "mixed-evidence, or all")
     p.add_argument("--ids", default="", help="comma-separated stream ids instead")
+    p.add_argument("--format", choices=["auto", "dhav", "ps"], default="auto",
+                   help="which carve to extract from (auto: DHAV if it found streams, else MPEG-PS)")
     p.set_defaults(func=cmd_extract_carved)
 
     p = sub.add_parser("survey", help="draft the layout of an unknown disk, or diff two scans")
