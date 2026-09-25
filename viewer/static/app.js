@@ -182,9 +182,9 @@ function viewFs() {
 // ---------------------------------------------------------------- recovered
 function viewRec() {
   const c = state.case?.carve, p = state.case?.parse;
-  if (!c && !p?.remnants_total) return `<p class="muted">${state.case?.in_progress ? "Carving is running inside the acquisition pass; results appear when it completes." : "No recovery results for this case yet."}</p>`;
+  if (!c && !p?.remnants_total && !state.case?.ps_carve && !state.case?.analytics) return `<p class="muted">${state.case?.in_progress ? "Carving is running inside the acquisition pass; results appear when it completes." : "No recovery results for this case yet."}</p>`;
   let h = "";
-  if (c) {
+  if (c && c.stats?.frames) {
     h += `<h2>Indexless carve ${pill(c.validation_status)}</h2>
       <div class="note">Every validated DHAV frame was carved <b>without</b> the filesystem index, then labelled against it. <b>outside_index</b> = footage the recorder's own index no longer accounts for (overwritten, deleted, or from an earlier period). Its camera cannot be established from the frames alone.</div>` +
       table(["Label", "Streams", "Frames", "Bytes"], Object.entries(c.labels).sort().map(([k, v]) =>
@@ -193,6 +193,15 @@ function viewRec() {
       table(["Stream", "Offset", "Frames", "First frame (recorder clock)", "Last frame", "Duration", "Confidence"], c.outside_index.map((r) =>
         [`<code>${esc(r.id)}</code>`, `<code>${hex(r.offset)}</code>`, r.frame_count.toLocaleString(), esc(localOf(r.timestamps[0])),
           esc(localOf(r.timestamps[1])), hms(r.duration_s), r.confidence.toFixed(2)]), true);
+  }
+  const ps = state.case?.ps_carve;
+  if (ps) {
+    h += `<h2>MPEG Program Stream footage ${pill(ps.validation_status)}</h2>
+      <div class="note">Carved by structure, without any filesystem index — the route to footage left under a reformatted drive. ${ps.hk_streams.toLocaleString()} of ${ps.streams_total.toLocaleString()} streams carry Hikvision "HK" stream-map descriptors; where present, the recorder's clock is read from them.</div>
+      <p class="muted">${ps.streams_total.toLocaleString()} streams · ${size(ps.bytes)} · ${hms(ps.duration_s)} · ${esc(ps.stream_types.join(", "))}${ps.dated ? ` · dated ${esc(ps.first_local)} → ${esc(ps.last_local)}` : ""}</p>` +
+      table(["Stream", "Offset", "Size", "Duration", "From (recorder clock)", "To"], ps.streams.map((r) =>
+        [`<code>${esc(r.id)}</code>`, `<code>${hex(r.offset)}</code>`, size(r.bytes), hms(r.duration_s),
+          esc(r.time_first_local || "-"), esc(r.time_last_local || "-")]), true);
   }
   const an = state.case?.analytics;
   if (an) {

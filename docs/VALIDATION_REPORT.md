@@ -254,7 +254,9 @@ list of moments to watch and nothing more. These clips' on-screen clocks read
 cameras' burned-in titles are *Parking*, *Road View 1* and *Road View 2*.
 
 **Full drive:** the 2,025 decodable outside-index streams sampled at one frame
-every 5 s — 4,802 frames: a person in 51, a car in 66, faces in none. The two
+every 5 s — 4,802 frames: a person in 51, a car in 63, faces in none (4 more
+car detections sat fixed in place through their clip — flagged static, e.g. a
+parked car, and not counted). The two
 strongest person detections, reviewed by eye: **0.84** is clearly a person
 walking along the road (on-screen clock 13/08/2026 05:59 PM, *Road View 1*);
 **0.83** is a small shape by a distant fence, too small to confirm. Nearly
@@ -263,12 +265,31 @@ it is not a measure of truth.
 
 No systematic accuracy measurement has been made; none is claimed.
 
+## 8b. Second drive: Hikvision footage under a Dahua-family format
+
+Drive `Z9C2632A` carries a DHFS 4.1 superblock whose index is empty on all
+four volumes (every cluster record reserved or empty; no recordings) — a
+Dahua-family recorder formatted it. Underneath: H.264 in MPEG-2 Program
+Stream with Hikvision `HK` stream-map descriptors.
+
+| Check | Result |
+|---|---|
+| Carve of a real 64 MiB sample | one stream: 7,260 packs, 15,680 video packets, 290 stream maps |
+| ffprobe on the extracted `.ps` | MPEG-PS, H.264, 960×576, 25 fps, 290.40 s — the pack clock gave 290.36 s |
+| Decode | frames decode; the first frames before the first keyframe do not (expected) |
+| `HK` time vs burned-in clock | decoded frame 250 shows 23-04-2021 07:40:17; the `HK` time of the first stream map is 07:40:07 and frame 250 is 10 s later — equal to the second |
+| `HK` time internally | 290 stream maps from 07:40:07 to 07:44:57: 288 steps of 1 s, one of 2 s |
+| Full pipeline on the sample (scan with carve-ps, extract, timeline, analytics, report, verify) | runs end to end; custody chain intact |
+| Analytics on the sample | 17 "face" detections at one fixed spot — a steel pot on a table. Now flagged **static** and not counted; the rule is tested |
+| Full drive | the acquisition pass with both carvers is running |
+
 ## 9. Vendor format status
 
 | Vendor | Status | Why not better |
 |---|---|---|
 | Dahua / CP Plus | `spec_only` | layout read off real media and consistent throughout (§3), but no footage has been byte-matched against the recorder's own export |
-| Hikvision | `synthetic_only` | field offsets beyond the magic strings rest only on our fixture; the team's drive has not been read |
+| Hikvision — video container | `spec_only` | MPEG-PS + `HK` descriptors decoded from real footage and cross-checked; not byte-matched to a Hikvision export |
+| Hikvision — filesystem | `synthetic_only` | the team's drive had been reformatted; the Hikvision filesystem on it was overwritten, so the parser still rests only on our fixture |
 | Honeywell, TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand-string detection only |
 
 **To reach `validated` for Dahua/CP Plus:** export one clip with the DVR's

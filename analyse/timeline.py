@@ -108,7 +108,7 @@ def _claims(rec: dict, source: str) -> list[datetime]:
 
 
 def build(parse_report: Optional[dict], carve_report: Optional[dict],
-          clock: ClockModel) -> dict:
+          clock: ClockModel, ps_report: Optional[dict] = None) -> dict:
     events: list[dict] = []
     anomalies: list[dict] = []
 
@@ -155,6 +155,17 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
         if len(c) >= 2:
             event(rec, "unindexed", c[0], c[-1], "frame",
                   {"note": "carved footage no index record accounts for"})
+    # MPEG-PS footage (e.g. Hikvision under a reformatted drive): dated from
+    # the stream map's "HK" descriptor where present, otherwise undated.
+    for row in (ps_report or {}).get("streams", []):
+        s0 = parse_local(row.get("time_first_local") or "")
+        s1 = parse_local(row.get("time_last_local") or "")
+        if s0 and s1:
+            rec = {"id": row["id"], "camera_id": "UNKNOWN", "confidence": 0.5,
+                   "offset": row["offset"], "length": row["bytes"]}
+            event(rec, "unindexed", s0, s1, "hk_descriptor",
+                  {"note": "MPEG-PS footage carved without an index; time from the stream "
+                           "map's HK descriptor"})
     for row in (carve_report or {}).get("streams", []):
         if row.get("index_label") == "mixed-evidence":
             anomalies.append({"kind": "mixed_evidence_stream", "id": row["recording"]["id"],

@@ -48,6 +48,7 @@ flowchart LR
 | Identification | `detect/` | Vendor signatures for all eight PS OEMs, confidence scoring, partitions; `survey.py` drafts an unknown disk's layout |
 | Parsing | `parsers/`, `plugins/` | Vendor filesystem plugins on one SDK with field provenance; drop-in loading |
 | Recovery | `recover/carver.py` | Indexless DHAV carve: streams by byte contiguity and stream continuity; splits rather than guesses |
+| | `recover/pscarve.py` | Indexless MPEG-PS carve (Hikvision and others): packs accepted only when their packets end exactly on the next pack; dated from Hikvision `HK` descriptors |
 | | `recover/preserve.py` | Filesystem metadata kept as whole scan blocks, provable to the Merkle root |
 | Analysis | `analyse/timeline.py` | Recorder clock → UTC on stated inputs; gaps; cross-camera correlation |
 | | `analyse/activity.py` | Motion activity from P-frame sizes per camera per minute — a tap or a standalone pass; a lead, not evidence |

@@ -178,6 +178,33 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                                                    "frames_match", "codec", "files")}
                             for k, v in ex.get("streams", {}).items()}}
 
+    ps = _load(j("carve", "ps_report.json"))
+    if ps:
+        rows = ps.get("streams", [])
+        dated = sorted(r["time_first_local"] for r in rows if r.get("time_first_local"))
+        by_month: dict[str, int] = {}
+        for d in dated:
+            by_month[d[:7]] = by_month.get(d[:7], 0) + 1
+        types = sorted({st["type"] for r in rows for st in r.get("streams", [])})
+        case["ps_carve"] = {
+            "sha256": _hashed(j("carve", "ps_report.json")), "stats": ps.get("stats"),
+            "validation_status": ps.get("validation_status"), "notes": ps.get("notes", []),
+            "streams_total": len(rows), "bytes": sum(r["bytes"] for r in rows),
+            "duration_s": sum(r["duration_s"] for r in rows),
+            "dated": len(dated), "first_local": dated[0] if dated else None,
+            "last_local": dated[-1] if dated else None, "by_month": by_month,
+            "stream_types": types,
+            "hk_streams": sum(1 for r in rows if r.get("hk_descriptors")),
+            "streams": [{k: r.get(k) for k in ("id", "offset", "bytes", "packs", "duration_s",
+                                                "time_first_local", "time_last_local")}
+                        for r in rows[:recordings_limit]]}
+        ex = _load(j("carve", "ps_extracted.json"))
+        if ex:
+            case["ps_carve"]["extracted"] = {
+                "sha256": _hashed(j("carve", "ps_extracted.json")),
+                "streams": {k: {x: v[x] for x in ("file", "bytes", "sha256", "bytes_match")}
+                            for k, v in ex.get("streams", {}).items()}}
+
     t = _load(j("timeline.json"))
     if t:
         case["timeline"] = {k: t.get(k) for k in ("clock", "cameras", "gaps", "correlations",
