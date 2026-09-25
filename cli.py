@@ -610,7 +610,25 @@ def cmd_preserve(args) -> int:
             print(f"  device        {dev.path}  ({human_size(dev.size_bytes)})")
             print(f"  write-block   {info.write_block_method}")
             print(f"  vendor        {vendor or 'unknown - generic head/tail only'}")
-            m = preserve.preserve(dev, bundle, vendor=vendor, blockmap=blockmap)
+            # Surviving Hikvision structures the scan found (e.g. under a later
+            # reformat): the master sector copy and the index region.
+            extra = []
+            sr = os.path.join(args.out, "scan_report.json")
+            if os.path.exists(sr):
+                with open(sr, "r", encoding="utf-8") as fh:
+                    hits = json.load(fh).get("signature_hits", [])
+                for h in hits:
+                    if h["signature_id"] == "hik.master":
+                        extra.append(preserve.Region(f"hikvision_master_0x{h['offset']:X}",
+                                                     h["offset"] - 0x10, h["offset"] - 0x10 + 512,
+                                                     "Hikvision master sector copy"))
+                    elif h["signature_id"] == "hik.btree":
+                        extra.append(preserve.Region(f"hikvision_hikbtree_0x{h['offset']:X}",
+                                                     h["offset"] - 0x10000, h["offset"] + (4 << 20),
+                                                     "Hikvision HIKBTREE header and its pages"))
+            if extra:
+                print(f"  hikvision     {len(extra)} surviving structure(s) added")
+            m = preserve.preserve(dev, bundle, vendor=vendor, blockmap=blockmap, extra=extra)
     except PermissionNeeded as exc:
         print(f"[!] {exc}")
         return 2
