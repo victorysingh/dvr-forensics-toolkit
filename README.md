@@ -49,11 +49,12 @@ python cli.py preserve --device /dev/sdb --out out/CASE-001      # filesystem me
 python cli.py parse    --device /dev/sdb --vendor Dahua --out out/CASE-001
 python cli.py timeline --out out/CASE-001 --tz-offset 330
 python cli.py report   --out out/CASE-001    # HTML + JSON, hashed into the ledger
-python cli.py serve                          # UI on http://127.0.0.1:8150
+python cli.py serve                          # viewer on http://127.0.0.1:8150
+python cli.py survey --device unknown.img    # draft the layout of an unknown vendor's disk
 python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, preserved blocks
 python cli.py prove  --out out/CASE-001 --offset 8388608
 
-python tests/test_pipeline.py               # 213 regression tests, no hardware
+python tests/test_pipeline.py               # 226 regression tests, no hardware
 python demo/tamper_demo.py                  # 2-minute stage demo
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
@@ -107,6 +108,7 @@ demo/      tamper_demo.py
 | Timeline (normalization, gaps, correlation) | working |
 | Report (HTML + JSON) and local UI | working |
 | Drop-in vendor plugins | working |
+| Unknown-vendor survey | working |
 | Video decode, AI analytics | not started (optional add-on) |
 | BSA s.63 certificate, CASE/UCO export | not started |
 

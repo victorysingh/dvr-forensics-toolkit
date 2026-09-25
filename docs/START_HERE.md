@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 213 tests, all should pass
+python tests/test_pipeline.py     # 226 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -99,9 +99,9 @@ If those pass, the engine below is intact:
 | Filesystem metadata preserved, provable to the scan | `recover/preserve.py` | working |
 | Timestamp normalization, gaps, cross-camera correlation | `analyse/timeline.py` | working |
 | Forensic report (HTML + JSON) | `report/` | working |
-| Local web UI (all eight OEMs, pipeline, timeline) | `ui/` | working |
+| Dependency-free case viewer (all eight OEMs, pipeline, timeline) | `viewer/` | working; the planned FastAPI + React UI (`api/`, `ui/`) wraps the same `report/case.py` |
 | Drop-in vendor plugins | `plugins/`, `parsers/__init__.py` | working |
-| Unknown-vendor survey tool | — | not started |
+| Unknown-vendor survey (headers, length/date fields, before/after diff) | `detect/survey.py` | working; rediscovered DHAV unaided |
 | Video decode (MP4) and AI analytics | — | not started (optional add-on, needs ffmpeg/OpenCV) |
 | BSA s.63 certificate, CASE/UCO export | — | not started |
 
