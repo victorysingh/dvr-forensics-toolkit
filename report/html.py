@@ -251,9 +251,18 @@ def render(case: dict, examiner_notes: str = "") -> str:
             add(f"<p>{ps['dated']:,} streams dated from the 'HK' descriptor (the recorder's "
                 f"own clock, zone unknown): {e(ps['first_local'])} to {e(ps['last_local'])}.</p>")
             add(table(["Month", "Streams"], sorted(ps["by_month"].items())))
-        add(table(["Stream", "Offset", "Size", "Duration", "From (recorder clock)", "To"],
-                  [[r["id"], f"0x{r['offset']:X}", size(r["bytes"]), hms(r["duration_s"]),
-                    r.get("time_first_local") or "-", r.get("time_last_local") or "-"]
+        pl = ps.get("labels")
+        if pl:
+            add(f"<h3>Cameras from the surviving Hikvision index</h3><p>{pl['index_records']} "
+                f"HIKBTREE records survived the reformat ({len(pl['index_headers'])} identical "
+                f"copies near the end of the disk). A stream is given a camera only when its "
+                f"data block has a record whose window contains the stream's own recorder "
+                f"times; older footage left in a reused block is outside_index.</p>")
+            add(table(["Label", "Streams"], list(pl["tally"].items())))
+        add(table(["Stream", "Camera", "Offset", "Size", "Duration", "From (recorder clock)", "To"],
+                  [[r["id"], r.get("label") or "-", f"0x{r['offset']:X}", size(r["bytes"]),
+                    hms(r["duration_s"]), r.get("time_first_local") or "-",
+                    r.get("time_last_local") or "-"]
                    for r in ps["streams"][:100]]))
         if ps["streams_total"] > 100:
             add(f"<p class='muted'>&hellip; {ps['streams_total'] - 100:,} more in the carve "
@@ -276,6 +285,12 @@ def render(case: dict, examiner_notes: str = "") -> str:
         add(table(["Camera", "Files", "First", "Last", "Covered", "Gaps"],
                   [[k, v["recordings"], v["first_local"], v["last_local"], hms(v["covered_s"]),
                     v["gaps"]] for k, v in sorted(t["cameras"].items())]))
+        if t.get("index_coverage"):
+            add("<h3>Recorded (per the index) vs recovered (by carving)</h3>")
+            add(table(["Camera", "Index blocks", "Recorded from", "to", "Recorded", "Recovered"],
+                      [[k, v["blocks"], v["first"], v["last"], hms(v["recorded_s"]),
+                        f"{v['recovered_share']:.1%}" if v.get("recovered_share") is not None else "-"]
+                       for k, v in t["index_coverage"].items()]))
         if t.get("gaps"):
             add("<h3>Recording gaps</h3>")
             add(table(["Camera", "From", "To", "Length", "Shared with"],
@@ -381,6 +396,8 @@ def render(case: dict, examiner_notes: str = "") -> str:
         inputs["analytics/analytics.json"] = an["sha256"]
     if ps:
         inputs["carve/ps_report.json"] = ps["sha256"]
+        if ps.get("labels"):
+            inputs["carve/ps_labels.json"] = ps["labels"]["sha256"]
         if ps.get("extracted"):
             inputs["carve/ps_extracted.json"] = ps["extracted"]["sha256"]
     add(table(["File", "SHA-256"], [[k, mono(v)] for k, v in inputs.items()]))

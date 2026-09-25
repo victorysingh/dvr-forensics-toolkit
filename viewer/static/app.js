@@ -199,8 +199,9 @@ function viewRec() {
     h += `<h2>MPEG Program Stream footage ${pill(ps.validation_status)}</h2>
       <div class="note">Carved by structure, without any filesystem index — the route to footage left under a reformatted drive. ${ps.hk_streams.toLocaleString()} of ${ps.streams_total.toLocaleString()} streams carry Hikvision "HK" stream-map descriptors; where present, the recorder's clock is read from them.</div>
       <p class="muted">${ps.streams_total.toLocaleString()} streams · ${size(ps.bytes)} · ${hms(ps.duration_s)} · ${esc(ps.stream_types.join(", "))}${ps.dated ? ` · dated ${esc(ps.first_local)} → ${esc(ps.last_local)}` : ""}</p>` +
-      table(["Stream", "Offset", "Size", "Duration", "From (recorder clock)", "To"], ps.streams.map((r) =>
-        [`<code>${esc(r.id)}</code>`, `<code>${hex(r.offset)}</code>`, size(r.bytes), hms(r.duration_s),
+      (ps.labels ? `<p class="muted">Cameras from ${ps.labels.index_records} surviving HIKBTREE records: ${Object.entries(ps.labels.tally).map(([k, v]) => `${esc(k)} ${v}`).join(" · ")}</p>` : "") +
+      table(["Stream", "Camera", "Offset", "Size", "Duration", "From (recorder clock)", "To"], ps.streams.map((r) =>
+        [`<code>${esc(r.id)}</code>`, esc(r.label || "-"), `<code>${hex(r.offset)}</code>`, size(r.bytes), hms(r.duration_s),
           esc(r.time_first_local || "-"), esc(r.time_last_local || "-")]), true);
   }
   const an = state.case?.analytics;

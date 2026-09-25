@@ -110,8 +110,30 @@ def _claims(rec: dict, source: str) -> list[datetime]:
     return out
 
 
+def index_coverage(hik_index: dict, events: list[dict]) -> dict:
+    """Per channel: what the surviving index says was recorded, and how much
+    of it the carve recovered (recorder clock, seconds)."""
+    per: dict[str, dict] = {}
+    for r in hik_index.get("records", []):
+        if r["channel"] == 255:
+            continue
+        c = per.setdefault(f"CH{r['channel']:02d}", {"blocks": 0, "recorded_s": 0,
+                                                    "first": r["start"], "last": r["end"]})
+        c["blocks"] += 1
+        c["recorded_s"] += r["end"] - r["start"]
+        c["first"], c["last"] = min(c["first"], r["start"]), max(c["last"], r["end"])
+    for cam, c in per.items():
+        got = sum(e["duration_s"] for e in events if e["camera"] == cam and e["kind"] == "indexed")
+        c["recovered_s"] = got
+        c["recovered_share"] = round(got / c["recorded_s"], 4) if c["recorded_s"] else None
+        c["first"] = datetime.utcfromtimestamp(c["first"]).strftime("%Y-%m-%d %H:%M:%S")
+        c["last"] = datetime.utcfromtimestamp(c["last"]).strftime("%Y-%m-%d %H:%M:%S")
+    return dict(sorted(per.items()))
+
+
 def build(parse_report: Optional[dict], carve_report: Optional[dict],
-          clock: ClockModel, ps_report: Optional[dict] = None) -> dict:
+          clock: ClockModel, ps_report: Optional[dict] = None,
+          hik_index: Optional[dict] = None) -> dict:
     events: list[dict] = []
     anomalies: list[dict] = []
 
@@ -165,13 +187,26 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
         s1 = parse_local(row.get("time_last_local") or "")
         if s0 and s1:
             from recover.pscarve import resolution
+            label = row.get("index_label")
+            if label and label.startswith("CH"):
+                # carved, then attributed to a camera by a surviving index record
+                # whose window contains the stream's own times: a camera lane
+                rec = {"id": row["id"], "camera_id": label, "confidence": 0.7,
+                       "offset": row["offset"], "length": row["bytes"]}
+                event(rec, "indexed", s0, s1, "hk_descriptor",
+                      {"note": "MPEG-PS footage carved without the index, attributed to "
+                               "its camera by the surviving HIKBTREE record for its block"})
+                continue
             res = resolution(row)
-            group = f"{res} group" if res else "UNKNOWN"
+            labelled = label is not None           # labelling ran: this one is outside it
+            group = f"{res} group" if res and not labelled else "UNKNOWN"
             rec = {"id": row["id"], "camera_id": group, "confidence": 0.5,
                    "offset": row["offset"], "length": row["bytes"]}
             event(rec, "unindexed", s0, s1, "hk_descriptor",
                   {"note": "MPEG-PS footage carved without an index; time from the stream "
-                           "map's HK descriptor", "group": bool(res)})
+                           "map's HK descriptor"
+                           + ("; no surviving index record accounts for it" if labelled else ""),
+                   "group": bool(res) and not labelled})
     for row in (carve_report or {}).get("streams", []):
         if row.get("index_label") == "mixed-evidence":
             anomalies.append({"kind": "mixed_evidence_stream", "id": row["recording"]["id"],
@@ -194,7 +229,10 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
         evs.sort(key=lambda e: e["start_local"])
         covered = 0.0
         cur_end: Optional[datetime] = None
-        is_group = cam.endswith(" group")
+        # lanes made of carved footage (resolution groups, or cameras named by a
+        # surviving index) have holes where the carve split or footage was lost,
+        # not where recording stopped: "no footage recovered", 1 h threshold
+        is_group = cam.endswith(" group") or all(e["time_basis"] == "hk_descriptor" for e in evs)
         min_gap = GROUP_GAP_MIN_S if is_group else GAP_MIN_S
         for e in evs:
             s, en = parse_local(e["start_local"]), parse_local(e["end_local"])
@@ -233,7 +271,7 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
                 key = (g["start_local"][:16])
                 if key not in seen:
                     seen.add(key)
-                    grp = g["camera"].endswith(" group")
+                    grp = g.get("meaning") == "no footage recovered"
                     correlated.append({
                         "kind": "no_footage_recovered" if grp else "system_wide_gap",
                         "start_local": g["start_local"], "end_local": g["end_local"],
@@ -245,7 +283,7 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
     # scheduled (a camera reboot, a time sync) rather than at an incident.
     marks: dict[int, list[tuple[str, str, str]]] = {}
     for g in gaps:
-        if not g.get("system_wide") and not g["camera"].endswith(" group"):
+        if not g.get("system_wide") and g.get("meaning") != "no footage recovered":
             d = parse_local(g["start_local"])
             marks.setdefault(d.hour * 6 + d.minute // 10, []).append(
                 (g["start_local"][:10], g["camera"], "gap"))
@@ -309,6 +347,7 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
     return {
         "rule": TIMELINE_RULE,
         "clock": clock.to_dict(),
+        "index_coverage": index_coverage(hik_index, events) if hik_index else None,
         "events": events,
         "cameras": cameras,
         "gaps": gaps,

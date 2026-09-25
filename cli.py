@@ -658,14 +658,21 @@ def cmd_timeline(args) -> int:
     parse_rep, pname = load("parse_dahua.json", "parse_hikvision.json")
     carve_rep, cname = load("carve/carve_report.json")
     ps_rep, psname = load("carve/ps_report.json")
+    ps_lab, plname = load("carve/ps_labels.json")
+    if ps_rep and ps_lab:
+        lab = {x["id"]: x["label"] for x in ps_lab["streams"]}
+        for row in ps_rep["streams"]:
+            row["index_label"] = lab.get(row["id"])
     if not parse_rep and not carve_rep and not ps_rep:
         print(f"[!] nothing to build from in {args.out}: run `parse` and/or `scan --carve`")
         return 1
     clock = ClockModel.from_observation(args.tz_offset, args.clock_observed,
                                         args.clock_reference)
-    t = build(parse_rep, carve_rep, clock, ps_report=ps_rep)
+    hik_idx, hname = load("carve/hik_index.json")
+    t = build(parse_rep, carve_rep, clock, ps_report=ps_rep, hik_index=hik_idx)
     t["generated_utc"] = utc_now()
-    t["inputs"] = {n: sha256_file(os.path.join(args.out, n)) for n in (pname, cname, psname) if n}
+    t["inputs"] = {n: sha256_file(os.path.join(args.out, n))
+                   for n in (pname, cname, psname, plname, hname) if n}
     path = os.path.join(args.out, "timeline.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(t, fh, indent=2)
@@ -678,6 +685,9 @@ def cmd_timeline(args) -> int:
     for cam, v in t["cameras"].items():
         print(f"  {cam:<13} {v['recordings']:4d} files  {v['first_local']} -> "
               f"{v['last_local']}  {v['covered_s'] / 3600:7.1f} h  {v['gaps']} gap(s)")
+    for cam, v in (t.get("index_coverage") or {}).items():
+        print(f"  {cam:<13} index: recorded {v['recorded_s'] / 3600:6.1f} h in {v['blocks']} "
+              f"blocks; recovered {v['recovered_share']:.1%}")
     kinds: dict = {}
     for x in t["correlations"] + t["anomalies"]:
         kinds[x["kind"]] = kinds.get(x["kind"], 0) + 1
@@ -1087,6 +1097,59 @@ def cmd_analyse_video(args) -> int:
     return 0
 
 
+def cmd_label_ps(args) -> int:
+    """Label carved MPEG-PS streams with cameras from a surviving HIKBTREE."""
+    from core.hashing import sha256_file
+    from parsers import hikbtree
+
+    out = args.out
+    with open(os.path.join(out, "scan_report.json"), "r", encoding="utf-8") as fh:
+        scan = json.load(fh)
+    heads = [h["offset"] for h in scan.get("signature_hits", []) if h["signature_id"] == "hik.btree"]
+    if not heads:
+        print("[!] the scan found no HIKBTREE header - nothing to label from")
+        return 1
+    with open(os.path.join(out, "carve", "ps_report.json"), "r", encoding="utf-8") as fh:
+        rows = json.load(fh)["streams"]
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            if dev.size_bytes != scan["device"]["size_bytes"]:
+                print("[!] this device is not the size of the scanned one - wrong drive?")
+                return 1
+            index = hikbtree.read_index(dev, heads)
+    except (PermissionNeeded, DeviceError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    labels = hikbtree.label_streams(index, rows)
+    ipath = os.path.join(out, "carve", "hik_index.json")
+    lpath = os.path.join(out, "carve", "ps_labels.json")
+    with open(ipath, "w", encoding="utf-8") as fh:
+        json.dump(dict(index, headers=heads, source_device=info.path,
+                       write_block_method=info.write_block_method), fh, indent=1)
+    with open(lpath, "w", encoding="utf-8") as fh:
+        json.dump({"rule": hikbtree.RULE, "index_sha256": sha256_file(ipath),
+                   "streams": labels}, fh, indent=1)
+    from collections import Counter
+    tally = Counter(l["label"] for l in labels)
+    print(f"{BANNER} - label MPEG-PS streams from the HIKBTREE index\n")
+    print(f"  headers       {len(heads)} at " + ", ".join(f"0x{h:X}" for h in heads))
+    print(f"  records       {len(index['records'])} (data-area base 0x{index['base']:X}, 1 GiB blocks)")
+    print(f"  channels      " + ", ".join(f"{k}: {v}" for k, v in index["channels"].items()))
+    for k, v in sorted(tally.items()):
+        print(f"  {k:<14}{v:5d} streams")
+    ledger = CustodyLedger(os.path.join(out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("ps_streams_labelled", {
+            "index": "carve/hik_index.json", "labels": "carve/ps_labels.json",
+            "records": len(index["records"]), "tally": dict(tally),
+            "write_block_method": info.write_block_method}, data_hash=sha256_file(lpath))
+    print(f"\n[+] {lpath}")
+    return 0
+
+
 def cmd_prove(args) -> int:
     """Produce a Merkle inclusion proof for the block containing an offset.
 
@@ -1253,6 +1316,12 @@ def main() -> int:
     p.add_argument("--fps", type=float, default=1.0, help="frames analysed per second of video")
     p.add_argument("--ids", default="", help="comma-separated clip ids (default: all extracted)")
     p.set_defaults(func=cmd_analyse_video)
+
+    p = sub.add_parser("label-ps",
+                       help="camera labels for carved MPEG-PS streams from a surviving HIKBTREE")
+    p.add_argument("--device", required=True)
+    p.add_argument("--out", required=True, help="case directory")
+    p.set_defaults(func=cmd_label_ps)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)
