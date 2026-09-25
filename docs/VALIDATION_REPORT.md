@@ -253,6 +253,14 @@ list of moments to watch and nothing more. These clips' on-screen clocks read
 **9 August 2026** — a month before anything the index describes — and the
 cameras' burned-in titles are *Parking*, *Road View 1* and *Road View 2*.
 
+**Full drive:** the 2,025 decodable outside-index streams sampled at one frame
+every 5 s — 4,802 frames: a person in 51, a car in 66, faces in none. The two
+strongest person detections, reviewed by eye: **0.84** is clearly a person
+walking along the road (on-screen clock 13/08/2026 05:59 PM, *Road View 1*);
+**0.83** is a small shape by a distant fence, too small to confirm. Nearly
+equal scores, very different certainty — a score ranks what to watch first;
+it is not a measure of truth.
+
 No systematic accuracy measurement has been made; none is claimed.
 
 ## 9. Vendor format status
