@@ -26,13 +26,13 @@ The machine-readable companion for each format is a Kaitai `.ksy` file in
 
 | | Dahua | CP Plus | Hikvision | Honeywell | TP-Link | Godrej | Uniview | Matrix |
 |---|---|---|---|---|---|---|---|---|
-| Filesystem | DHFS 4.1 **O** | DHFS 4.1 on our unit **O** (Dahua OEM) | proprietary, `HIKVISION@HANGZHOU` master sector + `HIKBTREE` index **P** (overwritten on our drive) | ? | ? | ? | ? | ? |
+| Filesystem | DHFS 4.1 **O** | DHFS 4.1 on our unit **O** (Dahua OEM) | `HIKVISION@HANGZHOU` master sector + `HIKBTREE` index **P**; index records decoded from surviving copies on our drive **O** | ? | ? | ? | ? | ? |
 | Video container | DHAV frames **O P** | DHAV **O** | MPEG-2 Program Stream with `HK` stream-map descriptors **O** | ? | ? | ? | ? | ? |
 | Codec seen | H.265 **O** | H.265 **O** | H.264, 960×576, 25 fps **O** | ? | ? | ? | ? | ? |
-| Camera id in frames | none — every camera writes channel 0; aux frames carry the channel title **O** | same **O** | none found in the stream; "Camera 04" burned into the picture **O** | ? | ? | ? | ? | ? |
+| Camera id in frames | none — every camera writes channel 0; aux frames carry the channel title **O** | same **O** | none in the stream; the index names the channel per 1 GiB block **O** | ? | ? | ? | ? | ? |
 | Time encoding | packed local date, no zone, + ms counter **O P** | same **O** | `HK` descriptor 0x40: year byte + packed M/D/h/m/s, local, no zone **O** | ? | ? | ? | ? | ? |
 | Detection in this tool | superblock magic + DHAV frames | Dahua-family structures + `CPPlusIPCam` channel title **O** | master magic + index header; `HK` stream-map descriptor **O** | `HONEYWELL` string | `TP-LINK` string | `GODREJ` string | `UNIVIEW` string | `MATRIX` string (weak: a common word) |
-| Parser | yes | yes (Dahua parser) | filesystem: yes (fixture only); video: MPEG-PS carver | no | no | no | no | no |
+| Parser | yes | yes (Dahua parser) | index records (real media) + MPEG-PS carver; full-FS parser fixture only | no | no | no | no | no |
 | Our status | `spec_only` | `spec_only` | `synthetic_only` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` |
 | Real media held | via the CP Plus drive | yes | footage on the second drive, under a Dahua-family format | no | no | no | no | no |
 
@@ -71,19 +71,24 @@ underneath, **Hikvision footage** that the format did not overwrite. Layout:
 
 | Aspect | Finding | Tag |
 |---|---|---|
-| Filesystem | master sector near the start carrying `HIKVISION@HANGZHOU`; a `HIKBTREE` index mapping recordings to fixed-size data blocks | P (Han / Jeong / Lee DVR filesystem analysis; hikextractor — citations to attach). **Overwritten on our drive** by the later format, so not observed |
+| Filesystem | master sector carrying `HIKVISION@HANGZHOU`; a `HIKBTREE` index mapping recordings to fixed-size data blocks | P (Han / Jeong / Lee DVR filesystem analysis; hikextractor — citations to attach) |
+| What survived on our drive | the primary master sector was overwritten by the later format; a master sector copy (`HIK.2011.03.08`, just before the data area) and **two identical `HIKBTREE` copies** (`HIK.2010.11.09`) near the end of the disk survived | O |
+| Index records | 48 bytes: 8×FF, channel at +0x11 (255 = initialised, never used), start/end at +0x18/+0x1C (seconds since 1970 on the recorder's own clock), data-block offset at +0x20 | O — 922 records |
+| Data blocks | 1 GiB each from a base (0x4C5E000 here); every record lands exactly on the grid; 931 blocks, as the master copy states | O |
+| Camera attribution | carved stream → its data block → the record whose window contains the stream's own times. 8 channels; each keeps one resolution; each holds 761–788 h | O |
+| Time zone | the index times equal the `HK` stream-map times: both are the recorder's local clock, and neither stores a zone | O |
 | Field offsets beyond the magic strings | as implemented in `parsers/hikvision.py` | **S** — our fixture only |
 | Container | MPEG-2 Program Stream: one pack per frame, a stream map before each keyframe, H.264 video | O (ISO/IEC 13818-1 container) |
 | `HK` descriptors | private descriptors in the stream map starting "HK": tag 0x40 carries the recorder's clock; 0x41 and the per-stream 0x42/0x44 are partly decoded (0x42 holds 960×576) | O |
 | Time | 0x40: year byte + month 4 bits / day 5 / hour 5 / minute 6 / second 6. Matches the burned-in clock to the second, +1 s per stream map, spans the pack clock's interval | O |
 | On-screen text | "23-04-2021 Fri 07:40:17", "Camera 04" | O |
-| Camera attribution | nothing found in the stream names the camera; the burned-in "Camera NN" would need OCR | O |
+| Camera attribution (stream alone) | nothing in the stream names the camera; the index does (above) | O |
 | Forensic consequence | a reformatted drive still yields its old footage, dated, by carving the container by structure — no filesystem needed | O |
 
-Status: Hikvision's **video container is decoded from real media**
-(`spec_only`: observed, cross-checked, not byte-matched to a Hikvision
-export). Its **filesystem stays `synthetic_only`** — the real one was
-overwritten before we got the drive.
+Status: Hikvision's **video container and index records are decoded from
+real media** (`spec_only`: observed and cross-checked, not byte-matched to a
+Hikvision export). The full-filesystem parser in `parsers/hikvision.py`,
+written before we held media, stays `synthetic_only`.
 
 ## 4. Honeywell, TP-Link, Godrej, Uniview, Matrix
 

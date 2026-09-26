@@ -1357,6 +1357,57 @@ def test_static_detections() -> None:
     check("a moving detection is not static", not any(d["static"] for d in people))
 
 
+def test_hikbtree(tmp: str) -> None:
+    """HIKBTREE records as observed on real media: found by shape, the data
+    base found as the common residue, copies de-duplicated, and a carved
+    stream labelled only when its own times fall inside a record."""
+    print("\n[Hikvision HIKBTREE records]")
+    from parsers import hikbtree
+
+    base, gib = 0x4C5E000, 1 << 30
+    size = base + 40 * gib
+
+    def rec(ch, start, end, block):
+        r = bytearray(48)
+        r[0:8] = b"\xff" * 8
+        r[0x11] = ch
+        struct.pack_into("<IIQ", r, 0x18, start, end, base + block * gib)
+        return bytes(r)
+    t0 = 1_722_000_000
+    page = (b"HIKBTREE" + bytes(56)
+            + rec(5, t0, t0 + 70_000, 3) + rec(5, t0 + 70_000, t0 + 140_000, 9)
+            + rec(2, t0, t0 + 90_000, 4) + rec(255, t0 - 999, t0 - 999, 1)
+            + b"\xff" * 8 + bytes(40))                     # a record-like shape off the grid
+    img = os.path.join(tmp, "hik_index.img")
+    with open(img, "wb") as fh:
+        fh.write(bytes(1 << 16) + page + page + bytes(1 << 16))   # two identical copies
+    class Dev:
+        size_bytes = size
+        def read_at(self, off, n):
+            with open(img, "rb") as fh:
+                fh.seek(off)
+                return fh.read(n)
+    idx = hikbtree.read_index(Dev(), [1 << 16, (1 << 16) + len(page)])
+    check("the data-area base is found as the common residue", idx["base"] == base, hex(idx["base"] or 0))
+    check("the two copies de-duplicate to four records",
+          len(idx["records"]) == 4 and all(r["copies"] == 2 for r in idx["records"]))
+    from datetime import datetime, timezone
+    loc = lambda v: datetime.fromtimestamp(v, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    rows = [{"id": "in", "offset": base + 3 * gib + 5000,
+             "time_first_local": loc(t0 + 100), "time_last_local": loc(t0 + 3600)},
+            {"id": "older", "offset": base + 3 * gib + 9000,
+             "time_first_local": loc(t0 - 400_000), "time_last_local": loc(t0 - 390_000)},
+            {"id": "unused", "offset": base + 1 * gib, "time_first_local": loc(t0),
+             "time_last_local": loc(t0 + 10)}]
+    lab = {x["id"]: x["label"] for x in hikbtree.label_streams(idx, rows)}
+    check("a stream inside its block's record window gets the record's channel",
+          lab["in"] == "CH05", str(lab))
+    check("older footage left in a reused block is outside_index",
+          lab["older"] == "outside_index")
+    check("an initialised, never-used block (channel 255) labels nothing",
+          lab["unused"] == "outside_index")
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1384,6 +1435,7 @@ def main() -> int:
         test_timeline_recurring()
         test_ps_carver(tmp)
         test_static_detections()
+        test_hikbtree(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
