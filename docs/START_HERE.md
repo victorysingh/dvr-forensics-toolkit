@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 242 tests, all should pass
+python tests/test_pipeline.py     # 247 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -94,6 +94,7 @@ If those pass, the engine below is intact:
 | Remnants of overwritten footage (Dahua) | `parsers/dahua.py` | working, `spec_only` |
 | Indexless DHAV carver, index cross-reference | `recover/carver.py` | working on real media, `spec_only` |
 | MPEG-PS carver (Hikvision footage, dated from the `HK` descriptor; works on a reformatted drive) | `recover/pscarve.py` | working on real media, `spec_only` |
+| Hikvision HIKBTREE index records → camera labels for carved footage | `parsers/hikbtree.py`, `cli.py label-ps` | working on real media, `spec_only` |
 | Carve inside the acquisition pass (`scan --carve`) | `recover/carver.py`, `acquire/scanner.py` | working; identical to a standalone carve on real media |
 | Survive a USB drop mid-pass, verified reconnect | `acquire/device.py`, `acquire/scanner.py` | working |
 | Write block that survives reconnects (udev rule) | `cli.py writeblock-rule` | working |
@@ -113,8 +114,9 @@ against its first 20 GiB, and a full acquisition of the drive is under way.
 The second drive (`Z9C2632A`) turned out to be reformatted by a Dahua-family
 recorder (DHFS superblock, empty index) with **Hikvision MPEG-PS footage
 underneath**, recovered by the MPEG-PS carver and dated from its `HK`
-descriptors. Hikvision's *filesystem* was overwritten, so the Hikvision
-filesystem parser is still tested only against the synthetic fixture.
+descriptors. Two copies of Hikvision's HIKBTREE index survived near the end
+of the disk; decoded, they name the camera for 2,021 of the 2,516 recovered
+streams. The older full-filesystem parser is still fixture-only.
 
 ---
 

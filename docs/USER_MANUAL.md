@@ -116,6 +116,9 @@ python cli.py report   --out out/CASE-001 --notes "..."
 python cli.py verify   --out out/CASE-001                          # again, now covering preserved blocks
 ```
 
+- `label-ps --device /dev/sdX --out out/CASE` names the camera of each carved
+  MPEG-PS stream from a surviving Hikvision HIKBTREE index, where the scan found
+  one; the timeline then shows camera lanes and recorded-vs-recovered hours.
 - `extract-carved --format ps` saves MPEG-PS streams unmodified as playable `.ps` files
   (the default `auto` picks PS when the DHAV carve found nothing).
 - `extract-carved` defaults to `--label outside_index`. Use `--label CH02` for

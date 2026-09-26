@@ -281,7 +281,13 @@ Stream with Hikvision `HK` stream-map descriptors.
 | `HK` time internally | 290 stream maps from 07:40:07 to 07:44:57: 288 steps of 1 s, one of 2 s |
 | Full pipeline on the sample (scan with carve-ps, extract, timeline, analytics, report, verify) | runs end to end; custody chain intact |
 | Analytics on the sample | 17 "face" detections at one fixed spot — a steel pot on a table. Now flagged **static** and not counted; the rule is tested |
-| Full drive | the acquisition pass with both carvers is running |
+| Full drive | one complete pass, 0 unreadable sectors, two USB drops healed by verified reconnects; MD5 `10496e7f842c020cbd47444cb270fbe2`, SHA-256 `04d7d4e05b14524b9f53b175ccc7e2b4156463b18e467e326da2a763405921d1` |
+| MPEG-PS carve, full drive | 2,516 streams, 923 GiB, ~6,300 h, every one dated from its `HK` descriptors: April 2021 (H.264) to 30 Aug 2024 (H.265 + G.711) |
+| Surviving Hikvision index | master sector copy + two identical HIKBTREE copies; 922 records on a 1 GiB block grid; 8 channels |
+| Camera attribution | 2,021 of 2,516 streams inside their block's record window; 495 older streams outside the index |
+| Independent checks of the attribution | every camera keeps one resolution (CH03/CH04 2560×1440, CH01/02/06 960×576, CH05/07/08 1280×720, apart from 3 streams each on CH03/CH04); all eight hold 761–788 h |
+| Recorded vs recovered | per the index each camera recorded continuously (~27 Jul – 30 Aug 2024); the carve recovered **99.6–99.7%** of those hours on every camera |
+| Time zone | index times equal `HK` times — both local; not derivable from these |
 
 ## 9. Vendor format status
 
@@ -289,7 +295,8 @@ Stream with Hikvision `HK` stream-map descriptors.
 |---|---|---|
 | Dahua / CP Plus | `spec_only` | layout read off real media and consistent throughout (§3), but no footage has been byte-matched against the recorder's own export |
 | Hikvision — video container | `spec_only` | MPEG-PS + `HK` descriptors decoded from real footage and cross-checked; not byte-matched to a Hikvision export |
-| Hikvision — filesystem | `synthetic_only` | the team's drive had been reformatted; the Hikvision filesystem on it was overwritten, so the parser still rests only on our fixture |
+| Hikvision — index records | `spec_only` | decoded from the surviving HIKBTREE copies on real media and cross-checked (resolution per camera, hours per camera, 99.6% recovered vs recorded); not byte-matched to an export |
+| Hikvision — full-filesystem parser (`parsers/hikvision.py`) | `synthetic_only` | written before we held media; its master-sector layout is still fixture-only |
 | Honeywell, TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand-string detection only |
 
 **To reach `validated` for Dahua/CP Plus:** export one clip with the DVR's

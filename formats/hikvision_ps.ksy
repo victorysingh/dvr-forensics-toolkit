@@ -16,8 +16,9 @@ doc: |
   before each keyframe (1 per second), H.264 at 960x576 (the 0x42 video
   descriptor holds 0x03C0 x 0x0240).
 
-  The Hikvision filesystem (master sector "HIKVISION@HANGZHOU", HIKBTREE
-  index) was overwritten on that drive; this file describes only the video.
+  On that drive the primary master sector was overwritten, but two HIKBTREE
+  copies survived near the end of the disk; `hikbtree_record` below is their
+  leaf record (OBSERVED, 922 records). parsers/hikbtree.py reads it.
 seq:
   - id: packs
     type: pack
@@ -125,6 +126,32 @@ types:
       low_bits:
         value: packed & 0x3f
         doc: OBSERVED always 32; undecoded.
+  hikbtree_record:
+    doc: OBSERVED. 48-byte leaf record of the HIKBTREE index.
+    seq:
+      - id: marker
+        contents: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]
+      - id: undecoded_08
+        size: 9
+      - id: channel
+        type: u1
+        doc: 1..N; 255 = an initialised, never-used block
+      - id: undecoded_12
+        size: 6
+      - id: start
+        type: u4le
+        doc: seconds since 1970 on the recorder's local clock (equals the HK time of the footage)
+      - id: end
+        type: u4le
+      - id: block_offset
+        type: u8le
+        doc: byte offset of the 1 GiB data block (base + N GiB; base 0x4C5E000 observed)
+      - id: undecoded_28
+        type: u4le
+        doc: 0x20 observed
+      - id: undecoded_2c
+        type: u4le
+        doc: small counter, meaning not established
   es_entries:
     seq:
       - id: items

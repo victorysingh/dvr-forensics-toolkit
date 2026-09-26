@@ -129,6 +129,19 @@ def hk_time(psm: Optional[bytes]) -> Optional[str]:
     return t.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def resolution(row: dict) -> Optional[str]:
+    """"WIDTHxHEIGHT" from the video entry's 0x42 descriptor in a report row
+    (observed: bytes 4-7 of its body, e.g. 0x03C0 x 0x0240 = 960x576)."""
+    for st in row.get("streams", []):
+        d = bytes.fromhex(st.get("descriptors_hex", ""))
+        i = d.find(b"\x42\x0e")
+        if i >= 0 and len(d) >= i + 10:
+            w, h = int.from_bytes(d[i + 6:i + 8], "big"), int.from_bytes(d[i + 8:i + 10], "big")
+            if w and h:
+                return f"{w}x{h}"
+    return None
+
+
 def psm_info(psm: bytes) -> dict:
     """Stream types and the raw "HK" descriptors of a Program Stream Map."""
     out = {"streams": [], "hk_descriptors": []}

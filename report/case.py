@@ -198,6 +198,20 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
             "streams": [{k: r.get(k) for k in ("id", "offset", "bytes", "packs", "duration_s",
                                                 "time_first_local", "time_last_local")}
                         for r in rows[:recordings_limit]]}
+        lab = _load(j("carve", "ps_labels.json"))
+        if lab:
+            tally: dict[str, int] = {}
+            for x in lab["streams"]:
+                tally[x["label"]] = tally.get(x["label"], 0) + 1
+            hidx = _load(j("carve", "hik_index.json")) or {}
+            case["ps_carve"]["labels"] = {
+                "sha256": _hashed(j("carve", "ps_labels.json")), "tally": dict(sorted(tally.items())),
+                "index_records": len(hidx.get("records", [])),
+                "index_channels": hidx.get("channels", {}), "index_base": hidx.get("base"),
+                "index_headers": hidx.get("headers", [])}
+            labels_by_id = {x["id"]: x["label"] for x in lab["streams"]}
+            for r in case["ps_carve"]["streams"]:
+                r["label"] = labels_by_id.get(r["id"])
         ex = _load(j("carve", "ps_extracted.json"))
         if ex:
             case["ps_carve"]["extracted"] = {
@@ -208,7 +222,8 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
     t = _load(j("timeline.json"))
     if t:
         case["timeline"] = {k: t.get(k) for k in ("clock", "cameras", "gaps", "correlations",
-                                                  "anomalies", "counts", "notes", "inputs")}
+                                                  "anomalies", "counts", "notes", "inputs",
+                                                  "index_coverage")}
         case["timeline"]["sha256"] = _hashed(j("timeline.json"))
         case["timeline"]["events"] = t.get("events", [])[:2000]
 

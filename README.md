@@ -54,7 +54,7 @@ python cli.py survey --device unknown.img    # draft the layout of an unknown ve
 python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, preserved blocks
 python cli.py prove  --out out/CASE-001 --offset 8388608
 
-python tests/test_pipeline.py               # 242 regression tests, no hardware
+python tests/test_pipeline.py               # 247 regression tests, no hardware
 python demo/tamper_demo.py                  # 2-minute stage demo
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
@@ -105,6 +105,7 @@ demo/      tamper_demo.py
 | Dahua DHFS 4.1 parser + extract | working on real media, `spec_only` |
 | Indexless carver, inline in the scan | working on real media, `spec_only` |
 | MPEG-PS carver (Hikvision video, dated) | working on real media, `spec_only` |
+| Hikvision index records → cameras for carved footage | working on real media, `spec_only` |
 | Metadata preservation | working |
 | Timeline (normalization, gaps, correlation) | working |
 | Report (HTML + JSON) and local UI | working |
