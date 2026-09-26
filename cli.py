@@ -1058,6 +1058,27 @@ def cmd_activity(args) -> int:
 def cmd_analyse_video(args) -> int:
     """Optional layer: faces and objects in extracted clips (lead, not evidence)."""
     import glob
+    if args.recount:
+        from analytics.static import recount
+        from core.hashing import sha256_file
+        path = os.path.join(args.out, "analytics", "analytics.json")
+        with open(path, "r", encoding="utf-8") as fh:
+            r = recount(json.load(fh))
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(r, fh, indent=1)
+        print(f"{BANNER} - analytics recount (stored boxes, no decoding)\n")
+        print("  counted       " + (", ".join(f"{k} {v}" for k, v in sorted(r["frames_with_totals"].items())) or "none"))
+        print("  not counted   " + (", ".join(f"{k} {v}" for k, v in sorted(r["flagged_not_counted"].items())) or "none")
+              + "  (static, or an implausible face box)")
+        ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+        if ledger.entries:
+            ledger.actor = ledger.entries[0].get("actor", "unknown")
+            ledger.case_id = ledger.entries[0].get("case_id", "")
+            ledger.append("video_analytics_recounted", {
+                "report": "analytics/analytics.json", "frames_with": r["frames_with_totals"],
+                "not_counted": r["flagged_not_counted"], "rule": r["implausible_rule"]},
+                data_hash=sha256_file(path))
+        return 0
     try:
         from analytics.detect import run
     except ImportError as exc:
@@ -1333,6 +1354,8 @@ def main() -> int:
     p.add_argument("--out", required=True, help="case directory")
     p.add_argument("--fps", type=float, default=1.0, help="frames analysed per second of video")
     p.add_argument("--ids", default="", help="comma-separated clip ids (default: all extracted)")
+    p.add_argument("--recount", action="store_true",
+                   help="re-apply the static/implausible rules to stored results, no decoding")
     p.set_defaults(func=cmd_analyse_video)
 
     p = sub.add_parser("label-ps",
