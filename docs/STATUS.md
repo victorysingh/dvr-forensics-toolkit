@@ -64,8 +64,9 @@ Named deliverables:
 | Top layer | Dahua DHFS 4.1 with an **empty** index — a Dahua-family recorder formatted it and never recorded |
 | Underneath | the Hikvision recorder's footage: **2,516 streams, 923 GiB, ~6,300 h**, every one dated, April 2021 (H.264) → 30 Aug 2024 (H.265 + audio) |
 | Hikvision index | a master copy and two HIKBTREE copies survived at the end of the disk: **922 records, 8 channels**; 2,021 streams attributed to a camera; the carve recovered **99.6–99.7%** of the hours the index says each camera recorded |
-| Analytics | on a 50-stream / 22 GB subset — see §5 |
-| Output | `out/drive2_Z9C2632A/` (report pending the analytics run) |
+| Camera labels checked against the picture | two decoded frames show "Camera 01" and "Camera 03" burned in, where the index gave CH01 and CH03; their on-screen clocks match the decoded times to within 2 s |
+| Analytics | 50-stream / 22 GB subset, 68,639 sampled frames: person 517, face 73, bus 1 — each with its camera and recorder time. 64 more "faces" were boxes spanning most of the frame (a floor, buckets) and are flagged implausible |
+| Output | `out/drive2_Z9C2632A/report.html` |
 
 Both drives: every block shared by independent reads is identical, apart
 from two blocks corrupted by a since-fixed bug (`VALIDATION_REPORT.md` §5–6).
@@ -100,8 +101,10 @@ writeblock-rule                      udev rule keeping a drive read-only across 
 - **A reconnected drive comes back writable.** The udev rules (serial- and
   adapter-keyed) re-apply the write block at enumeration; never reboot during
   a case (they live in `/run`).
-- **A detector will call a steel pot a face.** Static detections are flagged
-  and not counted.
+- **A detector will call a steel pot a face** — and a floor, and a stack of
+  buckets, at 0.99 confidence. Static detections and face boxes spanning most
+  of the frame are flagged and not counted; a score ranks what to watch, it
+  does not measure truth.
 
 ## 5. Open items for everyone
 
@@ -111,7 +114,6 @@ writeblock-rule                      udev rule keeping a drive read-only across 
 | Recorder time zone + clock error | to state UTC; today every time is the recorder's own clock | read from the units' settings, or the seizure-time photo method in the SOP |
 | Were the 23 Sep gaps on drive 1 the team's handling? | our own footprint must be stated | team memory |
 | Final project report | named deliverable | everyone |
-| Analytics on drive 2 | numbers for §2 | running at the time of writing |
 
 ## 6. For JP — your lane
 

@@ -1355,6 +1355,15 @@ def test_static_detections() -> None:
     people = [d for h in hits for d in h["detections"] if d["label"] == "person"]
     check("a detection fixed in place through the clip is static", all(d["static"] for d in faces))
     check("a moving detection is not static", not any(d["static"] for d in people))
+    from analytics.static import flag_implausible, recount
+    big = [{"t_s": 0, "detections": [{"label": "face", "score": 0.99, "box": [0.1, 0.1, 0.8, 0.8]},
+                                      {"label": "face", "score": 0.8, "box": [0.4, 0.4, 0.45, 0.47]}]}]
+    flag_implausible(big)
+    check("a face box spanning most of the frame is implausible, a small one is not",
+          big[0]["detections"][0]["implausible"] and not big[0]["detections"][1]["implausible"])
+    r = recount({"clips": [{"frames_analysed": 1, "detections": big}]})
+    check("recount counts only plausible, moving detections",
+          r["frames_with_totals"] == {"face": 1} and r["flagged_not_counted"] == {"face": 1})
 
 
 def test_hikbtree(tmp: str) -> None:

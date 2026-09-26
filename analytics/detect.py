@@ -29,7 +29,8 @@ from typing import Optional
 import numpy as np
 import onnxruntime as ort
 
-from analytics.static import STATIC_IOU, STATIC_MIN_FRAMES, STATIC_SHARE, flag_static
+from analytics.static import (STATIC_IOU, STATIC_MIN_FRAMES, STATIC_SHARE, counted,
+                              flag_implausible, flag_static)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS = {
@@ -172,18 +173,17 @@ def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
         if dets:
             hits.append({"t_s": round(t, 2), "detections": dets, "_rgb": rgb})
     flag_static(hits, frames)
+    flag_implausible(hits)
     counts: dict[str, int] = {}
     static: dict[str, int] = {}
     for h in hits:
-        for label in {d["label"] for d in h["detections"] if not d["static"]}:
+        for label in {d["label"] for d in h["detections"] if counted(d)}:
             counts[label] = counts.get(label, 0) + 1
-        for label in {d["label"] for d in h["detections"] if d["static"]}:
+        for label in {d["label"] for d in h["detections"] if not counted(d)}:
             static[label] = static.get(label, 0) + 1
     # thumbnails for the strongest frames with something that is not static
-    hits = [h for h in hits if any(not d["static"] for d in h["detections"])] + \
-        [h for h in hits if all(d["static"] for d in h["detections"])]
-    moving = [h for h in hits if any(not d["static"] for d in h["detections"])]
-    moving.sort(key=lambda h: -max(d["score"] for d in h["detections"] if not d["static"]))
+    moving = [h for h in hits if any(counted(d) for d in h["detections"])]
+    moving.sort(key=lambda h: -max(d["score"] for d in h["detections"] if counted(d)))
     hits = moving + [h for h in hits if h not in moving]
     thumbs = []
     if thumbs_dir:
