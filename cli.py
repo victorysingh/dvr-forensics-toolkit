@@ -1136,6 +1136,61 @@ def cmd_analyse_video(args) -> int:
     return 0
 
 
+def cmd_combine(args) -> int:
+    """One view across several recorders - on a shared axis only if earned.
+
+    Two DVRs from the same premises share no clock. A shared UTC axis needs
+    every case to state its recorder's timezone; without that the cases are
+    shown side by side, each on its own clock, and the command says per case
+    what is missing rather than quietly aligning them.
+    """
+    from analyse.combined import build, summary_lines
+    from core.contract import utc_now
+    from core.hashing import sha256_file
+    from report.html import render_combined
+
+    try:
+        view = build(args.cases)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    view["generated_utc"] = utc_now()
+    view["title"] = args.title
+    os.makedirs(args.out, exist_ok=True)
+    jpath = os.path.join(args.out, "combined.json")
+    with open(jpath, "w", encoding="utf-8") as fh:
+        json.dump(view, fh, indent=2)
+    hpath = os.path.join(args.out, "combined.html")
+    with open(hpath, "w", encoding="utf-8") as fh:
+        fh.write(render_combined(view))
+
+    print(f"{BANNER} - combined view across {len(view['cases'])} recorders\n")
+    for line in summary_lines(view):
+        print("  " + line if not line.startswith("  ") else line)
+    t = view["totals"]
+    print(f"\n  totals        {t['recorders']} recorders, {t['lanes']} lanes, "
+          f"{t['events']} events, {t['hours_recovered']:,.1f} h recovered, "
+          f"{t['gaps']} gaps, {t['anomalies']} anomalies")
+    jh = sha256_file(jpath)
+    # Each source case records that it was read into a combined view: the view
+    # is derived from those cases, so it belongs in their chains too.
+    for c in view["cases"]:
+        ledger = CustodyLedger(os.path.join(c["path"], "custody_ledger.jsonl"))
+        if ledger.entries:
+            ledger.actor = ledger.entries[0].get("actor", "unknown")
+            ledger.case_id = ledger.entries[0].get("case_id", "")
+            ledger.append("combined_view_built", {
+                "output": jpath.replace(os.sep, "/"),
+                "with_cases": [x["case_id"] for x in view["cases"]],
+                "axis": view["axis"]["axis"]}, data_hash=jh)
+    print(f"\n[+] {jpath}\n      sha256 {jh}")
+    print(f"[+] {hpath}")
+    if not view["axis"]["shared"]:
+        print("\n  the recorders are NOT on one axis - see 'needed' above; "
+              "side-by-side lanes are each on their own recorder clock")
+    return 0
+
+
 def cmd_read_osd(args) -> int:
     """Read the burned-in OSD of carved streams: camera title, and the clock.
 
@@ -1444,6 +1499,15 @@ def main() -> int:
     p.add_argument("--recount", action="store_true",
                    help="re-apply the static/implausible rules to stored results, no decoding")
     p.set_defaults(func=cmd_analyse_video)
+
+    p = sub.add_parser("combine",
+                       help="one view across several recorders (separate axes unless "
+                            "every case states its timezone)")
+    p.add_argument("--cases", nargs="+", required=True, metavar="DIR",
+                   help="two or more case directories, each with a timeline.json")
+    p.add_argument("--out", required=True, help="directory for combined.json and combined.html")
+    p.add_argument("--title", default="Combined view", help="heading for the page")
+    p.set_defaults(func=cmd_combine)
 
     p = sub.add_parser("read-osd",
                        help="optional: camera titles and the clock from the burned-in OSD")
