@@ -40,8 +40,10 @@ VENDOR_MATRIX = {
         "media": "CP Plus drive held",
         "basis": "the CP Plus unit's platter carries Dahua DHFS 4.1; on disk the two are "
                  "indistinguishable, so attribution to CP Plus rests on the seized unit's label"},
-    "Honeywell": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
-                  "media": "none", "basis": "firmware/volume string signature only"},
+    "Honeywell": {"family": "Honeywell NVR (GPT + proprietary video partition)",
+                  "parser": "Honeywell", "parser_status": "spec_only", "media": "none",
+                  "basis": "plugins/honeywell.py, written from Yoon & Hwang, DFRWS USA 2026 "
+                           "(arXiv:2605.07430); no Honeywell disk read by the team"},
     "TP-Link": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
                 "media": "none", "basis": "firmware string signature only"},
     "Godrej": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",

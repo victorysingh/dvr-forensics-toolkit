@@ -29,7 +29,7 @@ they are evidence).
 | Chain of custody | **done** — hash-chained ledger; every action recorded with the hash of what it produced | `acquire/ledger.py` |
 | Reports | **done** — HTML + JSON, hashed into the ledger | `report/` |
 | AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence" | `analyse/activity.py`, `analytics/` |
-| Support 5–6 OEMs | **honest answer**: 3 decoded from real media (Dahua, CP Plus, Hikvision), 5 detected (Honeywell, TP-Link, Godrej, Uniview, Matrix) with a plugin route and a survey tool for onboarding. For those 5, their video can still be recovered with no parser: `carve-annexb` finds raw H.264/H.265 by its parameter sets (no dates or cameras; `synthetic_only`) | `plugins/`, `detect/survey.py`, `recover/annexb.py` |
+| Support 5–6 OEMs | **honest answer**: 3 decoded from real media (Dahua, CP Plus, Hikvision); **Honeywell parsed from published research** (Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) as a drop-in plugin, `spec_only`, no media; 4 detected (TP-Link, Godrej, Uniview, Matrix) with a plugin route and a survey tool for onboarding. For those 4, their video can still be recovered with no parser: `carve-annexb` finds raw H.264/H.265 by its parameter sets (no dates or cameras; `synthetic_only`) | `plugins/`, `detect/survey.py`, `recover/annexb.py` |
 
 Named deliverables:
 
@@ -99,7 +99,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 320 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 330 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 
@@ -144,10 +144,11 @@ real media; the rest is open, and there is new work that fits it.
 
 **Open, and yours if you want them:**
 
-1. **Honeywell plugin.** No Honeywell media exists. The honest route is:
-   `survey` on any Honeywell disk or image you can find → a plugin from
-   `plugins/_template.py` → status `detected_not_parsed` until real media
-   parses. Without media, stop at detection and say so.
+1. ~~**Honeywell plugin.**~~ **Built** as `plugins/honeywell.py` from
+   Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430), the first published analysis of Honeywell's surveillance
+   filesystem: parse, recordings per camera, extract, and recovery after a
+   format. `spec_only` — the next step is any real Honeywell disk or image,
+   to move it on.
 2. **Datasets.** The CFReDS Heimvision `.E01` (link and licence still
    unconfirmed) or any other labelled DVR image. Each new image is a chance
    to validate a parser on a second recorder.

@@ -26,14 +26,14 @@ The machine-readable companion for each format is a Kaitai `.ksy` file in
 
 | | Dahua | CP Plus | Hikvision | Honeywell | TP-Link | Godrej | Uniview | Matrix |
 |---|---|---|---|---|---|---|---|---|
-| Filesystem | DHFS 4.1 **O** | DHFS 4.1 on our unit **O** (Dahua OEM) | `HIKVISION@HANGZHOU` master sector + `HIKBTREE` index **P**; index records decoded from surviving copies on our drive **O** | ? | ? | ? | ? | ? |
-| Video container | DHAV frames **O P** | DHAV **O** | MPEG-2 Program Stream with `HK` stream-map descriptors **O** | ? | ? | ? | ? | ? |
-| Codec seen | H.265 **O** | H.265 **O** | H.264, 960×576, 25 fps **O** | ? | ? | ? | ? | ? |
-| Camera id in frames | none — every camera writes channel 0; aux frames carry the channel title **O** | same **O** | none in the stream; the index names the channel per 1 GiB block **O** | ? | ? | ? | ? | ? |
-| Time encoding | packed local date, no zone, + ms counter **O P** | same **O** | `HK` descriptor 0x40: year byte + packed M/D/h/m/s, local, no zone **O** | ? | ? | ? | ? | ? |
+| Filesystem | DHFS 4.1 **O** | DHFS 4.1 on our unit **O** (Dahua OEM) | `HIKVISION@HANGZHOU` master sector + `HIKBTREE` index **P**; index records decoded from surviving copies on our drive **O** | GPT; Partition 1 proprietary (header, block list, channel list, record state, video area), Partition 2 ext4 **P** | ? | ? | ? | ? |
+| Video container | DHAV frames **O P** | DHAV **O** | MPEG-2 Program Stream with `HK` stream-map descriptors **O** | 20-byte Custom Header before each NAL unit **P** | ? | ? | ? | ? |
+| Codec seen | H.265 **O** | H.265 **O** | H.264, 960×576, 25 fps **O** | H.264 (unit supports H.265) **P** | ? | ? | ? | ? |
+| Camera id in frames | none — every camera writes channel 0; aux frames carry the channel title **O** | same **O** | none in the stream; the index names the channel per 1 GiB block **O** | none in the frame header; the channel list names it per chunk **P** | ? | ? | ? | ? |
+| Time encoding | packed local date, no zone, + ms counter **O P** | same **O** | `HK` descriptor 0x40: year byte + packed M/D/h/m/s, local, no zone **O** | Unix seconds (lists), Unix microseconds per frame; zone not stated **P** | ? | ? | ? | ? |
 | Detection in this tool | superblock magic + DHAV frames | Dahua-family structures + `CPPlusIPCam` channel title **O** | master magic + index header; `HK` stream-map descriptor **O** | `HONEYWELL` string | `TP-LINK` string | `GODREJ` string | `UNIVIEW` string | `MATRIX` string (weak: a common word) |
-| Parser | yes | yes (Dahua parser) | index records (real media) + MPEG-PS carver; full-FS parser fixture only | no | no | no | no | no |
-| Our status | `spec_only` | `spec_only` | `synthetic_only` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` |
+| Parser | yes | yes (Dahua parser) | index records (real media) + MPEG-PS carver; full-FS parser fixture only | yes, drop-in plugin from the paper | no | no | no | no |
+| Our status | `spec_only` | `spec_only` | container and index `spec_only`; full-FS parser `synthetic_only` | `spec_only` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` |
 | Real media held | via the CP Plus drive | yes | footage on the second drive, under a Dahua-family format | no | no | no | no | no |
 
 ---
@@ -90,7 +90,29 @@ real media** (`spec_only`: observed and cross-checked, not byte-matched to a
 Hikvision export). The full-filesystem parser in `parsers/hikvision.py`,
 written before we held media, stays `synthetic_only`.
 
-## 4. Honeywell, TP-Link, Godrej, Uniview, Matrix
+## 4. Honeywell
+
+From Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430), section 5, which studied a Honeywell HN35080200 NVR with eight
+HN40E-2030I cameras (H.264) on 160 GB and 250 GB disks. Implemented as the
+drop-in plugin `plugins/honeywell.py`; status `spec_only` — no Honeywell
+disk has been read by the team.
+
+| Aspect | Finding | Tag |
+|---|---|---|
+| Layout | GPT; sector 34 holds Machine Data (device ID, model name); Partition 1 proprietary, Partition 2 a 10 GB ext4 | P (5.1–5.2) |
+| Partition 1 | header 0x0–0x3FFF; block list 0x40000; channel list 0x400000; record state 0x40000000; video from 0x80000000 | P (5.4) |
+| Header | video start, next write, available and total space, each ×0x1000 ("rounded at the third digit"), little-endian; block group start time at 0x44 | P (5.4.1) |
+| Channel list | 16-byte entries: channel, stream (0x00 main, 0x20 sub), length ×0x1000, start time (Unix s), offset ×0x1000 | P (5.4.3) |
+| Frame header | 20 bytes before each NAL unit: type (0x82 IDR, 0x02 other), 80 01 00, width, height, NAL length, Unix µs | P (5.4.6) |
+| Deletion | formatting resets the header and removes the indexes but leaves the video until overwritten from the start of the video area; expiry and overwrite rewrite metadata the same way | P (6) |
+| Ambiguities, not guessed | byte order of the frame header's size and length; whether "the 12th byte" of a block index counts from 0 or 1; the origin of channel offsets; 4 bytes of each channel entry | — |
+
+The plugin measures what the paper leaves open (the channel-offset origin,
+whether a NAL length counts the start code) instead of assuming it, and
+recovers timestamped footage from a formatted disk by walking the frame
+headers.
+
+## 4a. TP-Link, Godrej, Uniview, Matrix
 
 What the tool does today for each: recognise a brand string (`HONEYWELL`,
 `TP-LINK`, `GODREJ`, `UNIVIEW`, `MATRIX`) wherever it appears on the
