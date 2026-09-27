@@ -178,6 +178,18 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                                                    "frames_match", "codec", "files")}
                             for k, v in ex.get("streams", {}).items()}}
 
+    es = _load(j("carve", "annexb_report.json"))
+    if es:
+        rows = es.get("streams", [])
+        case["es_carve"] = {
+            "sha256": _hashed(j("carve", "annexb_report.json")), "stats": es.get("stats"),
+            "validation_status": es.get("validation_status"), "notes": es.get("notes", []),
+            "streams_total": len(rows), "bytes": sum(r["bytes"] for r in rows),
+            "streams": [{k: r.get(k) for k in ("id", "codec", "width", "height", "offset",
+                                                "bytes", "slices", "keyframes")}
+                        for r in rows[:recordings_limit]],
+            "extracted": _load(j("carve", "es_extracted.json"))}
+
     ps = _load(j("carve", "ps_report.json"))
     if ps:
         rows = ps.get("streams", [])
