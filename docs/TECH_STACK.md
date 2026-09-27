@@ -42,6 +42,11 @@ capability matters more before the idea-round deadline than scan speed.
 
 The fix, when we take it (expected to reach I/O-bound, 120–200 MB/s):
 
+*Status 28 Sep: taps now run in a process each (`acquire/parallel.py`, a
+form of item 3), the four NAL searches are one pass (part of item 1), and
+item 2 turned out not to matter - the three hashes cost ~0.2 s per 128 MiB.
+See PERFORMANCE.md §5.*
+
 1. **One regex pass, not six.** Detection currently scans every byte six times:
    the signature alternation, `bytes.count` for start codes, and four separate
    NAL `findall`s. Merging them into a single alternation and classifying by

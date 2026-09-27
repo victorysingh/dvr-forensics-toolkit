@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import Counter
 import zlib
 from dataclasses import dataclass, field
 from typing import Optional
@@ -41,6 +42,17 @@ _H264_PPS = re.compile(rb"\x00\x00\x01[\x08\x28\x48\x68]")
 _H264_IDR = re.compile(rb"\x00\x00\x01[\x05\x25\x45\x65]")
 # HEVC: type is bits 1-6 of the first header byte; VPS=32, SPS=33, PPS=34.
 _H265_PS = re.compile(rb"\x00\x00\x01[\x40\x42\x44]")
+
+# All four in ONE pass, classified by the header byte captured.  The counts
+# equal four separate passes exactly: every match is 00 00 01 X with X never
+# 0x00, and a second start code cannot begin inside such a match unless X
+# were 0x00 - so no two matches of the patterns above can overlap.
+_NAL_KIND = {**{b: "sps" for b in b"\x07\x27\x47\x67"},
+             **{b: "pps" for b in b"\x08\x28\x48\x68"},
+             **{b: "idr" for b in b"\x05\x25\x45\x65"},
+             **{b: "hevc_ps" for b in b"\x40\x42\x44"}}
+_NAL_ANY = re.compile(rb"\x00\x00\x01([" + b"".join(
+    re.escape(bytes([b])) for b in sorted(_NAL_KIND)) + rb"])")
 
 
 @dataclass
@@ -118,20 +130,26 @@ class SignatureScanner:
             base = offset
 
         found = 0
+        # This loop runs once per match - on a Dahua disk, once per frame -
+        # so each match's text and position are read once and the lookups
+        # held locally.  The matches, counts and hits are unchanged.
+        counts, by_pattern, has_tail = self.hit_counts, self._by_pattern, bool(self._tail)
         for m in self._re.finditer(buf):
-            abs_off = base + m.start()
+            start, g = m.start(), m.group()
+            abs_off = base + start
             # Skip only matches that lie WHOLLY inside the carry-over tail -
             # those were complete in the previous block and already reported.
             # A match that starts in the tail but ends past the boundary was
             # invisible last time and must be reported now, which is the whole
             # reason the tail exists.
-            if self._tail and abs_off + len(m.group()) <= offset:
+            if has_tail and abs_off + len(g) <= offset:
                 continue
             found += 1
-            for s in self._by_pattern[m.group()]:
-                self.hit_counts[s.id] = self.hit_counts.get(s.id, 0) + 1
-                if self.hit_counts[s.id] <= MAX_HITS_PER_SIGNATURE:
-                    self.hits.append(self._make_hit(s, abs_off, buf, m.start(), base))
+            for s in by_pattern[g]:
+                n = counts.get(s.id, 0) + 1
+                counts[s.id] = n
+                if n <= MAX_HITS_PER_SIGNATURE:
+                    self.hits.append(self._make_hit(s, abs_off, buf, start, base))
 
         summary = BlockSummary(
             index=index, offset=offset, length=len(data), sha256=sha256_hex,
@@ -161,10 +179,11 @@ class SignatureScanner:
         summary.start_codes = data.count(sig.START_CODE_3)
         if summary.start_codes == 0:
             return
-        summary.sps = len(_H264_SPS.findall(data))
-        summary.pps = len(_H264_PPS.findall(data))
-        summary.idr = len(_H264_IDR.findall(data))
-        summary.hevc_ps = len(_H265_PS.findall(data))
+        kinds = {"sps": 0, "pps": 0, "idr": 0, "hevc_ps": 0}
+        for header, n in Counter(_NAL_ANY.findall(data)).items():
+            kinds[_NAL_KIND[header[0]]] += n
+        summary.sps, summary.pps = kinds["sps"], kinds["pps"]
+        summary.idr, summary.hevc_ps = kinds["idr"], kinds["hevc_ps"]
 
         self.codec.start_codes += summary.start_codes
         self.codec.sps += summary.sps
