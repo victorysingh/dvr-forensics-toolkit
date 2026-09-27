@@ -95,6 +95,7 @@ systemd-inhibit --what=sleep:idle python cli.py scan --device /dev/sdX \
 |---|---|
 | `--carve` | also recover footage in the same pass (Dahua-family disks). Costs CPU, not time |
 | `--carve-ps` | also recover MPEG Program Stream footage (Hikvision and others), dated from Hikvision's `HK` stream maps — including footage under a drive another recorder reformatted |
+| `--carve-annexb` | also recover raw H.264/H.265 by its parameter sets — the last resort for a recorder we have no parser for (§3.4f) |
 | `--reconnect-wait N` | if the drive drops off USB, wait up to N minutes for it to come back write-blocked and verified, then continue the same hashes. `0` fails at once |
 | `--max-mb N` | triage: stop after N MiB. The pass is marked incomplete and its hashes must not be quoted |
 | `--resume` | continue an interrupted scan. The Merkle root is valid; the linear MD5/SHA-256 are not |
@@ -262,6 +263,29 @@ unit on a Dahua-format disk agrees — CP Plus units are commonly Dahua-built),
 and the platter's model strings against the unit. A disagreement is a finding
 to explain, not an error: a Hikvision unit whose disk carries Dahua
 structures is a disk that another recorder formatted.
+
+### 3.4f Footage from a recorder we have no parser for
+
+When detection names a vendor with no parser (Honeywell, TP-Link, Godrej,
+Uniview, Matrix) — or names nobody — recover the video anyway:
+
+```bash
+python cli.py carve-annexb --device /dev/sdb --out out/CASE-001     # or scan --carve-annexb
+python cli.py extract-carved --device /dev/sdb --out out/CASE-001 --format annexb
+```
+
+Almost every recorder stores standard H.264 or H.265. A stream is started
+only at a sequence parameter set that parses within the standard's limits to
+a real picture size (random bytes pass as one about 3 times in 20,000), and is
+split at a new parameter set or a gap, never merged. Files come out as
+`carve/es_streams/es-NNNNN.h264|.h265`, hashed.
+
+Know what they are not: **no date and no camera** (a bare stream carries
+neither), and the unknown container's own bytes sit between frames — the
+footage plays, decoders conceal the rest, but it is not the recorder's
+bitstream byte for byte. Two cameras with identical settings interleaved on
+the disk may share a stream. The next step for that vendor is `survey`, then
+a plugin (§8).
 
 ### 3.5 Look at the results
 

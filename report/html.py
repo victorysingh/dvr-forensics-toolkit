@@ -302,6 +302,26 @@ def render(case: dict, examiner_notes: str = "") -> str:
                       [[k, v["file"], size(v["bytes"]), mono(v["sha256"])]
                        for k, v in sorted(pex.items())[:200]]))
 
+    es = case.get("es_carve")
+    if es:
+        add("<h2>5c. Raw H.264/H.265 carved without a parser</h2>")
+        add(f"<p>The last resort for a recorder whose format has no parser: streams found by "
+            f"their parameter sets alone. {es['streams_total']:,} streams, "
+            f"{size(es['bytes'])}. Status <b>{e(es['validation_status'])}</b>.</p>")
+        add("<p><b>What these are not.</b> They carry no date and no camera. Bytes of the "
+            "unknown container sit between their frames: the footage plays, but it is not "
+            "the recorder's bitstream byte for byte. Two cameras with identical settings "
+            "interleaved on the disk may share a stream.</p>")
+        add(table(["Stream", "Codec", "Picture", "Offset", "Size", "Slices", "Keyframes"],
+                  [[r["id"], r["codec"], f"{r['width']}x{r['height']}", f"0x{r['offset']:X}",
+                    size(r["bytes"]), r["slices"], r["keyframes"]]
+                   for r in es["streams"][:100]]))
+        ex = (es.get("extracted") or {}).get("streams", {})
+        if ex:
+            add(table(["Stream", "File", "Size", "SHA-256"],
+                      [[k, v["file"], size(v["bytes"]), mono(v["sha256"])]
+                       for k, v in sorted(ex.items())[:200]]))
+
     # -- timeline --------------------------------------------------------
     t = case.get("timeline")
     if t:

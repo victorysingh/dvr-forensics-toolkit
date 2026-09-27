@@ -29,7 +29,7 @@ they are evidence).
 | Chain of custody | **done** — hash-chained ledger; every action recorded with the hash of what it produced | `acquire/ledger.py` |
 | Reports | **done** — HTML + JSON, hashed into the ledger | `report/` |
 | AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence" | `analyse/activity.py`, `analytics/` |
-| Support 5–6 OEMs | **honest answer**: 3 decoded from real media (Dahua, CP Plus, Hikvision), 5 detected (Honeywell, TP-Link, Godrej, Uniview, Matrix) with a plugin route and a survey tool for onboarding | `plugins/`, `detect/survey.py` |
+| Support 5–6 OEMs | **honest answer**: 3 decoded from real media (Dahua, CP Plus, Hikvision), 5 detected (Honeywell, TP-Link, Godrej, Uniview, Matrix) with a plugin route and a survey tool for onboarding. For those 5, their video can still be recovered with no parser: `carve-annexb` finds raw H.264/H.265 by its parameter sets (no dates or cameras; `synthetic_only`) | `plugins/`, `detect/survey.py`, `recover/annexb.py` |
 
 Named deliverables:
 
@@ -88,6 +88,8 @@ read-osd                             camera titles and the clock from the burned
                                      for the streams no index accounts for
 identify-model / record-device       the recorder's model: strings on the platter outside the
                                      video, and as read off the unit - checked against each other
+carve-annexb                         raw H.264/H.265 by parameter sets - footage from a vendor
+                                     with no parser (no dates, no cameras)
 validate-export                      recovered footage byte-matched against the recorder's own
                                      export - the test for `validated`
 combine                              several recorders in one view - on one axis only where
@@ -97,7 +99,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 310 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 320 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 

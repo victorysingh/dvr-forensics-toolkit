@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 310 tests, all should pass
+python tests/test_pipeline.py     # 320 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -94,6 +94,7 @@ If those pass, the engine below is intact:
 | **Dahua DHFS 4.1 parser + per-camera extract** | `parsers/dahua.py` | **working on real media, `spec_only`** — see `docs/DAHUA_DHFS.md` |
 | Remnants of overwritten footage (Dahua) | `parsers/dahua.py` | working, `spec_only` |
 | Indexless DHAV carver, index cross-reference | `recover/carver.py` | working on real media, `spec_only` |
+| Raw H.264/H.265 carver for a vendor with no parser (anchored on parameter sets; no dates, no cameras) | `recover/annexb.py`, `cli.py carve-annexb`, `scan --carve-annexb` | working, `synthetic_only` |
 | MPEG-PS carver (Hikvision footage, dated from the `HK` descriptor; works on a reformatted drive) | `recover/pscarve.py` | working on real media, `spec_only` |
 | Hikvision HIKBTREE index records → camera labels for carved footage | `parsers/hikbtree.py`, `cli.py label-ps` | working on real media, `spec_only` |
 | Carve inside the acquisition pass (`scan --carve`) | `recover/carver.py`, `acquire/scanner.py` | working; identical to a standalone carve on real media |

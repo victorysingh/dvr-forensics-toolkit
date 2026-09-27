@@ -83,7 +83,7 @@ produce reliable and legally defensible forensic results.
 | Device Identification | `detect/signatures.py`, `detect/engine.py`, `detect/model.py` | working: vendor by confidence score; model from platter strings and the examiner's reading of the unit, cross-checked |
 | Acquisition | `acquire/device.py`, `acquire/scanner.py` | working |
 | File System & Format Parsing | `parsers/`, `plugins/` | Dahua DHFS on real media (`spec_only`, two drives); Hikvision index records and MPEG-PS container on real media (`spec_only`), full-FS parser `synthetic_only`; drop-in plugins |
-| Recovery | `parsers/dahua.py` remnants; `recover/carver.py`; `recover/pscarve.py` | Dahua remnants + indexless DHAV carver, and an MPEG-PS carver for Hikvision footage (recovered from under a reformatted drive, dated), both on real media (`spec_only`) and run inside the acquisition pass |
+| Recovery | `parsers/dahua.py` remnants; `recover/carver.py`; `recover/pscarve.py`; `recover/annexb.py` (vendors with no parser) | Dahua remnants + indexless DHAV carver, and an MPEG-PS carver for Hikvision footage (recovered from under a reformatted drive, dated), both on real media (`spec_only`) and run inside the acquisition pass |
 | Timeline Analysis | `analyse/timeline.py` | working: zone + measured clock error, gaps, cross-camera correlation |
 | Reporting | `report/`, `viewer/` | working: HTML + JSON report, dependency-free viewer |
 | Machine Learning | `analyse/activity.py` | motion activity from compressed frame sizes (lead, not evidence); face/object detection not started — needs the optional decode + ONNX layer |
