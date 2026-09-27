@@ -23,7 +23,8 @@ they are evidence).
 | Decode proprietary formats | **done on real media** — Dahua DHAV → H.265; Hikvision MPEG-PS + `HK` descriptors → H.264/H.265; ffmpeg decodes both | `recover/carver.py`, `recover/pscarve.py` |
 | Extract video and metadata | **done** — `.dav`/`.h265` and `.ps`, per-file SHA-256 | `extract-carved`, `extract` |
 | Recover deleted footage | **done on real media** — Dahua: 2,246 streams outside every index; Hikvision: a whole reformatted drive, 2,516 streams | carvers |
-| Normalize timestamps | **partly** — recorder clock decoded and cross-checked against burned-in clocks on both vendors; conversion to UTC needs the recorder's zone and clock error, which we have not read from the units | `analyse/timeline.py` |
+| Attribute recovered footage to a camera | **done where an index survived** — 2,021 of 2,516 Hikvision streams from HIKBTREE records. For the 2,741 streams no index covers, `read-osd` reads the title the recorder painted into the picture; built and tested, OCR accuracy not yet measured | `parsers/hikbtree.py`, `analytics/osd.py` |
+| Normalize timestamps | **partly** — recorder clock decoded and cross-checked against burned-in clocks on both vendors (by eye on three frames; `read-osd` now does it per stream, untested against real pixels); conversion to UTC needs the recorder's zone and clock error, which we have not read from the units | `analyse/timeline.py`, `analytics/osd.py` |
 | Correlate events across cameras | **done** — gaps per camera, recorder-wide gaps, recurring patterns, multi-camera activity peaks | `analyse/timeline.py`, `analyse/activity.py` |
 | Chain of custody | **done** — hash-chained ledger; every action recorded with the hash of what it produced | `acquire/ledger.py` |
 | Reports | **done** — HTML + JSON, hashed into the ledger | `report/` |
@@ -83,12 +84,14 @@ label-ps                             HIKBTREE index -> cameras for carved PS foo
 extract / extract-carved             footage out, hashed
 timeline                             clock rule, gaps, recurring patterns, coverage
 activity / analyse-video             leads: motion, faces, objects
+read-osd                             camera titles and the clock from the burned-in picture,
+                                     for the streams no index accounts for
 report / verify / prove / serve      report, re-verification, Merkle proofs, viewer
 survey                               draft the layout of an unknown vendor's disk
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 247 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 271 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 
@@ -140,12 +143,30 @@ real media; the rest is open, and there is new work that fits it.
 2. **Datasets.** The CFReDS Heimvision `.E01` (link and licence still
    unconfirmed) or any other labelled DVR image. Each new image is a chance
    to validate a parser on a second recorder.
-3. **Camera attribution from the burned-in text (OCR).** Footage outside every
-   index has no camera — but the picture carries it: "Parking",
-   "Road View 1/2" (CP Plus), "Camera 04" (Hikvision). Tesseract with a
-   character whitelist on the title region (`TECH_STACK.md` already chose
-   Tesseract) would label those streams. Same approach reads the burned-in
-   clock for the seizure-time clock check.
+3. ~~**Camera attribution from the burned-in text (OCR).**~~ **Built, and it
+   needs the one thing this machine could not do.** `cli.py read-osd`
+   (`analytics/osd.py`, rules in `analytics/osd_rules.py`, 22 tests) reads the
+   channel title and the clock out of the picture, votes across sampled frames,
+   and cross-checks the OSD clock against the date decoded from the container.
+   It is wired into the report (section 6c), the viewer and the ledger.
+
+   **It has never been run on a rendered frame** — neither ffmpeg nor Tesseract
+   was installed where it was written, so the OCR accuracy is untested and the
+   status is `synthetic_only`. The next step is small and is the whole of the
+   remaining work: on a machine with `ffmpeg` and `tesseract-ocr`, run it over
+   the streams whose frames §8a and §8b of `VALIDATION_REPORT.md` already
+   record being read by eye (*Parking*, *Road View 1/2*; *Camera 01*,
+   *Camera 03*) and compare. Matching what the eye read, on two vendors, makes
+   it `spec_only`; disagreements belong in the validation report with the frame
+   as the arbiter. `docs/OSD_OCR.md` §6 has the table to compare against.
+
+   Read `docs/OSD_OCR.md` §3 before changing the rules: no OSD position is
+   hardcoded (four bands are scored on the footage itself), a label needs
+   frames to agree before it is claimed, and an ambiguous date stays ambiguous
+   until the container's own date resolves it. §7 records the stronger route
+   that was deliberately *not* taken — the channel title in Dahua `0xF1` aux
+   frames, which is on-platter bytes rather than pixels, and what it would
+   take.
 4. **Frames that do not decode.** On drive 1, 2,087 video frames after a
    keyframe still fail to decode (4,980 more precede an overwritten keyframe,
    which is expected). Suspected: a reference frame lost mid-stream. Needs

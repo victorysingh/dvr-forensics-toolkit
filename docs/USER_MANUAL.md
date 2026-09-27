@@ -145,6 +145,31 @@ shake also produce peaks: on the CP Plus drive the strongest cluster is every
 camera at once around dusk. Use it to decide what footage to watch first,
 never as a finding.
 
+### 3.4b Camera names from the burned-in picture (a lead, not evidence)
+
+Optional, and it needs two binaries the forensic core does not:
+`sudo apt install ffmpeg tesseract-ocr`.
+
+```bash
+python cli.py read-osd --out out/CASE-001 --unlabelled
+```
+
+Footage no index accounts for carries no camera in its bytes — but the recorder
+painted the channel title into the picture. This samples frames from each
+stream, reads the title and the displayed clock, and claims a label only when
+enough frames agree; the share that agreed is reported with it. `--unlabelled`
+restricts the run to exactly those streams, which is what you normally want.
+
+It also compares the clock in the picture with the date decoded from the
+container: two routes to the recorder's own clock, which should agree. A
+disagreement is reported and is not resolved for you — the frame is the
+arbiter. Nothing here converts a time to UTC.
+
+A title is what the installer typed ("Parking"), not a channel number, and it
+is OCR of pixels: confirm it in the frame before it goes near a finding. The
+OCR's accuracy has not yet been measured on real footage — `docs/OSD_OCR.md`
+§6 says exactly what that means and how to settle it.
+
 ### 3.5 Look at the results
 
 ```bash
@@ -157,7 +182,7 @@ python cli.py serve            # then open http://127.0.0.1:8150
 | Vendors | all eight PS OEMs with status, parser, real media held; the add-a-vendor pipeline; plugins |
 | Acquisition & custody | device, hashes, preserved regions, every ledger entry |
 | Filesystem | parser status, volumes, recordings, field provenance |
-| Recovered | carve labels, footage outside every index, remnants |
+| Recovered | carve labels, footage outside every index, remnants, camera names read from the picture |
 | Timeline | camera lanes, gaps, other footage; correlations and anomalies |
 | Report | the report, printable |
 

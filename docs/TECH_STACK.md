@@ -104,7 +104,7 @@ UI can do must also be doable from `cli.py` on a machine with no browser.
 |---|---|---|---|
 | Ed25519 signing | `cryptography` | PyNaCl | No stdlib option; widely audited |
 | Codec validation | bundled `ffmpeg` / `ffprobe` | PyAV | External binary, no Python ABI risk, and we need the CLI tools anyway |
-| OSD clock OCR | **Tesseract** + digit whitelist | PaddleOCR, EasyOCR | ~30 MB vs ~2 GB of torch. DVR clock text is high-contrast, fixed-position, fixed-font — near best case for Tesseract |
+| OSD clock OCR | **Tesseract** + digit whitelist | PaddleOCR, EasyOCR | ~30 MB vs ~2 GB of torch. DVR clock text is high-contrast, fixed-position, fixed-font — near best case for Tesseract. **Trap found when it was built:** `tessedit_char_whitelist` is honoured by the legacy engine and silently ignored by the LSTM engine in Tesseract 4 and 5, so the whitelist is also re-applied to the output in Python (`analytics/osd_rules.py`) — passing the flag alone does nothing on a modern install |
 | AI triage | **ONNX Runtime** + YOLO exported to ONNX | `ultralytics` + torch | ~50 MB vs ~2.5 GB. On an air-gapped deployment that difference *is* the deployment story |
 | Case index | `sqlite3` (stdlib) | Postgres | Single file, portable, zero setup, already in Python |
 | Web API | FastAPI + uvicorn | Flask, Django | Async, typed, automatic OpenAPI — the schema doubles as user-manual material |

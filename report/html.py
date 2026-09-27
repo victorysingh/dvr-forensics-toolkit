@@ -353,6 +353,38 @@ def render(case: dict, examiner_notes: str = "") -> str:
                                                   for d in h["detections"])]
                    for h in an["top"][:30]]))
 
+    osd = case.get("osd")
+    if osd:
+        s = osd["summary"]
+        lay = osd.get("layout") or {}
+        add("<h2>6c. Burned-in OSD — camera titles and the recorder's clock</h2>")
+        add("<div class='box warn'>Optional layer. A title here is <b>OCR of pixels</b>, not a "
+            "decoded field: it is the channel name the recorder painted into the picture, read "
+            "by a machine, and it carries the share of sampled frames that agreed. It names a "
+            "camera and identifies no person. Confirm any label in the frame itself.</div>")
+        add(f"<p>{s.get('streams_named_by_the_picture', 0)} of {s.get('streams', 0)} streams "
+            f"were named by the picture, from {osd.get('frames_per_stream')} sampled frames each"
+            + (f"; the title reads in the <b>{e((lay.get('title') or {}).get('band', '?'))}</b> "
+               f"band and the clock in the <b>{e((lay.get('clock') or {}).get('band', '?'))}</b> "
+               "band of this recorder's picture" if lay else "") + ".</p>")
+        if s.get("titles"):
+            add(table(["Title read from the picture", "Streams"],
+                      [[k, v] for k, v in s["titles"].items()]))
+        add("<h3>Clock in the picture vs the date in the container</h3>")
+        add("<p>Both are the recorder's own wall clock reached by different routes, so they "
+            "should agree. A disagreement means one of the two is wrong, and this does not "
+            "decide which. Neither is UTC: see section 6 for the clock model.</p>")
+        add("<p>" + (", ".join(f"{e(k)}: {v}" for k, v in s.get("clock_checks", {}).items())
+                     or "nothing compared") + ".</p>")
+        if osd.get("clock_disagreements"):
+            add(table(["Clip", "Picture − container (s)", "Detail"],
+                      [[d["clip"], f"{d['offset_s']:+.0f}" if d.get("offset_s") is not None else "-",
+                        d.get("detail") or ""] for d in osd["clock_disagreements"]]))
+        if osd.get("named"):
+            add(table(["Clip", "Title", "Confidence", "Frames agreeing", "Clock check"],
+                      [[n["clip"], n["title"], f"{n['confidence']:.2f}", n["frames"],
+                        n.get("clock") or "-"] for n in osd["named"][:30]]))
+
     # -- custody ---------------------------------------------------------
     add("<h2>7. Chain of custody</h2>")
     add(f"<p>Append-only ledger; each entry carries the SHA-256 of the previous one. "
@@ -372,7 +404,9 @@ def render(case: dict, examiner_notes: str = "") -> str:
         "<li>Recorder timestamps are the device's own wall clock. Conversion to UTC relies on the "
         "zone and clock error stated in section 6; without them no UTC is asserted.</li>"
         "<li>Carved footage outside the index cannot be attributed to a camera from the frame "
-        "data alone.</li>"
+        "data alone: the DHAV channel byte is 0 for every camera. Where the recorder burned the "
+        "channel title into the picture, section 6c reads it — as a lead from OCR, never as a "
+        "decoded field.</li>"
         "<li>Vendor names for OEM-rebadged recorders (e.g. CP Plus on Dahua DHFS) rest on the "
         "seized unit, not on the platter.</li>"
         "<li>The drive was not imaged in full; the whole-device hashes, per-block hash map and "
@@ -394,6 +428,8 @@ def render(case: dict, examiner_notes: str = "") -> str:
         inputs["activity.json"] = a["sha256"]
     if an:
         inputs["analytics/analytics.json"] = an["sha256"]
+    if osd:
+        inputs["analytics/osd.json"] = osd["sha256"]
     if ps:
         inputs["carve/ps_report.json"] = ps["sha256"]
         if ps.get("labels"):
