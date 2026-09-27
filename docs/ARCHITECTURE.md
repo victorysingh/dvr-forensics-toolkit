@@ -202,6 +202,10 @@ out/<case>/
   timeline.json           events, gaps, correlations, anomalies, clock rule
   report.html, report.json
 ```
+A combined view over several case directories (`cli.py combine`) writes
+`combined.json` and `combined.html` to a directory of its own - it belongs to
+no single case - and records itself in every source case's ledger.
+
 
 ---
 

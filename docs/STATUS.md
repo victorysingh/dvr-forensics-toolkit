@@ -86,12 +86,14 @@ timeline                             clock rule, gaps, recurring patterns, cover
 activity / analyse-video             leads: motion, faces, objects
 read-osd                             camera titles and the clock from the burned-in picture,
                                      for the streams no index accounts for
+combine                              several recorders in one view - on one axis only where
+                                     every case states its recorder's timezone
 report / verify / prove / serve      report, re-verification, Merkle proofs, viewer
 survey                               draft the layout of an unknown vendor's disk
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 271 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 282 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 
@@ -114,7 +116,7 @@ writeblock-rule                      udev rule keeping a drive read-only across 
 | Item | Why it matters | Needs |
 |---|---|---|
 | Byte-match a recovered clip against a native DVR export | the only route to `validated` for any vendor | the physical CP Plus DVR |
-| Recorder time zone + clock error | to state UTC; today every time is the recorder's own clock | read from the units' settings, or the seizure-time photo method in the SOP |
+| Recorder time zone + clock error | to state UTC; today every time is the recorder's own clock — and, since `combine` landed, the only thing keeping the two drives off one axis | read from the units' settings, or the seizure-time photo method in the SOP |
 | Were the 23 Sep gaps on drive 1 the team's handling? | our own footprint must be stated | team memory |
 | Final project report | named deliverable | everyone |
 
@@ -171,8 +173,23 @@ real media; the rest is open, and there is new work that fits it.
    keyframe still fail to decode (4,980 more precede an overwritten keyframe,
    which is expected). Suspected: a reference frame lost mid-stream. Needs
    checking frame by frame.
-5. **Timeline across the two drives.** Both recorders share nothing, but the
-   timeline format is the same; a combined view for the demo is cheap.
+5. ~~**Timeline across the two drives.**~~ **Built:** `cli.py combine --cases
+   out/A out/B --out out/COMBINED` writes `combined.json` and a
+   `combined.html` page, and records the view in each source case's ledger.
+
+   The part worth reviewing is what it refuses to do. Both recorders share
+   nothing — no common clock, no common zone — so a single axis has to be
+   earned: the view draws one only when *every* case states its recorder's
+   timezone, and otherwise shows the cases side by side on their own clocks,
+   says on the page that they are not aligned, and makes **no** statement
+   about what was recorded at the same time. On a shared axis, a recorder
+   whose clock error was never measured is named as a caveat rather than
+   absorbed. 11 tests cover this, including the one that matters: no
+   simultaneity claim without a shared axis.
+
+   For our two drives it will say "not aligned" until someone reads the zones
+   off the units — which is the open item in §5 above, and this is now a
+   second thing waiting on it.
 
 **Prathyushree** (H.264 and timestamp research, output verification): the
 `HK` time decoding (`formats/hikvision_ps.ksy`) and the DHAV packed date are

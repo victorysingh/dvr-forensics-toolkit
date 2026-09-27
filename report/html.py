@@ -444,3 +444,87 @@ def render(case: dict, examiner_notes: str = "") -> str:
             "<meta name='viewport' content='width=device-width,initial-scale=1'>"
             f"<title>Forensic Report {e(case.get('case_id'))}</title><style>{CSS}</style></head>"
             f"<body><main>{''.join(parts)}</main></body></html>")
+
+
+def render_combined(view: dict) -> str:
+    """The combined view across recorders, as a page for the demo.
+
+    Deliberately not a forensic report: it cites each case's report rather
+    than restating it, and its first statement is always whether these
+    recorders may be read on one axis at all.
+    """
+    ax = view.get("axis", {})
+    shared = ax.get("shared")
+    parts: list[str] = []
+    add = parts.append
+
+    add(f"<h1>{e(view.get('title') or 'Combined view')}</h1>")
+    add(f"<p class='muted'>{len(view.get('cases', []))} recorders &middot; generated "
+        f"{e(view.get('generated_utc') or utc_now())}</p>")
+
+    add(f"<div class='box {'' if shared else 'warn'}'><b>"
+        f"{'One UTC axis' if shared else 'Separate axes — these recorders are not aligned'}"
+        f".</b> {e((ax.get('reason') or '')[:1].upper() + (ax.get('reason') or '')[1:])}</div>")
+    if ax.get("needs"):
+        add("<p><b>To place these recorders on one axis, each of these is needed:</b></p><ul>"
+            + "".join(f"<li>{e(n)}</li>" for n in ax["needs"]) + "</ul>")
+    if ax.get("caveats"):
+        add("<p class='muted'><b>Caveats:</b></p><ul class='muted'>"
+            + "".join(f"<li>{e(n)}</li>" for n in ax["caveats"]) + "</ul>")
+
+    t = view.get("totals", {})
+    add("<h2>1. Across the case</h2>")
+    add(table(["Recorders", "Lanes", "Events", "Hours recovered", "Acquired", "Gaps", "Anomalies"],
+              [[t.get("recorders"), t.get("lanes"), f"{t.get('events', 0):,}",
+                f"{t.get('hours_recovered', 0):,.1f}", size(t.get("bytes_acquired")),
+                t.get("gaps"), t.get("anomalies")]]))
+    add("<p class='muted'>Totals add up what was recovered from several devices. They "
+        "summarise the case, not anything that happened at the premises.</p>")
+
+    add("<h2>2. The recorders</h2>")
+    add(table(["Case", "Device", "Serial", "Size", "Complete pass", "Lanes", "Events",
+               "Span (recorder clock)", "Span (UTC)"],
+              [[c["case_id"], c["device"].get("model") or c["device"].get("path") or "-",
+                c["device"].get("serial") or "-", size(c["device"].get("size_bytes")),
+                "yes" if c.get("complete_pass") else "NO",
+                len(c["lanes"]), f"{c['events']:,}",
+                f"{c['span_local']['first'] or '?'} → {c['span_local']['last'] or '?'}",
+                (f"{c['span_utc']['first']} → {c['span_utc']['last']}"
+                 if c["span_utc"]["first"] else "not asserted")]
+               for c in view.get("cases", [])]))
+
+    for c in view.get("cases", []):
+        add(f"<h3>{e(c['case_id'])} — lanes</h3>")
+        add(f"<p class='muted'>Clock: {e((c.get('clock') or {}).get('rule'))}</p>")
+        add(table(["Lane", "Recordings", "First (recorder clock)", "Last", "Hours", "Gaps"],
+                  [[name, v["recordings"], v["first_local"], v["last_local"],
+                    f"{v['hours']:,.1f}", v["gaps"]]
+                   for name, v in c["lanes"].items()]))
+
+    add("<h2>3. Recorders running at the same time</h2>")
+    if not shared:
+        add("<p class='muted'>Not determined: the recorders are on separate axes, so no "
+            "statement about simultaneity is available. See the top of this page.</p>")
+    elif not view.get("overlaps"):
+        add("<p class='muted'>No two recorders hold footage covering the same period.</p>")
+    else:
+        add(table(["Recorders", "From (UTC)", "To (UTC)", "Duration"],
+                  [[" + ".join(o["cases"]), o["from_utc"], o["to_utc"],
+                    f"{o['duration_s'] / 3600:,.1f} h"] for o in view["overlaps"]]))
+        add("<p class='muted'>That two recorders were both running is a fact about the "
+            "premises. What either of them saw is not decided here.</p>")
+
+    add("<h2>4. Notes and inputs</h2>")
+    add("<div class='box warn'><ul>"
+        + "".join(f"<li>{e(n)}</li>" for n in view.get("notes", [])) + "</ul></div>")
+    add(table(["Case timeline", "SHA-256"],
+              [[k, mono(v)] for k, v in (view.get("inputs") or {}).items()]))
+    add("<footer>This page cites each case's own report and timeline; it restates "
+        "nothing. Each recorder's findings, hashes and chain of custody live in that "
+        "case's report.</footer>")
+
+    return ("<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            f"<title>{e(view.get('title') or 'Combined view')}</title>"
+            f"<style>{CSS}</style></head>"
+            f"<body><main>{''.join(parts)}</main></body></html>")
