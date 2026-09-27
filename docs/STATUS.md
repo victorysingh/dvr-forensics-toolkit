@@ -89,6 +89,8 @@ read-osd                             camera titles and the clock from the burned
                                      for the streams no index accounts for
 identify-model / record-device       the recorder's model: strings on the platter outside the
                                      video, and as read off the unit - checked against each other
+ewf-info --verify                    an E01 image's stored MD5/SHA-1 reproduced (every command
+                                     also reads .E01 directly)
 carve-annexb                         raw H.264/H.265 by parameter sets - footage from a vendor
                                      with no parser (no dates, no cameras)
 certificate                          BSA 2023 s.63 certificate, Part A or B, drafted from the
@@ -102,7 +104,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 340 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 345 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 

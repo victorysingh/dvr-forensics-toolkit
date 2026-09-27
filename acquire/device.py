@@ -133,6 +133,7 @@ class BlockDevice:
         self.path = path
         self._handle = None
         self._fh = None
+        self._ewf = None                 # an E01 image, read through acquire/ewf.py
         self.is_raw = self._looks_raw(path)
         self.sector_size = sector_size or 512
         self.size_bytes = 0
@@ -180,6 +181,15 @@ class BlockDevice:
             else:
                 self.size_bytes = os.path.getsize(self.path)
                 self.model = "disk image file"
+                from acquire import ewf
+                if ewf.is_ewf(self.path):
+                    try:
+                        self._ewf = ewf.EwfImage(self.path)
+                    except ewf.EwfError as exc:
+                        raise DeviceError(str(exc)) from exc
+                    self.size_bytes = self._ewf.size_bytes
+                    self.sector_size = self._ewf.bytes_per_sector
+                    self.model = f"EWF (E01) image, {len(self._ewf.paths)} segment(s)"
 
     def _probe_linux(self) -> None:
         """Model/serial/bus from udev's database - plain file reads, no
@@ -272,6 +282,9 @@ class BlockDevice:
         if self._fh is not None:
             self._fh.close()
             self._fh = None
+        if self._ewf is not None:
+            self._ewf.close()
+            self._ewf = None
 
     def __enter__(self) -> "BlockDevice":
         return self
@@ -315,6 +328,8 @@ class BlockDevice:
                 raise DeviceError(f"read {length}B at {offset} failed: "
                                   f"WinError {ctypes.get_last_error()}")
             return buf.raw[:got.value]
+        if self._ewf is not None:
+            return self._ewf.read(offset, length)
         self._fh.seek(offset)
         buf = bytearray()
         while len(buf) < length:

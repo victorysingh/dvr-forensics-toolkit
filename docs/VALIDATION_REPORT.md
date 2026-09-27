@@ -18,7 +18,8 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 348 pass, 0 fail: 340 on generated data with known ground truth, 8 on real media |
+| Automated tests | 353 pass, 0 fail: 345 on generated data with known ground truth, 8 on real media |
+| E01 reader | a generated E01 set (19 segments, compressed and stored chunks) reads back byte-identical; scan and carve of it equal the raw image's (MD5, SHA-256, Merkle root, streams); a damaged chunk is reported unreadable. On a real E01, `ewf-info --verify` against the image's own stored MD5 is the test - not yet run |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
