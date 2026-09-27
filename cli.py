@@ -223,6 +223,9 @@ def cmd_parse(args) -> int:
                 print("  remnants      scanning every indexed cluster in the image "
                       "for older footage ...")
                 remnants = parser.remnant_recordings(dev)
+            elif getattr(args, "remnants", False) and hasattr(parser, "recover_video_area"):
+                print("  video area    walking frame headers, no index needed ...")
+                remnants = parser.recover_video_area(dev)
     except PermissionNeeded as exc:
         print(f"[!] {exc}")
         return 2
@@ -271,6 +274,17 @@ def cmd_parse(args) -> int:
             print(f"  {rec.id}  camera ?  @0x{rec.offset:<10X} "
                   f"{human_size(rec.length):>10s}  {rec.frame_count:5d} frames  "
                   f"{_when(rec)}")
+        if len(remnants) > args.limit:
+            print(f"  ... {len(remnants) - args.limit} more")
+    elif getattr(args, "remnants", False) and hasattr(parser, "video_area_stats"):
+        vs = parser.video_area_stats
+        print(f"\n--- footage found by frame headers ({len(remnants)}) {'-' * 24}")
+        print(f"  {vs['frames']} frames in {vs['runs']} chunk(s); {vs['padding_skips']} "
+              f"padding skip(s). One run per chunk, camera unknown: frame headers carry "
+              f"no channel")
+        for rec in remnants[:args.limit]:
+            print(f"  {rec.id}  @0x{rec.offset:<10X} {human_size(rec.length):>10s}  "
+                  f"{rec.frame_count:5d} frames  {_when(rec)}")
         if len(remnants) > args.limit:
             print(f"  ... {len(remnants) - args.limit} more")
 
@@ -327,6 +341,42 @@ def _when(rec) -> str:
     return "no timestamp"
 
 
+def _extract_with_plugin(args, plugin) -> int:
+    """A plugin's own reassembly (e.g. Honeywell): playable video plus a
+    manifest with its hash, the parse's status, and what the plugin measured."""
+    from core.contract import SCHEMA_VERSION, dump_json, utc_now
+
+    os.makedirs(args.out, exist_ok=True)
+    print(f"{BANNER} - {args.vendor} extract {args.recording}\n")
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            result = plugin.parse(dev)
+            stats = plugin.extract_recording(dev, args.recording,
+                                             os.path.join(args.out, args.recording))
+    except KeyError:
+        print(f"[!] no recording {args.recording!r}. Run `parse --vendor {args.vendor}` "
+              f"to list recording ids.")
+        return 1
+    except (PermissionNeeded, DeviceError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    manifest = {"schema_version": SCHEMA_VERSION, "generated_utc": utc_now(),
+                "tool": "ps26150-forensics extract", "vendor": args.vendor,
+                "source_device": info.path, "write_block_method": info.write_block_method,
+                "parser_rule": plugin.parser_rule, "validation_status": result.validation_status,
+                "recording": args.recording, "output": stats}
+    mpath = os.path.join(args.out, args.recording + ".manifest.json")
+    dump_json(manifest, mpath)
+    print(f"  [+] {stats['file']}  {human_size(stats['bytes'])}  {stats['frames']} frames  "
+          f"sha256 {stats['sha256'][:16]}...")
+    print(f"  span          {stats.get('first_time_utc')} -> {stats.get('last_time_utc')} "
+          f"(recorder clock, zone not established)")
+    print(f"  [+] {os.path.basename(mpath)}")
+    print(f"\n  status {result.validation_status.upper()}")
+    return 0
+
+
 def cmd_extract(args) -> int:
     """Reassemble one recording into playable files, with a hashed manifest.
 
@@ -340,8 +390,11 @@ def cmd_extract(args) -> int:
     from parsers import dahua, get_parser
 
     if args.vendor != "Dahua":
-        print(f"[!] extract is implemented for Dahua DHFS only; {args.vendor!r} "
-              f"recordings can be listed with `parse` but not reassembled yet.")
+        plugin = get_parser(args.vendor)
+        if plugin is not None and hasattr(plugin, "extract_recording"):
+            return _extract_with_plugin(args, plugin)
+        print(f"[!] extract is implemented for Dahua DHFS and plugins that offer it; "
+              f"{args.vendor!r} recordings can be listed with `parse` but not reassembled yet.")
         return 1
     parser = get_parser(args.vendor)
     if args.tz_offset is not None:

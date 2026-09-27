@@ -266,7 +266,7 @@ structures is a disk that another recorder formatted.
 
 ### 3.4f Footage from a recorder we have no parser for
 
-When detection names a vendor with no parser (Honeywell, TP-Link, Godrej,
+When detection names a vendor with no parser (TP-Link, Godrej,
 Uniview, Matrix) — or names nobody — recover the video anyway:
 
 ```bash
@@ -351,6 +351,12 @@ preserved structure came from this drive, without the drive.
 | `not enough free space` from `extract-carved` | narrow the selection with `--ids` or `--label` |
 
 ## 8. Adding a vendor
+
+`plugins/honeywell.py` is the worked example: one file, written from a
+published paper, registered by dropping it into `plugins/`. It uses
+`parse`, `extract --vendor Honeywell --recording <id>`, and
+`parse --vendor Honeywell --remnants` (footage by frame headers after a
+format) with no change to the core.
 
 Start with a survey of the unknown disk (write-blocked, or an image):
 

@@ -2187,6 +2187,87 @@ def test_annexb_carver(tmp: str) -> None:
           and "no date and no camera" in page)
 
 
+def test_honeywell(tmp: str) -> None:
+    """The Honeywell plugin against a disk built to Yoon & Hwang (2026) s.5:
+    it reads the paper's fields, finds recordings per camera, extracts
+    playable video, and still recovers footage after a format."""
+    print("\n[Honeywell plugin (spec_only, from Yoon & Hwang 2026)]")
+    import argparse
+    import cli
+    from detect import model as M
+    from report.case import vendor_matrix
+    from tests import synth_honeywell as SH
+
+    hw = get_parser("Honeywell")
+    img = os.path.join(tmp, "honeywell.img")
+    truth = SH.build(img)
+    with BlockDevice(img) as dev:
+        found = hw.detect(dev)
+        res = hw.parse(dev)
+    v = res.volume
+    check("the drop-in plugin registers, detects the layout, and says spec_only",
+          hw is not None and found and res.validation_status == "spec_only"
+          and all(f["source"] == "published" for f in res.field_provenance))
+    check("header fields decoded x0x1000 (the paper's 'rounded at the third digit')",
+          v["header"]["video_start"] == SH.VIDEO_START
+          and v["header"]["block_group_start"] == SH.T0 and v["block_indexes"] == 6,
+          str(v["header"]))
+    check("machine data in sector 34 gives the model and device ID",
+          any(SH.MODEL in s for s in v["machine_data_strings"])
+          and any(SH.DEVICE_ID in s for s in v["machine_data_strings"]),
+          str(v["machine_data_strings"]))
+    check("channel offsets' origin measured, not assumed: the video area",
+          v["channel_offset_origin"] == "video area" and v["channel_indexes"] == 12
+          and v["codec"] == "h264", str(v))
+    ids = [r.id for r in res.recordings]
+    check("recordings per camera, split where recording paused",
+          ids == ["hw-ch00-main-0000", "hw-ch00-main-0001", "hw-ch01-main-0000",
+                  "hw-ch01-main-0001"]
+          and res.recordings[0].start_utc == "2025-11-26T21:48:19Z", str(ids))
+
+    with BlockDevice(img) as dev:
+        st = hw.extract_recording(dev, "hw-ch00-main-0000", os.path.join(tmp, "hw_rec"))
+    with open(os.path.join(tmp, "hw_rec.h264"), "rb") as fh:
+        out = fh.read()
+    check("extract: the camera's NAL units without the custom headers, frame times kept",
+          out == b"".join(truth["nals"][(0, False)]) and st["frames"] == 90
+          and st["length_counted_start_code"] > 0 and st["first_time_utc"] == "2025-11-26T21:48:19Z",
+          str({k: st[k] for k in ("frames", "length_counted_start_code", "padding_skips")}))
+
+    fmt = os.path.join(tmp, "honeywell_formatted.img")
+    SH.build(fmt, format=True)
+    with BlockDevice(fmt) as dev:
+        res_f = hw.parse(dev)
+        runs = hw.recover_video_area(dev)
+    check("after a format the index is gone - and the footage is not (paper s.6)",
+          res_f.recordings == [] and len(runs) == truth["chunks_total"]
+          and sum(r.frame_count for r in runs) == truth["frames"]
+          and all(r.camera_id == "unknown" for r in runs), f"{len(runs)} runs")
+
+    with BlockDevice(os.path.join(tmp, "unknown_vendor.img")) as dev:
+        not_hw = hw.detect(dev)
+    check("a disk with no GPT Honeywell layout is not detected", not not_hw)
+
+    ms = M.ModelSearch()
+    with open(img, "rb") as fh:
+        ms.feed(0, fh.read(1 << 16))
+    cands = ms.result({})["candidates"]
+    row = next(r for r in vendor_matrix() if r["vendor"] == "Honeywell")
+    check("identify-model reads the model from the machine data; the matrix lists the parser",
+          [c["model"] for c in cands] == [SH.MODEL] and cands[0]["kind"] == "recorder"
+          and row["parser"] == "Honeywell" and row["parser_status"] == "spec_only",
+          f"{cands} {row}")
+
+    rc = cli.cmd_extract(argparse.Namespace(device=img, vendor="Honeywell",
+                                            recording="hw-ch01-main-0001",
+                                            out=os.path.join(tmp, "hw_out"), tz_offset=None))
+    man = json.load(open(os.path.join(tmp, "hw_out", "hw-ch01-main-0001.manifest.json"),
+                         encoding="utf-8"))
+    check("extract --vendor Honeywell works through the plugin, with a hashed manifest",
+          rc == 0 and man["validation_status"] == "spec_only"
+          and man["output"]["frames"] == 90 and len(man["output"]["sha256"]) == 64)
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -2221,6 +2302,7 @@ def main() -> int:
         test_validate_export(tmp)
         test_model(tmp)
         test_annexb_carver(tmp)
+        test_honeywell(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
