@@ -58,7 +58,7 @@ python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, p
 python cli.py prove  --out out/CASE-001 --offset 8388608
 python cli.py validate-export --export clip.dav --against out/REF-001/clips --out out/REF-001
 
-python tests/test_pipeline.py               # 345 regression tests, no hardware
+python tests/test_pipeline.py               # 351 regression tests, no hardware
 python cli.py ewf-info --image case.E01 --verify   # any command also takes an .E01
 python -m validate.realmedia --case1 out/CASE-001 --image1 head.dd   # every real-media check
 python demo/tamper_demo.py                  # 2-minute stage demo
@@ -125,7 +125,7 @@ demo/      tamper_demo.py
 | Motion activity from frame sizes (lead, not evidence) | working |
 | Video decode, face/object detection | not started (optional layer) |
 | BSA s.63 certificate (draft from the case record) | working; wording to be checked against the Gazette |
-| CASE/UCO export | not started |
+| CASE/UCO export (JSON-LD; `Conforms: True` under the official `case_validate`) | working |
 
 Nothing is `validated`: that needs a byte-match between recovered footage and
 the recorder's own export. The CP Plus drive (Dahua-family DHFS) is real

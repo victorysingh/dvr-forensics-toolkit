@@ -961,6 +961,30 @@ def _extract_annexb(args) -> int:
     return 0 if not bad else 1
 
 
+def cmd_case_export(args) -> int:
+    """The case as CASE/UCO JSON-LD, for other forensic tools."""
+    from core.hashing import sha256_file
+    from report import case_uco
+
+    doc = case_uco.build(args.out)
+    path = os.path.join(args.out, "case.jsonld")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=1)
+    kinds: dict[str, int] = {}
+    for n in doc["@graph"]:
+        kinds[n["@type"]] = kinds.get(n["@type"], 0) + 1
+    print(f"{BANNER} - CASE/UCO export\n")
+    for k, v in sorted(kinds.items()):
+        print(f"  {v:6d}  {k}")
+    ledger = _case_ledger(args.out)
+    if ledger:
+        ledger.append("case_exported", {"file": "case.jsonld", "nodes": len(doc["@graph"])},
+                      data_hash=sha256_file(path))
+        print("  SHA-256 recorded in the custody ledger")
+    print(f"\n[+] {path}")
+    return 0
+
+
 def cmd_ewf_info(args) -> int:
     """What an E01 image holds, and - with --verify - whether this reader
     reproduces the MD5/SHA-1 the image stores for its own media."""
@@ -2027,6 +2051,11 @@ def main() -> int:
     p.add_argument("--device", default="", help="or read the serial from this node")
     p.add_argument("--user", default="", help="also grant this user READ-only access")
     p.set_defaults(func=cmd_writeblock_rule)
+
+    p = sub.add_parser("case-export",
+                       help="the case as CASE/UCO JSON-LD (the forensic exchange standard)")
+    p.add_argument("--out", required=True, help="case directory")
+    p.set_defaults(func=cmd_case_export)
 
     p = sub.add_parser("ewf-info",
                        help="an E01 image's segments, geometry and stored hashes; --verify "

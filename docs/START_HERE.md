@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 345 tests, all should pass
+python tests/test_pipeline.py     # 351 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -114,7 +114,7 @@ If those pass, the engine below is intact:
 | Burned-in OSD: camera titles and the clock, for footage no index names | `analytics/osd.py`, `analytics/osd_rules.py`, `cli.py read-osd` | rules and orchestration tested, `synthetic_only` — **never run on a rendered frame**; see `docs/OSD_OCR.md` §6 |
 | Video decode (MP4), face/object detection | — | not started (optional layer: ffmpeg, ONNX Runtime — see TECH_STACK) |
 | BSA s.63 certificate (draft, Part A/B, from the case's own hashes) | `report/s63.py`, `cli.py certificate` | working; wording to be checked against the Gazette |
-| CASE/UCO export | — | not started |
+| CASE/UCO export: drive, recorder, ledger actions, every file with its hash and byte ranges | `report/case_uco.py`, `cli.py case-export` | working; a sample validates under `case_validate` 0.18.0 |
 
 **Real media:** two DVR drives are held. The CP Plus unit's SkyHawk
 (`WWD4A3NX`) carries Dahua-family DHFS 4.1 — the Dahua parser was built
