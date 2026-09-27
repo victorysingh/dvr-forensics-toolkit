@@ -81,9 +81,11 @@ FAMILIES = [
                 _p(rb"SATATYA ?[A-Z]{2,5}[0-9A-Z-]{2,14}"),
                 "unknown to us", "Matrix SATATYA product line"),
     ModelFamily("honeywell", "Honeywell",
-                _p(rb"H(?:EN|RGX?|RDP)[0-9]{3,5}[0-9A-Z-]{0,8}"),
-                "Honeywell NVR filesystem (published tools; spec only)",
-                "Honeywell HEN NVRs, HRG/HRGX/HRDP DVRs"),
+                _p(rb"(?:H(?:EN|RGX?|RDP)[0-9]{3,5}[0-9A-Z-]{0,8}|HN[0-9]{8}"
+                   rb"|HN[0-9]{2}[A-Z]-[0-9A-Z]{3,6})"),
+                "GPT disk, proprietary video partition, 20-byte header per H.264 NAL unit "
+                "(published: Yoon & Hwang, DFRWS USA 2026)",
+                "Honeywell HEN/HN NVRs, HRG/HRGX/HRDP DVRs, HNxxE cameras"),
 ]
 # Godrej: no model numbering we could pin down, so no pattern - its units
 # are found by the brand string in detect/signatures.py or not at all.
@@ -100,6 +102,7 @@ KIND = [
     ("tplink", re.compile(r"^VIGI"), "recorder"),
     ("uniview", re.compile(r"^NVR"), "recorder"),
     ("matrix", re.compile(r"^SATATYA"), "recorder"),
+    ("honeywell", re.compile(r"^HN[0-9]{2}[A-Z]-"), "camera"),
     ("honeywell", re.compile(r"^H"), "recorder"),
 ]
 

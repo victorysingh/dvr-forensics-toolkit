@@ -58,7 +58,7 @@ python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, p
 python cli.py prove  --out out/CASE-001 --offset 8388608
 python cli.py validate-export --export clip.dav --against out/REF-001/clips --out out/REF-001
 
-python tests/test_pipeline.py               # 320 regression tests, no hardware
+python tests/test_pipeline.py               # 330 regression tests, no hardware
 python demo/tamper_demo.py                  # 2-minute stage demo
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
@@ -107,6 +107,7 @@ demo/      tamper_demo.py
 | Recorder model (platter strings + examiner's reading, cross-checked) | working; not yet run on real media |
 | Partition parsing (MBR/GPT) | working |
 | Hikvision FS parser | working, `synthetic_only` |
+| Honeywell NVR (plugin, from Yoon & Hwang 2026) | working, `spec_only` (no Honeywell media) |
 | Dahua DHFS 4.1 parser + extract | working on real media, `spec_only` |
 | Indexless carver, inline in the scan | working on real media, `spec_only` |
 | MPEG-PS carver (Hikvision video, dated) | working on real media, `spec_only` |
