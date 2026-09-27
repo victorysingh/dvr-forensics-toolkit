@@ -80,7 +80,7 @@ produce reliable and legally defensible forensic results.
 
 | PS module | Where it lives | State |
 |---|---|---|
-| Device Identification | `detect/signatures.py`, `detect/engine.py` | working |
+| Device Identification | `detect/signatures.py`, `detect/engine.py`, `detect/model.py` | working: vendor by confidence score; model from platter strings and the examiner's reading of the unit, cross-checked |
 | Acquisition | `acquire/device.py`, `acquire/scanner.py` | working |
 | File System & Format Parsing | `parsers/`, `plugins/` | Dahua DHFS on real media (`spec_only`, two drives); Hikvision index records and MPEG-PS container on real media (`spec_only`), full-FS parser `synthetic_only`; drop-in plugins |
 | Recovery | `parsers/dahua.py` remnants; `recover/carver.py`; `recover/pscarve.py` | Dahua remnants + indexless DHAV carver, and an MPEG-PS carver for Hikvision footage (recovered from under a reformatted drive, dated), both on real media (`spec_only`) and run inside the acquisition pass |

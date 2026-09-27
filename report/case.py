@@ -275,6 +275,17 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                 for s in osd.get("streams", [])
                 if s.get("clock", {}).get("verdict") == "disagrees"][:50]}
 
+    record = _load(j("device_record.json"))
+    platter = _load(j("model.json"))
+    if record or platter:
+        from detect import model
+        case["model"] = {
+            "observations": (record or {}).get("observations", []),
+            "record_sha256": _hashed(j("device_record.json")) if record else None,
+            "platter": platter, "platter_sha256": _hashed(j("model.json")) if platter else None,
+            "checks": model.check((record or {}).get("observations", []), platter,
+                                  (scan or {}).get("detections"))}
+
     case["vendors"] = vendor_matrix((scan or {}).get("detections"))
     case["files"] = {n: _hashed(j(n)) for n in ("scan_report.json", "blockmap.jsonl",
                                                 "custody_ledger.jsonl")
