@@ -86,7 +86,52 @@ sets out the fix, deferred on purpose until the parsers landed:
 The DHAV carve (56.6 MiB/s alone) is now the slowest single task and the next
 candidate.
 
-## 5. Recommendation for the next acquisition
+## 5. Update, 28 Sep: taps in parallel, a faster carve
+
+Section 4's limit - a pass that is CPU-bound - is now largely lifted, with
+no change to any output.
+
+**What changed**
+
+- **Each tap runs in its own process** (`acquire/parallel.py`; the default
+  for `scan`, `--no-parallel` to switch it off). The main process still
+  hashes and detects; the carvers and the activity count stop waiting for
+  each other. Blocks reach the workers through shared memory, not pipes:
+  pickling 8 MiB blocks into four queues had cut the main process from 69 to
+  25 MiB/s on its own, with the workers doing nothing (measured).
+- **The DHAV carver** no longer recomputes the oldest stream's position on
+  every frame, and no longer finds a stream in its list by comparing
+  dataclasses field by field. Its output is identical to the previous
+  carver's on every test image, including with stream retirement forced
+  (1, 4 and 32 MiB) so that path was exercised.
+- **Detection** counts the four kinds of NAL header in one regex pass
+  instead of four. The counts are provably the same (no two such matches can
+  overlap), and the block summaries, codec profile and signature hits were
+  compared block by block, old code against new.
+
+**Measured, same run, same machine** (1 GiB synthetic image):
+
+| | MiB/s |
+|---|---|
+| one pass, taps in the scanning process | 12.5 |
+| **one pass, taps in parallel** | **28.0 (2.24x)** |
+| scan alone (hashes, Merkle map, detection) - now the ceiling | 35.4 |
+| DHAV carve alone | 51.0 |
+
+**Why only same-run ratios are quoted.** This laptop's speed moved by about
+3x between runs on the same day - the scan alone measured 104 MiB/s in the
+morning and 32-35 MiB/s later (Windows Defender scanning the freshly written
+test images, and power/thermal state). A ratio inside one run is sound; an
+absolute figure from one run is a statement about the laptop's mood.
+
+**What it means for a 1 TB drive.** Even in the slow state, the parallel
+pass (28.0 MiB/s) is faster than the USB 2 bridge (23.4 MiB/s), so the drive
+is the limit again: **~11.3 h**, where the serial pass in the same state would
+take ~21 h. On USB 3 the main process - hashing and detection, 104 MiB/s in
+the fast state - is now what sets the pace; measure it on the acquisition
+workstation before planning around a USB 3 dock.
+
+## 6. Recommendation for the next acquisition
 
 - Use a **USB 3 dock**. Over USB 2 the drive is the limit, and nothing in
   software shortens an 11-hour read.

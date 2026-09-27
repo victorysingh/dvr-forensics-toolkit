@@ -93,6 +93,7 @@ class CarvedStream:
     counters: dict[str, list[int]] = field(default_factory=dict)
     # Index label tally, filled while carving when an index is supplied.
     tally: dict[str, int] = field(default_factory=dict)
+    retired: bool = False           # gone quiet and moved out of the active list
 
     @property
     def last(self) -> DhavFrame:
@@ -162,17 +163,30 @@ class Carver:
         self._last_report = start
         self._prev: Optional[DhavFrame] = None
         self._prev_stream: Optional[CarvedStream] = None
+        # A lower bound on the oldest active stream's last offset.  Frames
+        # arrive in disk order and streams only move forward, so it stays a
+        # lower bound until recomputed - and the exact minimum is only needed
+        # when this bound says a stream might be due to retire.
+        self._oldest: Optional[int] = None
 
     def add(self, fr: DhavFrame) -> None:
         stats, active = self.stats, self.active
         stats["frames"] += 1
         # Close streams that have gone quiet, so the candidate list stays
         # short and an old stream cannot capture a new recording's frames.
-        if active and fr.offset - min(s.last.offset for s in active) > RETIRE_BYTES:
-            keep = []
-            for s in active:
-                (keep if fr.offset - s.last.offset <= RETIRE_BYTES else self.done).append(s)
-            self.active = active = keep
+        if active and (self._oldest is None or fr.offset - self._oldest > RETIRE_BYTES):
+            oldest = min(s.last.offset for s in active)
+            if fr.offset - oldest > RETIRE_BYTES:
+                keep = []
+                for s in active:
+                    if fr.offset - s.last.offset <= RETIRE_BYTES:
+                        keep.append(s)
+                    else:
+                        s.retired = True
+                        self.done.append(s)
+                self.active = active = keep
+                oldest = min((s.last.offset for s in active), default=None)
+            self._oldest = oldest
 
         # 1. Byte contiguity: the recorder writes a stream sequentially, so a
         #    frame starting exactly where the previous one ended, and
@@ -182,7 +196,7 @@ class Carver:
         target: Optional[CarvedStream] = None
         if (prev is not None and prev_stream is not None
                 and fr.offset == prev.offset + prev.length
-                and prev_stream in active
+                and not prev_stream.retired
                 and prev_stream.state.distance(fr) is not None):
             target = prev_stream
             stats["joined_by_contiguity"] += 1

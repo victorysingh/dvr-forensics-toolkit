@@ -96,6 +96,7 @@ systemd-inhibit --what=sleep:idle python cli.py scan --device /dev/sdX \
 | `--carve` | also recover footage in the same pass (Dahua-family disks). Costs CPU, not time |
 | `--carve-ps` | also recover MPEG Program Stream footage (Hikvision and others), dated from Hikvision's `HK` stream maps — including footage under a drive another recorder reformatted |
 | `--carve-annexb` | also recover raw H.264/H.265 by its parameter sets — the last resort for a recorder we have no parser for (§3.4f) |
+| `--no-parallel` | run the carvers and the activity count inside the scanning process instead of one process each. Same output, slower; for a machine with one CPU |
 | `--reconnect-wait N` | if the drive drops off USB, wait up to N minutes for it to come back write-blocked and verified, then continue the same hashes. `0` fails at once |
 | `--max-mb N` | triage: stop after N MiB. The pass is marked incomplete and its hashes must not be quoted |
 | `--resume` | continue an interrupted scan. The Merkle root is valid; the linear MD5/SHA-256 are not |
