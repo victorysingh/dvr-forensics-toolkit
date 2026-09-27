@@ -264,7 +264,7 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
 | Comparative analysis of major OEMs | `OEM_COMPARISON.md`, `formats/*.ksy` |
 | DVR/NVR forensic image | `FORENSIC_IMAGE.md` (whole-drive hashes, block map, 20 GiB head image, preserved metadata) |
 | System architecture documentation | `ARCHITECTURE.md`, `TECH_STACK.md`, `DATA_CONTRACT.md` |
-| Functional prototype | `cli.py` and the viewer (`python cli.py serve`) |
+| Functional prototype | `cli.py` and the viewer (`python cli.py serve`); `python demo/stage_demo.py` shows every capability in eight steps |
 | Standard Operating Procedures | `SOP_EXAMINATION.md`, `LINUX_ACQUISITION.md` |
 | Validation reports | `VALIDATION_REPORT.md`, `PERFORMANCE.md` |
 | User manuals | `USER_MANUAL.md` |
