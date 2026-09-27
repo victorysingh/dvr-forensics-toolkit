@@ -963,6 +963,48 @@ def _extract_annexb(args) -> int:
     return 0 if not bad else 1
 
 
+def cmd_ewf_info(args) -> int:
+    """What an E01 image holds, and - with --verify - whether this reader
+    reproduces the MD5/SHA-1 the image stores for its own media."""
+    from acquire import ewf
+
+    try:
+        img = ewf.EwfImage(args.image)
+    except (ewf.EwfError, OSError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    try:
+        comp = sum(1 for c in img.chunks if c[3])
+        print(f"{BANNER} - E01 image\n")
+        print(f"  segments      {len(img.paths)}: " + ", ".join(os.path.basename(p) for p in img.paths))
+        print(f"  media         {img.size_bytes:,} bytes ({human_size(img.size_bytes)}), "
+              f"{img.sectors:,} sectors of {img.bytes_per_sector}")
+        print(f"  chunks        {len(img.chunks):,} of {human_size(img.chunk_size)}, "
+              f"{comp:,} compressed")
+        print(f"  stored MD5    {img.stored_md5 or '(none)'}")
+        print(f"  stored SHA-1  {img.stored_sha1 or '(none)'}")
+        if not args.verify:
+            return 0
+
+        def progress(done, total):
+            if done % (1 << 30) < img.chunk_size * 256 or done == total:
+                print(f"    {human_size(done)} of {human_size(total)}", flush=True)
+
+        v = img.verify(progress)
+        print(f"\n  computed MD5  {v['computed']['md5']}"
+              + {True: "  = stored", False: "  DIFFERS from stored", None: ""}[v["md5_match"]])
+        print(f"  computed SHA1 {v['computed']['sha1']}"
+              + {True: "  = stored", False: "  DIFFERS from stored", None: ""}[v["sha1_match"]])
+        ok = v["md5_match"] is not False and v["sha1_match"] is not False
+        print("\n  " + ("the reader reproduces the image's own hash of its media"
+                        if v["md5_match"] or v["sha1_match"] else
+                        "the image stores no hash to check against" if ok else
+                        "MISMATCH - do not use this reader's output for this image"))
+        return 0 if ok else 1
+    finally:
+        img.close()
+
+
 def cmd_decode_check(args) -> int:
     """Which extracted DHAV frames did not decode, and was a frame missing
     from the disk (a counter gap) since the last keyframe?"""
@@ -1984,6 +2026,14 @@ def main() -> int:
     p.add_argument("--device", default="", help="or read the serial from this node")
     p.add_argument("--user", default="", help="also grant this user READ-only access")
     p.set_defaults(func=cmd_writeblock_rule)
+
+    p = sub.add_parser("ewf-info",
+                       help="an E01 image's segments, geometry and stored hashes; --verify "
+                            "recomputes them")
+    p.add_argument("--image", required=True, help="the .E01 (other segments are found beside it)")
+    p.add_argument("--verify", action="store_true",
+                   help="read every chunk and compare with the stored MD5/SHA-1")
+    p.set_defaults(func=cmd_ewf_info)
 
     p = sub.add_parser("decode-check",
                        help="optional: which recovered frames do not decode, and whether a "

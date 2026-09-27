@@ -43,6 +43,7 @@ flowchart LR
 | Device | `acquire/device.py` | Read-only access to a raw device or an image file; sector alignment; bad-sector isolation; device-loss detection; udev identity; write-block reporting |
 | Acquisition | `acquire/scanner.py` | The single pass: linear MD5 + SHA-256, per-block SHA-256 and Merkle root, signature scan, codec profile, taps, verified reconnect |
 | Custody | `acquire/ledger.py` | Append-only JSONL; each entry carries the SHA-256 of the previous one |
+| | `acquire/ewf.py` | E01 (EnCase) images read directly behind the same read-only device layer: segments, compressed and stored chunks, stored MD5/SHA-1 for self-verification |
 | Integrity | `core/hashing.py` | Streaming hashes, Merkle root, inclusion proofs |
 | Contract | `core/contract.py` | Frozen shapes (`SCHEMA_VERSION 1.0.0`) every engine builds against |
 | Identification | `detect/` | Vendor signatures for all eight PS OEMs, confidence scoring, partitions; `survey.py` drafts an unknown disk's layout; `model.py` finds model numbers outside the video and checks them against the unit and the format |

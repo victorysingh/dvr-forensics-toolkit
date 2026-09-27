@@ -336,6 +336,22 @@ python -m validate.realmedia --case1 out/cpplus_WWD4A3NX --image1 skyhawk_WWD4A3
 
 Anything its inputs do not allow is skipped, with the reason in the summary.
 
+### 3.4i E01 (EnCase) images
+
+Every command that takes `--device` also takes an `.E01` image: pass the
+first segment and the rest (`.E02`, `.E03`, ...) are found beside it.
+Compressed and stored chunks are both read, read-only, with no extra
+software. Before relying on a reader for an image, let the image check it:
+
+```bash
+python cli.py ewf-info --image case.E01 --verify
+```
+
+An E01 stores the MD5 (and often the SHA-1) of the media it holds; `--verify`
+reads every chunk and compares. A match proves the bytes the tool sees are
+the bytes that were acquired. A chunk whose data fails its checksum is
+reported by `scan` as an unreadable region, never read as good data.
+
 ### 3.5 Look at the results
 
 ```bash

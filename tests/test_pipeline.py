@@ -2415,6 +2415,85 @@ def test_real_media_tools(tmp: str) -> None:
           and cov["share_of_known_found"] == 0.5 and cov["found_bytes_not_known"] == 100, str(cov))
 
 
+def test_ewf(tmp: str) -> None:
+    """E01 images read directly: the same bytes, hashes and carve as the raw
+    image, across segments; a damaged chunk is reported, never guessed."""
+    print("\n[E01 images]")
+    import argparse
+    import cli
+    from acquire import ewf
+    from recover.carver import CarveTap
+    from tests import synth_ewf
+
+    raw = os.path.join(tmp, "e01src.img")
+    synth_dahua.build(raw, seconds=20)
+    with open(raw, "rb") as fh:
+        media = fh.read()
+    # an incompressible tail, so the set holds stored chunks as well as compressed ones
+    import random
+    media += bytes(-len(media) % 512) + random.Random(1).randbytes(256 << 10)
+    with open(raw, "wb") as fh:
+        fh.write(media)
+    base = os.path.join(tmp, "e01set")
+    paths = synth_ewf.write(base, media, chunks_per_segment=7)
+    e01 = paths[0]
+    with BlockDevice(e01) as dev:
+        same = dev.size_bytes == len(media) and dev.read_at(0, len(media)) == media
+        odd = dev.read_at(12345, 70000) == media[12345:12345 + 70000]
+        model = dev.model
+    img = ewf.EwfImage(e01)
+    comp = sum(1 for c in img.chunks if c[3])
+    img.close()
+    check("an E01 set in several segments reads back byte-identical to the raw image",
+          same and odd and len(paths) > 2 and f"{len(paths)} segment" in model
+          and 0 < comp < len(img.chunks), f"{len(paths)} segments, {comp} compressed")
+
+    rc = cli.cmd_ewf_info(argparse.Namespace(image=e01, verify=True))
+    check("ewf-info --verify reproduces the MD5 and SHA-1 the image stores", rc == 0)
+
+    outs = {}
+    for name, path in (("raw", raw), ("e01", e01)):
+        rep = ScanSession(path, os.path.join(tmp, f"ewfscan_{name}"),
+                          CaseInfo(case_id=name, investigator="t"), block_size=1 << 20,
+                          quiet=True, taps=[CarveTap()]).run()
+        with open(os.path.join(tmp, f"ewfscan_{name}", "carve", "carve_report.json"),
+                  encoding="utf-8") as fh:
+            carve = [(r["recording"]["frame_count"], r["extents"]) for r in json.load(fh)["streams"]]
+        outs[name] = ({h.algorithm: h.value for h in rep.hashes}, carve)
+    check("scan + carve of the E01 equal the raw image's: MD5, SHA-256, Merkle root, streams",
+          outs["raw"] == outs["e01"] and outs["raw"][1], str(len(outs["raw"][1])))
+
+    bad = os.path.join(tmp, "e01bad")
+    bad_paths = synth_ewf.write(bad, media, chunks_per_segment=7)
+    # corrupt the first STORED (uncompressed) chunk's data, not its checksum
+    img = ewf.EwfImage(bad_paths[0])
+    k = next(i for i, c in enumerate(img.chunks) if not c[3])
+    seg, at = img.chunks[k][0], img.chunks[k][1]
+    img.close()
+    with open(bad_paths[seg], "rb") as fh:
+        blob = bytearray(fh.read())
+    blob[at + 100] ^= 0xFF
+    with open(bad_paths[seg], "wb") as fh:
+        fh.write(bytes(blob))
+    rep = ScanSession(bad_paths[0], os.path.join(tmp, "ewfscan_bad"),
+                      CaseInfo(case_id="bad", investigator="t"), block_size=1 << 20,
+                      quiet=True).run()
+    check("a damaged chunk is reported as an unreadable region, never read as good data",
+          rep.bad_regions and rep.bad_regions[0].offset <= k * 32768 < rep.bad_regions[0].offset
+          + sum(b.length for b in rep.bad_regions), str(rep.bad_regions[:1]))
+
+    broken = bytearray(open(e01, "rb").read())
+    broken[13 + 20] ^= 0x01                      # inside the first section descriptor
+    brk = os.path.join(tmp, "broken.E01")
+    open(brk, "wb").write(bytes(broken))
+    try:
+        BlockDevice(brk)
+        refused = False
+    except Exception as exc:                      # noqa: BLE001
+        refused = "checksum" in str(exc)
+    check("a section descriptor failing its checksum is refused at open", refused)
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -2452,6 +2531,7 @@ def main() -> int:
         test_honeywell(tmp)
         test_s63_certificate(tmp)
         test_real_media_tools(tmp)
+        test_ewf(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
