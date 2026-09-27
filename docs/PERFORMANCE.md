@@ -1,0 +1,95 @@
+# Analysis time
+
+The problem statement lists "reduce analysis time" among what the tool must
+achieve. This document gives the measured answer and states where it stops
+holding.
+
+Measured 28 Sep 2026. Reproduce it with
+`python demo/bench_single_pass.py --size-mb 1024`.
+
+---
+
+## 1. The claim, in one line
+
+**One read of the drive does what would otherwise take five.** For a 1 TB
+surveillance drive over the USB 2 bridge the team actually used:
+
+| Approach | Time | Free disk space needed |
+|---|---|---|
+| **This tool: one pass** (hashes, Merkle map, detection, three carvers, motion activity) | **~11.3 h** | none beyond the outputs |
+| The same work, one read of the drive per task | ~56.6 h | none |
+| Image the drive first, then run each task on the image | ~21.9 h | **~931 GiB** |
+
+## 2. Where the numbers come from
+
+**The drive speed is measured, not assumed.** Drive 1's acquisition (attempt 4)
+read all 1,000,204,884,992 bytes in 11 h 19 min (24 Sep 19:15 to 25 Sep
+06:34 UTC). That period includes one USB drop and a manual replug. It works
+out to **23.4 MiB/s**: the Super Top USB 2.0 bridge (`14cd:6116`) is the
+limit, not the disk and not the software.
+
+**The CPU cost of each task is measured on a synthetic image.** The image
+holds Dahua DHAV, Program Stream and raw H.264 footage (not evidence). It was
+1 GiB, on an Intel Core (Family 6 Model 186), 16 logical CPUs, Python 3.13.9,
+Windows 11:
+
+| Work | Seconds | MiB/s |
+|---|---|---|
+| read only (from the OS cache) | 0.87 | 1,178 |
+| **one pass: all of the below** | **38.33** | **26.7** |
+| separately: scan (MD5 + SHA-256, Merkle map, detection) | 9.86 | 103.9 |
+| separately: DHAV carve | 18.09 | 56.6 |
+| separately: MPEG-PS carve | 3.30 | 310.7 |
+| separately: raw H.264/H.265 carve | 6.08 | 168.4 |
+| separately: motion activity | 3.62 | 282.6 |
+| one read a task: sum | 40.94 | 25.0 |
+
+**How the projection works.** Each pass takes whichever is slower: the drive
+at 23.4 MiB/s, or the CPU at the rate above. Every task here runs faster than
+the drive, so over USB 2 each pass costs a full read of the drive:
+
+- one pass is 1 read, **~11.3 h**;
+- one read per task is 5 reads, **~56.6 h**;
+- imaging first is 1 read (~11.3 h) plus each task on the local image at CPU
+  speed (~10.6 h), **~21.9 h**, and it needs the drive's full size free.
+  Shrestha's workstation had 669 GB free against a 931.5 GiB drive
+  (`FORENSIC_IMAGE.md` §2). That is why the case holds hashes, a Merkle map, a
+  20 GiB head image and preserved metadata rather than a full image.
+
+## 3. What the saving is, and what it is not
+
+- **It is fewer reads of the evidence.** On data already in memory, doing
+  everything in one pass saves only about 6% of the CPU time (38.3 s against
+  40.9 s). The saving comes from the drive: every pass not taken is another
+  11 hours on this bridge.
+- **Fewer reads also means less risk.** The bridge dropped out five times
+  across the two drives (`STATUS.md` §4). A second full read is a second
+  chance of that happening, and a second chance for a mistake to write to
+  the evidence.
+- **It is not "faster than a commercial tool."** We have not timed one, and
+  make no claim about one.
+
+## 4. Where it stops holding: fast media
+
+In one pass the tool runs at **26.7 MiB/s on this machine: it is CPU-bound.**
+Over USB 2 (23.4 MiB/s) that does not matter; the drive is slower. Over USB 3
+(assumed ~120 MiB/s, not measured by the team), the pass would take about
+**9.9 h, set by the CPU and not the drive**, although the drive alone could be
+read in about 2.2 h.
+
+That is the known cost of a pure-Python, stdlib-only core. `TECH_STACK.md`
+sets out the fix, deferred on purpose until the parsers landed:
+1. one regex pass instead of six;
+2. MD5 and SHA-256 on separate threads;
+3. block detection across a process pool.
+
+The DHAV carve (56.6 MiB/s alone) is now the slowest single task and the next
+candidate.
+
+## 5. Recommendation for the next acquisition
+
+- Use a **USB 3 dock**. Over USB 2 the drive is the limit, and nothing in
+  software shortens an 11-hour read.
+- Before relying on a USB 3 dock to cut the time, run the benchmark on the
+  acquisition workstation. The CPU figure above is for this laptop, and the
+  pass cannot go faster than the CPU rate measured there.
