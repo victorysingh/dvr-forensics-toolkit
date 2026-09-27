@@ -51,6 +51,7 @@ flowchart LR
 | | `parsers/hikbtree.py` | Hikvision HIKBTREE index records from real media: camera and time per 1 GiB data block; labels carved PS streams |
 | | `recover/pscarve.py` | Indexless MPEG-PS carve (Hikvision and others): packs accepted only when their packets end exactly on the next pack; dated from Hikvision `HK` descriptors |
 | | `recover/preserve.py` | Filesystem metadata kept as whole scan blocks, provable to the Merkle root |
+| Validation | `validate/exportmatch.py` | Recovered footage against the recorder's own export: picture slices compared in order, located by anchors that cannot repeat by chance |
 | Analysis | `analyse/timeline.py` | Recorder clock → UTC on stated inputs; gaps; cross-camera correlation |
 | | `analyse/activity.py` | Motion activity from P-frame sizes per camera per minute — a tap or a standalone pass; a lead, not evidence |
 | Reporting | `report/` | One case view (`load_case`) for everything that presents a case; HTML + JSON report |
@@ -162,7 +163,7 @@ against the hashes taken at acquisition.
 | Every vendor claim has a status — `validated`, `spec_only`, `synthetic_only`, `detected_not_parsed` — set by its **weakest** evidence | `detect/engine.py::_weakest`, `parsers/base.py::weakest_source` |
 | Every decoded field records where its layout came from (fixture, published, observed on real media) | `parsers/base.py::FieldSpec` |
 | Vendor attribution is a confidence score, never a boolean (CP Plus units carry Dahua DHFS) | `detect/engine.py` |
-| Nothing is `validated` until footage is byte-matched against the recorder's own export | enforced by never emitting it |
+| Nothing is `validated` until footage is byte-matched against the recorder's own export | enforced by never emitting it; `validate-export` measures the match, and the status moves only in review |
 | Recorder timestamps stay recorder-local unless the zone and clock error are stated, and the rule used is printed | `analyse/timeline.py::ClockModel` |
 | Gaps are "no indexed footage", never "deleted"; carved footage outside the index has no camera | `analyse/timeline.py`, `recover/carver.py` |
 | High-entropy regions are "detected, not parsed", never "encrypted" | `detect/engine.py` |
@@ -195,6 +196,7 @@ out/<case>/
   carve/streams/          extracted footage (.dav + bare .h264/.h265)
   carve/extracted.json    per-file SHA-256 and frame checks
   carve/ps_labels.json    cameras for carved MPEG-PS streams, from a surviving HIKBTREE
+  validation/export_<clip>.json  recovered footage vs the recorder's own export
   analytics/analytics.json  faces and objects in extracted clips (optional layer)
   analytics/osd.json      camera titles and the clock read off the picture (optional layer)
   preserved/              filesystem metadata as whole scan blocks + manifest

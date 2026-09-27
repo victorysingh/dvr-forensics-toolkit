@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 282 tests, all should pass
+python tests/test_pipeline.py     # 299 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -101,6 +101,7 @@ If those pass, the engine below is intact:
 | Filesystem metadata preserved, provable to the scan | `recover/preserve.py` | working |
 | Timestamp normalization, gaps, cross-camera correlation | `analyse/timeline.py` | working |
 | Several recorders in one view, on a shared axis only where every case states its timezone | `analyse/combined.py`, `cli.py combine` | working |
+| Recovered footage byte-matched against the recorder's own export (the test for `validated`) | `validate/exportmatch.py`, `cli.py validate-export` | working on generated footage; not yet run on a real export |
 | Forensic report (HTML + JSON) | `report/` | working |
 | Dependency-free case viewer (all eight OEMs, pipeline, timeline) | `viewer/` | working; the planned FastAPI + React UI (`api/`, `ui/`) wraps the same `report/case.py` |
 | Drop-in vendor plugins | `plugins/`, `parsers/__init__.py` | working |

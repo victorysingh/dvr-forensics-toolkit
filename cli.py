@@ -1331,6 +1331,150 @@ def cmd_label_ps(args) -> int:
     return 0
 
 
+def _recovered_files(paths: list[str]) -> list[str]:
+    """Files to search, from files and directories.  Where a stream was
+    extracted both as stored (.dav / .ps) and as bare video (.h264 / .h265),
+    only the stored copy is kept - the same slices twice would be counted
+    twice."""
+    from validate.exportmatch import sniff_file
+
+    found = []
+    for p in paths:
+        if os.path.isdir(p):
+            for root, _dirs, files in os.walk(p):
+                found += [os.path.join(root, f) for f in sorted(files)]
+        else:
+            found.append(p)
+    kinds = {f: sniff_file(f) for f in found if os.path.getsize(f)}
+    stored = {os.path.splitext(f)[0] for f, k in kinds.items() if k in ("dhav", "ps")}
+    return [f for f, k in kinds.items()
+            if k in ("dhav", "ps") or (k == "annexb" and os.path.splitext(f)[0] not in stored)]
+
+
+def _demux_export(path: str, out_dir: str):
+    """An MP4 / AVI / ASF export's video as bare Annex-B, with ffmpeg copying
+    the stream (`-c:v copy`: slices are re-framed, never re-encoded).
+    Returns (path, how) or (None, None) when ffmpeg is not installed."""
+    import shutil
+    import subprocess
+
+    ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
+    if not (ffmpeg and ffprobe):
+        return None, None
+    codec = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0",
+                            "-show_entries", "stream=codec_name",
+                            "-of", "default=nw=1:nk=1", path],
+                           capture_output=True, text=True).stdout.strip()
+    fmt = {"h264": "h264", "hevc": "hevc"}.get(codec)
+    if not fmt:
+        raise ValueError(f"the export's video is {codec or 'unreadable'}; "
+                         f"only H.264 and H.265 can be compared")
+    dst = os.path.join(out_dir, os.path.basename(path) + (".h264" if fmt == "h264" else ".h265"))
+    args = ["-v", "error", "-y", "-i", path, "-map", "0:v:0", "-c:v", "copy", "-f", fmt, dst]
+    subprocess.run([ffmpeg] + args, check=True)
+    version = subprocess.run([ffmpeg, "-version"], capture_output=True,
+                             text=True).stdout.splitlines()[0]
+    return dst, {"tool": version, "command": "ffmpeg " + " ".join(args)}
+
+
+def cmd_validate_export(args) -> int:
+    """Byte-match footage recovered from the disk against the recorder's own
+    export - the test that decides `validated` (VALIDATION_REPORT.md §9)."""
+    from core.contract import SCHEMA_VERSION, dump_json, utc_now
+    from core.hashing import sha256_file
+    from validate import exportmatch
+
+    vdir = os.path.join(args.out, "validation")
+    os.makedirs(vdir, exist_ok=True)
+    print(f"{BANNER} - compare recovered footage with the recorder's export\n")
+    kind = exportmatch.sniff_file(args.export)
+    compared, demux = args.export, None
+    print(f"  export        {args.export}  ({kind})")
+    if kind in ("mp4", "avi", "asf"):
+        try:
+            compared, demux = _demux_export(args.export, vdir)
+        except (ValueError, OSError) as exc:
+            print(f"[!] {exc}")
+            return 1
+        if compared is None:
+            print(f"[!] a {kind.upper()} export needs ffmpeg to take out its video stream "
+                  f"(nothing is re-encoded). Install ffmpeg, or run:\n"
+                  f"    ffmpeg -i {args.export} -map 0:v:0 -c:v copy -f hevc export.h265\n"
+                  f"  (-f h264 export.h264 for H.264) and pass that file as --export.")
+            return 1
+        print(f"  video out     {compared}  (ffmpeg -c:v copy)")
+    elif kind == "unknown":
+        print("[!] not a DHAV, MPEG-PS, MP4, AVI, ASF or Annex-B file")
+        return 1
+
+    files = _recovered_files(args.against)
+    if not files:
+        print("[!] no recovered footage (.dav, .ps, .h264, .h265) under --against")
+        return 1
+    print(f"  recovered     {len(files)} file(s)")
+
+    def progress(path, n):
+        print(f"    {os.path.basename(path)}: {n:,} slices read", flush=True)
+
+    res = exportmatch.compare(compared, files, codec=args.codec, progress=progress)
+    res["export"].update({"path": args.export, "bytes": os.path.getsize(args.export),
+                          "sha256": sha256_file(args.export), "demuxed": demux})
+    if demux:
+        res["export"]["demuxed_sha256"] = sha256_file(compared)
+    for r in res["recovered"]:
+        r.update({"bytes": os.path.getsize(r["path"]), "sha256": sha256_file(r["path"])})
+    res.update({"schema_version": SCHEMA_VERSION, "generated_utc": utc_now(),
+                "tool": "ps26150-forensics validate-export",
+                "recorder": args.recorder or None})
+    rpath = os.path.join(vdir, f"export_{os.path.basename(args.export)}.json")
+    dump_json(res, rpath)
+
+    m, e = res["match"], res["export"]
+    print(f"\n--- result {'-' * 48}")
+    print(f"  export        {e['codec']} ({e['codec_source']}), {e['frames']} frames, "
+          f"{e['slices']} slices, sha256 {e['sha256'][:16]}...")
+    for r in res["recovered"]:
+        if r["slices_credited"]:
+            print(f"  found in      {os.path.basename(r['path'])}: {r['slices_credited']} "
+                  f"slices, export slices {r['export_range'][0]}-{r['export_range'][1]}")
+    print(f"  slices        {m['slices_matched']} of {m['slices_total']} byte-identical, "
+          f"in order ({m['share']:.2%})")
+    print(f"  frames        {m['frames_fully_matched']} of {m['frames_total']} fully matched")
+    if m["unmatched_ranges_total"]:
+        print(f"  not found     {m['unmatched_ranges_total']} range(s) of export slices, "
+              f"first: {m['unmatched_ranges'][0]['export_slices']}")
+    c = res["container"]
+    if "frames_byte_identical" in c:
+        print(f"  DHAV frames   {c['frames_byte_identical']} of {c['frames_compared']} "
+              f"identical incl. header; dates equal {c['date_equal']}, "
+              f"counters equal {c['frame_counter_equal']}")
+    elif "time_equal" in c:
+        print(f"  HK time       equal on {c['time_equal']} of {c['frames_compared']} frames")
+    p = res["parameter_sets"]
+    print(f"  param sets    {p['in_both']} in both, {p['export_only']} export only, "
+          f"{p['recovered_only']} recovered only")
+    for n in res["notes"]:
+        print(f"  note          {n}")
+    print(f"\n  verdict       {m['verdict'].upper()}"
+          + ("  - meets the validation criterion" if res["meets_criterion"] else ""))
+    if res["meets_criterion"]:
+        print("                the vendor's status is NOT changed automatically: record this "
+              "in VALIDATION_REPORT.md section 9 and change it in review")
+
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("export_compared", {
+            "result": os.path.relpath(rpath, args.out), "export_sha256": e["sha256"],
+            "verdict": m["verdict"], "slices_matched": m["slices_matched"],
+            "slices_total": m["slices_total"], "meets_criterion": res["meets_criterion"],
+            "recorder": args.recorder or None}, data_hash=sha256_file(rpath))
+        print("  result SHA-256 recorded in the custody ledger")
+    print(f"\n[+] {rpath}")
+    return 0 if m["verdict"] != "none" else 1
+
+
 def cmd_prove(args) -> int:
     """Produce a Merkle inclusion proof for the block containing an offset.
 
@@ -1526,6 +1670,20 @@ def main() -> int:
     p.add_argument("--device", required=True)
     p.add_argument("--out", required=True, help="case directory")
     p.set_defaults(func=cmd_label_ps)
+
+    p = sub.add_parser("validate-export",
+                       help="byte-match recovered footage against the recorder's own export")
+    p.add_argument("--export", required=True,
+                   help="the clip the recorder exported (.dav, Hikvision .mp4/.ps, MP4/AVI/ASF, "
+                        ".h264/.h265)")
+    p.add_argument("--against", required=True, nargs="+",
+                   help="recovered footage: files or directories (.dav, .ps, .h264, .h265)")
+    p.add_argument("--out", required=True, help="case directory (result goes to validation/)")
+    p.add_argument("--codec", choices=["auto", "h264", "h265"], default="auto")
+    p.add_argument("--recorder", default="",
+                   help="the recorder that exported the clip, as read off its label or "
+                        "System Info (model, firmware)")
+    p.set_defaults(func=cmd_validate_export)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)
