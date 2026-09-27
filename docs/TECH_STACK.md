@@ -11,7 +11,7 @@ into the final project report.
 > **The forensic core stays stdlib-only. Every dependency lives in the UI and
 > AI layers.**
 
-`core/`, `acquire/`, `detect/`, `parsers/` and `recover/` import nothing
+`core/`, `acquire/`, `detect/`, `parsers/`, `recover/` and `validate/` import nothing
 outside the Python standard library. The code that touches evidence stays
 small and auditable — which is precisely what a validation report needs to
 claim — and it runs on an air-gapped workstation with a bare Python install.

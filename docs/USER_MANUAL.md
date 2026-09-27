@@ -191,6 +191,50 @@ Even on a shared axis, a recorder whose clock error was never measured
 (`--clock-observed/--clock-reference`) carries an unknown offset, and that is
 listed as a caveat rather than absorbed.
 
+### 3.4d Validate against the recorder's own export
+
+This is the only way a vendor's status can become `validated`: the recorder
+exports a clip with its own export function, and the same footage recovered
+from the disk is compared with it byte for byte.
+
+**Never put an evidence drive back into its recorder to do this.** A recorder
+writes to its disk as soon as it runs — it records, rotates, may re-format —
+which changes the evidence and its hash. Use a **reference disk**:
+
+1. Put a spare SATA disk in the recorder and let the recorder format it. That
+   is the point: the layout is then the recorder's own.
+2. Photograph the recorder's clock next to a trusted clock, then let it
+   record 10–15 minutes.
+3. Export 1–2 minutes of one camera with the recorder's own export function —
+   in its native format if it offers one (`.dav` on Dahua and CP Plus). Note
+   the camera and the period. Photograph the recorder's label and its System
+   Info screen (model, firmware).
+4. Acquire the reference disk like any evidence (`scan --carve` or
+   `--carve-ps`), `parse` it, and `extract` the recording that covers the
+   exported period.
+5. Compare:
+
+```bash
+python cli.py validate-export --export /media/usb/ch1_1100.dav \
+    --against out/REF-001/clips --out out/REF-001 \
+    --recorder "CP Plus CP-UNR-104F1, firmware <from System Info>"
+```
+
+It compares the pictures themselves — every H.264/H.265 slice, in order —
+not the container around them, because an export may legitimately rewrite
+frame headers or add data. The verdict is `identical`, `partial` (with the
+export frames it could not find, each of which needs an explanation), or
+`none`. Container differences are printed separately. `--against` takes files
+or directories; a stream extracted both as `.dav` and as bare video is
+searched once. MP4, AVI and ASF exports need `ffmpeg`, which copies the video
+out without re-encoding it; Hikvision's `.mp4` files are Program Streams and
+are read directly.
+
+The result goes to `validation/export_<clip>.json` with both files' SHA-256,
+and into the custody ledger. The vendor's status is **not** changed for you:
+record an `identical` result in `VALIDATION_REPORT.md` §9, and the status
+moves in review.
+
 ### 3.5 Look at the results
 
 ```bash
