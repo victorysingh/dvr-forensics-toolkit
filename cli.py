@@ -1331,6 +1331,142 @@ def cmd_label_ps(args) -> int:
     return 0
 
 
+def _case_ledger(out: str) -> Optional[CustodyLedger]:
+    ledger = CustodyLedger(os.path.join(out, "custody_ledger.jsonl"))
+    if not ledger.entries:
+        return None
+    ledger.actor = ledger.entries[0].get("actor", "unknown")
+    ledger.case_id = ledger.entries[0].get("case_id", "")
+    return ledger
+
+
+def _load_json(path: str) -> Optional[dict]:
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _print_model_checks(out: str) -> None:
+    from detect import model
+
+    rec = _load_json(os.path.join(out, "device_record.json")) or {}
+    platter = _load_json(os.path.join(out, "model.json"))
+    scan = _load_json(os.path.join(out, "scan_report.json")) or {}
+    print("\n  checks")
+    for c in model.check(rec.get("observations", []), platter, scan.get("detections")):
+        print(f"    {c['verdict']:<26} {c['check']}: {c['detail']}")
+
+
+def cmd_identify_model(args) -> int:
+    """Search the non-video parts of the disk for the recorder's model number."""
+    from core.contract import dump_json
+    from core.hashing import sha256_file
+    from detect import model
+    from detect.survey import sample_offsets
+
+    bm_path = os.path.join(args.out, "blockmap.jsonl")
+    print(f"{BANNER} - model strings on the platter\n")
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            if os.path.exists(bm_path):
+                with open(bm_path, "r", encoding="utf-8") as fh:
+                    blockmap = [json.loads(l) for l in fh if l.strip()]
+                if blockmap and blockmap[-1]["offset"] + blockmap[-1]["length"] > dev.size_bytes:
+                    print("[!] the block map is of a larger device - wrong drive?")
+                    return 1
+                blocks, searched = model.select_blocks(blockmap, dev.size_bytes,
+                                                       int(args.max_gb * (1 << 30)))
+            else:
+                sample = 1 << 20
+                blocks = [(o, min(sample, dev.size_bytes - o))
+                          for o in sample_offsets(dev.size_bytes, 256, sample)]
+                searched = {"rule": "no block map in the case: the first and last 8 MiB and "
+                                    "256 samples of 1 MiB spread across the disk",
+                            "blocks": len(blocks), "bytes": sum(n for _, n in blocks),
+                            "device_bytes": dev.size_bytes}
+            print(f"  device        {dev.path}  ({info.write_block_method})")
+            print(f"  searching     {human_size(searched['bytes'])} in {len(blocks)} blocks - "
+                  f"{searched['rule']}")
+            ms = model.ModelSearch()
+            for k, (off, n) in enumerate(blocks):
+                ms.feed(off, dev.read_at(off, n))
+                if k and k % 500 == 0:
+                    print(f"    {k}/{len(blocks)} blocks", flush=True)
+    except (PermissionNeeded, DeviceError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    res = ms.result(searched)
+    res.update({"source_device": info.path, "write_block_method": info.write_block_method})
+    path = os.path.join(args.out, "model.json")
+    dump_json(res, path)
+    print()
+    if not res["candidates"]:
+        print("  no model-numbered string found in what was searched")
+    for c in res["candidates"][:15]:
+        print(f"  {c['kind']:<9} {c['model']:<26} {c['vendor']:<10} {c['count']:>6}x  "
+              f"first at 0x{c['offsets'][0]:X}")
+    _print_model_checks(args.out)
+    ledger = _case_ledger(args.out)
+    if ledger:
+        ledger.append("model_searched", {"result": "model.json", "blocks": searched["blocks"],
+                                         "bytes": searched["bytes"],
+                                         "candidates": len(res["candidates"]),
+                                         "write_block_method": info.write_block_method},
+                      data_hash=sha256_file(path))
+        print("  result SHA-256 recorded in the custody ledger")
+    print(f"\n[+] {path}")
+    return 0
+
+
+def cmd_record_device(args) -> int:
+    """Record the recorder's model, serial and firmware as the examiner read
+    them off the unit, with the SHA-256 of each photo that shows them."""
+    from core.contract import canonical_json, dump_json, utc_now
+    from core.hashing import sha256_bytes, sha256_file
+    from detect import model
+
+    photos = []
+    for p in args.photo:
+        if not os.path.isfile(p):
+            print(f"[!] no such photo: {p}")
+            return 1
+        photos.append({"file": os.path.basename(p), "bytes": os.path.getsize(p),
+                       "sha256": sha256_file(p)})
+    ledger = _case_ledger(args.out)
+    obs = model.observation(args.model, args.serial, args.firmware, args.read_from,
+                            photos or None, ledger.actor if ledger else "", utc_now())
+    path = os.path.join(args.out, "device_record.json")
+    rec = _load_json(path) or {"rule": model.RULE, "observations": []}
+    rec["observations"].append(obs)
+    os.makedirs(args.out, exist_ok=True)
+    dump_json(rec, path)
+
+    print(f"{BANNER} - recorder as read off the unit\n")
+    print(f"  model         {obs['model']}")
+    ident = obs["identified"]
+    print("  identified    " + (f"{ident['vendor']} {ident['kind']}; stores video as: "
+                                f"{ident['storage']}" if ident else
+                                "not a model numbering we know - recorded as typed"))
+    for k in ("serial", "firmware", "read_from"):
+        if obs[k]:
+            print(f"  {k:<13} {obs[k]}")
+    for p in photos:
+        print(f"  photo         {p['file']}  sha256 {p['sha256'][:16]}...")
+    _print_model_checks(args.out)
+    if ledger:
+        ledger.append("device_recorded", {"model": obs["model"], "serial": obs["serial"],
+                                          "firmware": obs["firmware"],
+                                          "read_from": obs["read_from"], "photos": photos},
+                      data_hash=sha256_bytes(canonical_json(obs)))
+        print("  recorded in the custody ledger")
+    else:
+        print("  [!] no custody ledger in this case directory - recorded in "
+              "device_record.json only")
+    return 0
+
+
 def _recovered_files(paths: list[str]) -> list[str]:
     """Files to search, from files and directories.  Where a stream was
     extracted both as stored (.dav / .ps) and as bare video (.h264 / .h265),
@@ -1670,6 +1806,25 @@ def main() -> int:
     p.add_argument("--device", required=True)
     p.add_argument("--out", required=True, help="case directory")
     p.set_defaults(func=cmd_label_ps)
+
+    p = sub.add_parser("identify-model",
+                       help="search the non-video parts of the disk for the recorder's model")
+    p.add_argument("--device", required=True)
+    p.add_argument("--out", required=True, help="case directory (uses its block map)")
+    p.add_argument("--max-gb", type=float, default=4.0,
+                   help="most bytes to read (default 4 GiB)")
+    p.set_defaults(func=cmd_identify_model)
+
+    p = sub.add_parser("record-device",
+                       help="record the recorder's model/serial/firmware as read off the unit")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--model", required=True, help="as printed on the label or System Info")
+    p.add_argument("--serial", default="")
+    p.add_argument("--firmware", default="")
+    p.add_argument("--read-from", default="", choices=["", "label", "system-info", "other"])
+    p.add_argument("--photo", nargs="*", default=[],
+                   help="photos showing it; hashed, not copied")
+    p.set_defaults(func=cmd_record_device)
 
     p = sub.add_parser("validate-export",
                        help="byte-match recovered footage against the recorder's own export")

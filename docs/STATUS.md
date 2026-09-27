@@ -16,7 +16,7 @@ they are evidence).
 
 | PS asks for | Status | Where |
 |---|---|---|
-| Identify the DVR / vendor | **done** — signatures for all eight OEMs, confidence scores; on-platter evidence found for CP Plus (`CPPlusIPCam`) and Hikvision (`HK` descriptors, surviving master/index) | `detect/` |
+| Identify the DVR / vendor | **done** — signatures for all eight OEMs, confidence scores; on-platter evidence found for CP Plus (`CPPlusIPCam`) and Hikvision (`HK` descriptors, surviving master/index). **Model:** `identify-model` searches the non-video parts of the disk for model numbers; `record-device` records the model off the unit with hashed photos; the two are checked against the format on the disk. Not yet run on either drive | `detect/`, `detect/model.py` |
 | Create forensic images | **done** — whole-drive MD5 + SHA-256 in one read-only pass, per-block Merkle map, preserved metadata, 20 GiB head image; see `FORENSIC_IMAGE.md` | `acquire/`, `recover/preserve.py` |
 | MD5 and SHA-256 | **done** — both drives | `scan` |
 | Parse proprietary file systems | **done on real media** — Dahua/CP Plus DHFS 4.1 (2 drives); Hikvision HIKBTREE index records (surviving copies) | `parsers/dahua.py`, `parsers/hikbtree.py` |
@@ -86,6 +86,8 @@ timeline                             clock rule, gaps, recurring patterns, cover
 activity / analyse-video             leads: motion, faces, objects
 read-osd                             camera titles and the clock from the burned-in picture,
                                      for the streams no index accounts for
+identify-model / record-device       the recorder's model: strings on the platter outside the
+                                     video, and as read off the unit - checked against each other
 validate-export                      recovered footage byte-matched against the recorder's own
                                      export - the test for `validated`
 combine                              several recorders in one view - on one axis only where
@@ -95,7 +97,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 299 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 310 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 

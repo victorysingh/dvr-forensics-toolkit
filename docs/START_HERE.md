@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 299 tests, all should pass
+python tests/test_pipeline.py     # 310 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -86,6 +86,7 @@ If those pass, the engine below is intact:
 | Linear MD5/SHA-256 + per-block Merkle map | `core/hashing.py` | working |
 | Hash-chained custody ledger | `acquire/ledger.py` | working |
 | Signature DB + confidence scoring | `detect/` | working |
+| Recorder model: platter strings outside the video, the examiner's reading with hashed photos, cross-checked | `detect/model.py`, `cli.py identify-model`, `cli.py record-device` | working; not yet run on either drive |
 | Partition parsing (MBR/GPT) | `detect/engine.py` | working |
 | Synthetic DVR image generator | `tests/synth_dvr.py` | working |
 | Vendor parser plugin SDK (field provenance) | `parsers/base.py` | working |
