@@ -88,19 +88,18 @@ produce reliable and legally defensible forensic results.
 | Reporting | `report/`, `viewer/` | working: HTML + JSON report, dependency-free viewer |
 | Machine Learning | `analyse/activity.py` | motion activity from compressed frame sizes (lead, not evidence); face/object detection not started — needs the optional decode + ONNX layer |
 
-## Named deliverables not yet started
+## Named deliverables
 
-The PS asks for these explicitly, and they are marked work, not optional
-polish:
+The PS asks for these explicitly. All exist now; `FINAL_REPORT.md` §12 maps
+each to its file:
 
-- comparative analysis of the major OEMs
-- a DVR/NVR forensic image
-- system architecture documentation
-- Standard Operating Procedures (`docs/LINUX_ACQUISITION.md` is the beginning
-  of the acquisition SOP)
-- validation reports
-- user manuals
-- final project report
+- comparative analysis of the major OEMs — `OEM_COMPARISON.md`
+- a DVR/NVR forensic image — `FORENSIC_IMAGE.md`
+- system architecture documentation — `ARCHITECTURE.md`
+- Standard Operating Procedures — `SOP_EXAMINATION.md`, `LINUX_ACQUISITION.md`
+- validation reports — `VALIDATION_REPORT.md`, `PERFORMANCE.md`
+- user manuals — `USER_MANUAL.md`
+- final project report — `FINAL_REPORT.md`
 
 ## Reading the PS honestly
 
