@@ -4,9 +4,10 @@ PS26150 deliverable: *comparative analysis of major DVR/NVR OEMs (Dahua
 Technology, CP Plus, Honeywell Security, TP-Link, Godrej, Uniview, Matrix)*;
 Hikvision is included because the PS names it among the supported OEMs.
 
-**Status: draft.** The Dahua / CP Plus column is first-hand. Everything else
-is either published research whose citation still has to be attached, or
-unknown — and says so. Filling the unknowns, with citations, is the
+**Status: draft.** The Dahua / CP Plus column is first-hand; Hikvision is
+first-hand for the container and index; Honeywell is from published research
+(§4); the research questions for the rest have first answers with sources
+(§5.1). What is still unknown says so. Filling the unknowns, with citations, is the
 researchers' work (§5 lists the questions). Nothing here may be quoted as
 more certain than its tag.
 
@@ -99,6 +100,7 @@ disk has been read by the team.
 
 | Aspect | Finding | Tag |
 |---|---|---|
+| Which Honeywell units | Honeywell was a Dahua OEM until April 2022 (IPVM, §5.2 [1]): older units may carry DHFS and are read by the Dahua parser; this layout is the newer units' | P |
 | Layout | GPT; sector 34 holds Machine Data (device ID, model name); Partition 1 proprietary, Partition 2 a 10 GB ext4 | P (5.1–5.2) |
 | Partition 1 | header 0x0–0x3FFF; block list 0x40000; channel list 0x400000; record state 0x40000000; video from 0x80000000 | P (5.4) |
 | Header | video start, next write, available and total space, each ×0x1000 ("rounded at the third digit"), little-endian; block group start time at 0x44 | P (5.4.1) |
@@ -154,3 +156,48 @@ models not built on Dahua boards:
 
 Answers go into this file with a tag and a citation, and into a `.ksy` in
 `formats/` once a layout is established.
+
+### 5.1 Answers so far (28 Sep 2026)
+
+Public sources for these vendors are thin, and that is itself a finding: none
+of TP-Link, Godrej, Uniview or Matrix has a published analysis of its
+on-disk format. Everything below is sourced; a blank question is marked **?**,
+not filled from forum talk. Sources are listed in §5.2.
+
+| Question | CP Plus | Honeywell | TP-Link (VIGI) | Godrej | Uniview | Matrix (SATATYA) |
+|---|---|---|---|---|---|---|
+| 1. Who builds the board | Dahua OEM: "CP Plus (Orange Line)" is a current entry in IPVM's Dahua OEM directory [1]; the brand's trademarks belong to Aditya Infotech [2]. On our unit, DHFS 4.1 **O** | A **former** Dahua OEM that "stopped purchasing these models in April 2022" [1]; the HN35080200 studied by Yoon & Hwang uses its own filesystem [3] | ? — not in the Dahua OEM directory [1]; no public statement found | ? — not in the Dahua OEM directory [1]; no public statement found | Its own design, and itself an OEM source: IPVM keeps separate Uniview OEM directories [1] | Indian manufacturer (Vadodara, Gujarat), own SATATYA line [4]; not in the Dahua OEM directory [1] |
+| 2. Filesystem | DHFS 4.1 **O** (Dahua-built units) | newer units: GPT + proprietary video partition **P** [3]; older Dahua-built units: presumably DHFS — **not established** | ? | ? | proprietary; commercial recovery tools support it [5] but no layout is published | ? |
+| 3. Container, codec, camera id | DHAV, H.265, channel byte 0 on every camera **O** | 20-byte header per H.264 NAL unit; camera only in the channel list **P** [3] | ? | ? | ? | ? |
+| 4. Time encoding | packed local date, no zone **O** | Unix s / µs, zone not stated **P** [3] | ? | ? | ? | ? |
+| 5. Overwrite | circular; old footage survives at cluster tails **O** | expiry and overwrite rewrite metadata; a format leaves video until overwritten **P** [3] | loop recording; "Locked" files are protected from overwrite [6] | ? | ? | ? |
+| 6. Native export, player, integrity | `.dav` (Dahua) — not yet exported by us | ? | exported to USB from the NVR's GUI; format not stated; "the audio format in exported videos may not be compatible with some playback software"; no hash or signature mentioned [6] | ? | ? | native `.avs` (MATRIX DVR Backup Manager), `.stm` (Device Player), `.mxs` (Device/Web/DVR Client, SATATYA CORE) [7]; export to AVI over USB/FTP [8] |
+| 7. Signature better than a brand name | DHFS superblock, DHAV frames, `CPPlusIPCam` **O** | GPT + partition header + frame header `82/02 80 01 00` **P** [3] (too short to scan the whole disk for; checked structurally) | model numbering `VIGI NVRxxxx` (`identify-model`) | ? | model numbering `NVR3xx-xx…` (`identify-model`) | model numbering `SATATYA …`; the magic bytes of `.avs`/`.mxs`/`.stm` are not published |
+
+**What follows for the tool:**
+
+- **CP Plus.** The Dahua parser is the right parser for Dahua-built CP Plus
+  units, now from a second, independent source [1] as well as our drive. For
+  a CP Plus unit that is not Dahua-built, `record-device` + `identify-model`
+  will show the mismatch.
+- **Honeywell.** A Honeywell disk may carry either format: DHFS on units
+  bought from Dahua before April 2022, the Yoon & Hwang layout on the newer
+  ones. The tool already tries both (the Dahua parser and the Honeywell
+  plugin detect independently). On a Honeywell unit with a DHFS disk, the
+  model check reads "differ", which is explained by [1] and should be
+  written up as such, not as tampering.
+- **TP-Link, Godrej, Uniview, Matrix.** Nothing published to parse from. Their
+  video is recoverable by `carve-annexb`. Their exports (TP-Link to USB,
+  Matrix to AVI) are what `validate-export` would compare against, once a
+  unit is available to record on.
+
+### 5.2 Sources
+
+1. IPVM, *Dahua OEM Directory (Public Report)*, 3 May 2024 — https://ipvm.com/reports/dahua-oem
+2. Trademark note "CP Plus, KVMS Pro, … CP-UNC, CP-USC, CP-VNR, and CP-UVR are trademarks of Aditya Infotech Ltd.", on an integrator's page (Tentosoft) — https://tentosoft.com/works-with/cp-plus.html. A primary CP Plus source is still to be found.
+3. J. Yoon, S. Hwang, DFRWS USA 2026, arXiv:2605.07430 (§4 of this file).
+4. Matrix Comsec, *SATATYA Network Video Recorders* product pages — https://www.matrixcomsec.com/product/satatya-network-video-recorders/
+5. 512 BYTE, *Uniview NVR Recovery* (commercial recovery software; states support, publishes no layout) — https://soft.512byte.ua/knowledge-base/uniview-nvr-recovery/
+6. TP-Link, *How to Search and Export Recordings from VIGI NVR GUI* (FAQ 4615) — https://www.tp-link.com/us/support/faq/4615/
+7. Matrix Wiki, *How to play .avs, .mxs and .stm file?* — https://wiki.matrixcomsec.com/index.php?title=How_to_play_.avs%2C_.mxs_and_.stm_file%3F
+8. Matrix Wiki, *FAQs – SATATYA HVR* / *FAQs – SATATYA SAMAS* (export to AVI) — https://wiki.matrixcomsec.com/index.php?title=FAQs_-_SATATYA_HVR
