@@ -24,6 +24,7 @@ Two different things are validated here, and they must not be confused:
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
 | Analytics (optional) | runs on recovered clips; detections reviewed by eye as plausible leads; no accuracy claimed |
 | OSD reader (optional) | rules and orchestration tested (§8c); **OCR accuracy not measured** — never yet run on a rendered frame |
+| Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
