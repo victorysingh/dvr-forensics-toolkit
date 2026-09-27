@@ -2494,6 +2494,69 @@ def test_ewf(tmp: str) -> None:
     check("a section descriptor failing its checksum is refused at open", refused)
 
 
+class ExplodingTap:
+    """A tap that fails part-way through, to prove a failure in a worker
+    process never touches the hashes (constructed by the worker by name)."""
+
+    name = "exploding"
+
+    def prepare(self, dev, start, end, log=print):
+        self.n = 0
+
+    def feed(self, offset, data):
+        self.n += 1
+        if self.n == 2:
+            raise ValueError("boom")
+
+    def finish(self, out_dir, info):
+        return {"blocks": self.n}
+
+
+def test_parallel_taps(tmp: str) -> None:
+    """Taps in their own processes: the same reports and the same hashes as
+    in the scanning process; a failing worker is recorded, the scan completes."""
+    print("\n[parallel taps]")
+    from acquire.parallel import TAPS, ProcessTap, _resolve
+
+    img = os.path.join(tmp, "unknown_vendor.img")          # DHAV-free, raw H.264/H.265
+    dahua_img = os.path.join(tmp, "e01src.img")            # DHAV footage + noise
+
+    def run(path, name, parallel):
+        taps = [ProcessTap(TAPS[n]) if parallel else _resolve(TAPS[n])() for n in TAPS]
+        out = os.path.join(tmp, f"par_{name}_{parallel}")
+        rep = ScanSession(path, out, CaseInfo(case_id="P", investigator="t"),
+                          block_size=1 << 20, quiet=True, taps=taps).run()
+        reports = {}
+        for f in ("carve/carve_report.json", "carve/ps_report.json",
+                  "carve/annexb_report.json", "activity.json"):
+            p = os.path.join(out, f)
+            if os.path.exists(p):
+                with open(p, encoding="utf-8") as fh:
+                    r = json.load(fh)
+                for k in ("generated_utc", "tool"):
+                    r.pop(k, None)
+                reports[f] = r
+        return {h.algorithm: h.value for h in rep.hashes}, reports
+
+    same = True
+    for path, name in ((img, "es"), (dahua_img, "dhav")):
+        a, b = run(path, name, False), run(path, name, True)
+        same = same and a == b and len(a[1]) == 4
+    check("every tap in its own process: the same four reports and the same hashes", same)
+
+    out = os.path.join(tmp, "par_fail")
+    s = ScanSession(img, out, CaseInfo(case_id="F", investigator="t"), block_size=1 << 20,
+                    quiet=True, taps=[ProcessTap("tests.test_pipeline:ExplodingTap")])
+    rep = s.run()
+    plain = ScanSession(img, os.path.join(tmp, "par_plain"), CaseInfo(case_id="F", investigator="t"),
+                        block_size=1 << 20, quiet=True).run()
+    led = CustodyLedger(os.path.join(out, "custody_ledger.jsonl"))
+    check("a tap failing in its worker: recorded, hashes unchanged, scan complete",
+          {h.algorithm: h.value for h in rep.hashes} == {h.algorithm: h.value for h in plain.hashes}
+          and rep.stats.complete_pass and "boom" in s.tap_results["exploding"]["error"]
+          and any(e["action"] == "inline_exploding_failed" for e in led.entries))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -2532,6 +2595,7 @@ def main() -> int:
         test_s63_certificate(tmp)
         test_real_media_tools(tmp)
         test_ewf(tmp)
+        test_parallel_taps(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

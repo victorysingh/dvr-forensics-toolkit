@@ -41,6 +41,7 @@ flowchart LR
 | Layer | Path | Responsibility |
 |---|---|---|
 | Device | `acquire/device.py` | Read-only access to a raw device or an image file; sector alignment; bad-sector isolation; device-loss detection; udev identity; write-block reporting |
+| | `acquire/parallel.py` | Each tap in its own process, fed through a shared-memory ring; the hashes never leave the main process; a failing worker is recorded and the scan completes |
 | Acquisition | `acquire/scanner.py` | The single pass: linear MD5 + SHA-256, per-block SHA-256 and Merkle root, signature scan, codec profile, taps, verified reconnect |
 | Custody | `acquire/ledger.py` | Append-only JSONL; each entry carries the SHA-256 of the previous one |
 | | `acquire/ewf.py` | E01 (EnCase) images read directly behind the same read-only device layer: segments, compressed and stored chunks, stored MD5/SHA-1 for self-verification |
