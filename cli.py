@@ -1747,6 +1747,41 @@ def cmd_validate_export(args) -> int:
     return 0 if m["verdict"] != "none" else 1
 
 
+def cmd_certificate(args) -> int:
+    """Draft the BSA 2023 s.63(4)(c) certificate from what the case recorded."""
+    from core.contract import dump_json
+    from core.hashing import sha256_file
+    from report import s63
+
+    cert = s63.build(args.out, part=args.part, records=args.records, declarant={
+        "name": args.name, "relation": args.relation, "address": args.address,
+        "designation": args.designation, "date": args.date, "time": args.time,
+        "place": args.place})
+    base = os.path.join(args.out, f"certificate_s63_part{cert['part']}")
+    dump_json(cert, base + ".json")
+    with open(base + ".html", "w", encoding="utf-8") as fh:
+        fh.write(s63.render(cert))
+    f = cert["fields"]
+    print(f"{BANNER} - section 63 certificate, Part {cert['part']} (DRAFT)\n")
+    print(f"  device        DVR; {f['make_model'] or 'make/model not recorded'}")
+    print(f"  serial        {f['serial'] or 'not recorded'}")
+    print(f"  hash values   {len(f['hash_values'])} ({', '.join(f['algorithm_ticks']) or 'none'}), "
+          f"listed in the enclosed hash report")
+    for n in cert["notes"]:
+        print(f"  [!] {n}")
+    print("  left blank    " + "\n                ".join(cert["left_to_the_declarant"]))
+    print(f"  wording       {cert['wording_source']}")
+    ledger = _case_ledger(args.out)
+    if ledger:
+        ledger.append("s63_certificate_drafted", {
+            "part": cert["part"], "html": os.path.basename(base) + ".html",
+            "html_sha256": sha256_file(base + ".html"), "hash_values": len(f["hash_values"])},
+            data_hash=sha256_file(base + ".json"))
+        print("  both files' SHA-256 recorded in the custody ledger")
+    print(f"\n[+] {base}.html")
+    return 0 if f["hash_values"] else 1
+
+
 def cmd_prove(args) -> int:
     """Produce a Merkle inclusion proof for the block containing an offset.
 
@@ -1986,6 +2021,18 @@ def main() -> int:
                    help="the recorder that exported the clip, as read off its label or "
                         "System Info (model, firmware)")
     p.set_defaults(func=cmd_validate_export)
+
+    p = sub.add_parser("certificate",
+                       help="draft the BSA 2023 s.63(4)(c) certificate from the case record")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--part", choices=["A", "B"], default="B",
+                   help="A: by the party producing the record; B: by the expert (default)")
+    p.add_argument("--records", choices=["drive", "footage", "both"], default="both",
+                   help="what the hash values certify: the whole drive, the extracted "
+                        "footage, or both (default)")
+    for k in ("name", "relation", "address", "designation", "date", "time", "place"):
+        p.add_argument(f"--{k}", default="", help=f"the declarant's {k} (left blank if omitted)")
+    p.set_defaults(func=cmd_certificate)
 
     p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
     p.add_argument("--out", required=True)

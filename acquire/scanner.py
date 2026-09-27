@@ -199,12 +199,16 @@ class ScanSession:
             self._progress(bytes_read, start_offset, total, started, final=True)
 
             root = merkle_root(leaves)
+            # Complete means the whole DEVICE, not the requested range: a triage
+            # pass (--max-mb) hashes a prefix, and its hash must never read as
+            # the drive's (USER_MANUAL 3.3).
+            whole = complete_pass and bytes_read + start_offset >= dev.size_bytes
             hashes: list[HashRecord] = []
             if hasher is not None:
                 for algo, value in hasher.digests().items():
                     hashes.append(HashRecord(algorithm=algo, value=value,
-                                             scope="full_device", offset=0,
-                                             length=bytes_read))
+                                             scope="full_device" if whole else "region",
+                                             offset=0, length=bytes_read))
             hashes.append(HashRecord(algorithm="sha256-merkle", value=root,
                                      scope="block_merkle_root", offset=0,
                                      length=bytes_read))
@@ -214,7 +218,7 @@ class ScanSession:
                 block_size=self.block_size, bad_sectors=len(bad_regions),
                 duration_s=round(elapsed, 2),
                 throughput_mbps=round(bytes_read / elapsed / 1024 / 1024, 2),
-                complete_pass=complete_pass and bytes_read + start_offset >= total,
+                complete_pass=whole,
             )
 
             detections = scanner.detections()

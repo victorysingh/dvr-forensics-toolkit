@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 338 pass, 0 fail: 330 on generated data with known ground truth, 8 on real media |
+| Automated tests | 344 pass, 0 fail: 336 on generated data with known ground truth, 8 on real media |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
@@ -183,6 +183,22 @@ power-cycle of the adapter and a replug on another port, the drive returned
 write-blocked; the scan re-read blocks 0, 17620 and 17621, all matched, and
 the same hashes continued from the first unhashed byte. Recorded as
 `device_lost` / `device_reconnected` in the ledger.
+
+### 6.4 A triage pass read as complete (found in review, 28 Sep)
+
+Not a hardware failure: found while writing the s.63 certificate, which must
+never certify a hash that does not cover the whole drive. A `--max-mb`
+triage pass recorded `complete_pass: true` and scoped its MD5/SHA-256 as
+`full_device` — complete relative to the range asked for, not the device —
+although USER_MANUAL §3.3 says such a pass is marked incomplete. Neither
+evidence drive is affected: both were acquired in full passes.
+
+**Fix:** a pass is complete only if it covered the whole device, and only
+then are its hashes scoped `full_device`; a triage hash is scoped `region`.
+The certificate also checks each hash's length against the drive's size, so
+reports written before the fix are caught.
+**Regression test:** "a triage pass is not complete, its hash is a region's,
+and no drive hash is certified".
 
 ## 7. Recovery
 
