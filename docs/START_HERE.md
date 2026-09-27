@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 340 tests, all should pass
+python tests/test_pipeline.py     # 345 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -81,6 +81,7 @@ If those pass, the engine below is intact:
 | Component | File | State |
 |---|---|---|
 | Read-only device layer (Linux + Windows) | `acquire/device.py` | working |
+| E01 (EnCase) images, segments and compressed chunks, self-verified by their stored MD5 | `acquire/ewf.py`, `cli.py ewf-info` | working on generated E01 sets; not yet on a real E01 |
 | Bad-sector isolation, zero-fill in place | `acquire/device.py` | working |
 | Single-pass acquisition scan | `acquire/scanner.py` | working |
 | Linear MD5/SHA-256 + per-block Merkle map | `core/hashing.py` | working |
