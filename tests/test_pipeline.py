@@ -1417,6 +1417,164 @@ def test_hikbtree(tmp: str) -> None:
           lab["unused"] == "outside_index")
 
 
+def test_osd_rules() -> None:
+    """The rules for reading a burned-in OSD: a title only when frames agree,
+    a band chosen by the footage rather than hardcoded, and an ambiguous date
+    left ambiguous until the container resolves it."""
+    print("\n[OSD: title and clock rules]")
+    from datetime import datetime
+    from analytics import osd_rules as R
+
+    check("digit-shaped letters are fixed inside a numeric word only",
+          R.normalise_title("Camera O1") == "Camera 01"
+          and R.normalise_title("Road VIew 1") == "Road VIew 1")
+    check("a bare number is not a title, and noise is not either",
+          R.normalise_title("2024-08-30") is None and R.normalise_title("~~") is None
+          and R.normalise_title("ab") is None)
+
+    v = R.vote_title(["Camera 01", "Camera O1", "CAMERA 01", "Parklng", "%%%"])
+    check("a title is the agreed reading, with the share that agreed and the rest kept",
+          v["title"] == "Camera 01" and v["frames_agreeing"] == 3 and v["frames_read"] == 4
+          and v["confidence"] == 0.75 and v["alternatives"] == {"parklng": 1}, str(v))
+    check("frames that disagree claim nothing",
+          R.vote_title(["Parking", "Gate 2", "Road View 1"]) is None)
+    check("too few readable frames claim nothing",
+          R.vote_title(["Parking", "Parking", "%%"]) is None)
+
+    # Readings are grouped per stream: two streams are two cameras with two
+    # different titles, so a band is scored within a stream and then averaged.
+    bands = {"top_left": [["Parking"] * 4, ["Gate 2"] * 4],
+             "top_right": [["", "%%", "", ""], ["", "", "", ""]],
+             "bottom_left": [[""] * 4, [""] * 4],
+             "bottom_right": [["", "", "", ""], ["", "", "", ""]]}
+    picked = R.pick_band(bands, "title")
+    check("the band that reads consistently wins, and every band's score is kept",
+          picked["band"] == "top_left" and picked["scores"]["top_right"] == 0.0, str(picked))
+    check("two streams with different titles do not cancel each other out",
+          picked["score"] == 1.0, str(picked["score"]))
+    check("no band claims a layout when nothing reads",
+          R.pick_band({b: [["", "%%"]] for b in R.BANDS}, "title") is None)
+
+    p = R.parse_osd_clock("2024-08-30 14:23:45")
+    check("an unambiguous clock reads once",
+          not p["ambiguous"] and p["readings"] == [datetime(2024, 8, 30, 14, 23, 45)])
+    p = R.parse_osd_clock("01/02/2024 08:00:00")
+    check("a date that is two dates returns both, flagged ambiguous",
+          p["ambiguous"] and len(p["readings"]) == 2, str(p["readings"]))
+    check("an ambiguous reading with no second source stays unresolved",
+          R.resolve_against(p, None)["resolved"] is None)
+    r = R.resolve_against(p, datetime(2024, 2, 1, 8, 0, 2))
+    check("the container's own date chooses between the two, and is recorded as having",
+          r["resolved"] == datetime(2024, 2, 1, 8, 0) and r["resolved_by"] == "container date",
+          str(r.get("resolved_by")))
+    check("a two-digit year is not read as the first century",
+          R.parse_osd_clock("24-08-30 14:23:45") is None)
+
+    c = R.clock_check(datetime(2024, 8, 30, 14, 23, 45), datetime(2024, 8, 30, 14, 23, 43))
+    d = R.clock_check(datetime(2024, 8, 30, 14, 23, 45), datetime(2024, 8, 30, 14, 20, 43))
+    check("the picture and the container agree within tolerance, and disagree outside it",
+          c["verdict"] == "agrees" and d["verdict"] == "disagrees" and d["offset_s"] == 182.0)
+    check("nothing is compared when either clock is missing",
+          R.clock_check(None, datetime(2024, 1, 1))["verdict"] == "not compared")
+
+
+def test_osd_reader(tmp: str) -> None:
+    """The OSD reader end to end with the OCR stubbed: ffmpeg and Tesseract are
+    not installed in CI, so `sample` and `ocr` are replaced by a fake recorder
+    that paints a title in one corner and a clock in another.  This exercises
+    calibration, the per-stream vote, the clock cross-check against the
+    container's own date, and the report shape - not Tesseract's accuracy,
+    which no test here can claim."""
+    print("\n[OSD: reader against a stubbed recorder]")
+    from datetime import datetime, timedelta
+    from analytics import osd as O
+
+    start = datetime(2024, 8, 30, 14, 0, 0)
+    painted = {"ps-00001": "Camera 01", "ps-00002": "Parking"}
+
+    def fake_sample(clip, band, out_dir, frames=6, window_s=30, negate=False):
+        # The recorder puts the title bottom-left and the clock top-right; every
+        # other band holds picture, which reads as nothing.
+        sid = os.path.splitext(os.path.basename(clip))[0]
+        step = window_s / float(frames)
+        out = []
+        for i in range(frames):
+            if band == O.BANDS["bottom_left"]:
+                text = painted.get(sid, "")
+            elif band == O.BANDS["top_right"]:
+                text = (start + timedelta(seconds=i * step)).strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                text = ""
+            p = os.path.join(out_dir, f"f{i:03d}.pgm")
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            out.append(p)
+        return out
+
+    def fake_ocr(image, chars):
+        with open(image, "r", encoding="utf-8") as fh:
+            return fh.read()
+
+    case = os.path.join(tmp, "osd-case")
+    os.makedirs(os.path.join(case, "carve", "ps_streams"), exist_ok=True)
+    clips = []
+    for sid in ("ps-00001", "ps-00002"):
+        p = os.path.join(case, "carve", "ps_streams", sid + ".ps")
+        with open(p, "wb") as fh:
+            fh.write(b"\x00" * 16)
+        clips.append(p)
+    # the container's own date for one stream only: the other has nothing to
+    # check its picture against, which must not be reported as agreement
+    with open(os.path.join(case, "carve", "ps_report.json"), "w", encoding="utf-8") as fh:
+        json.dump({"streams": [{"id": "ps-00001",
+                                "time_first_local": start.strftime("%Y-%m-%d %H:%M:%S")}]}, fh)
+
+    real = (O.sample, O.ocr, O.have_tools)
+    O.sample, O.ocr, O.have_tools = fake_sample, fake_ocr, lambda: None
+    try:
+        r = O.run(clips, case, frames=4, log=lambda *a: None)
+    finally:
+        O.sample, O.ocr, O.have_tools = real
+
+    lay = r["layout"]
+    check("calibration finds the corners the recorder actually painted",
+          lay["title"]["band"] == "bottom_left" and lay["clock"]["band"] == "top_right",
+          f"{lay['title']} / {lay['clock']}")
+    by = {s["clip"]: s for s in r["streams"]}
+    check("each stream is named from its own picture",
+          by["ps-00001.ps"]["label"]["title"] == "Camera 01"
+          and by["ps-00002.ps"]["label"]["title"] == "Parking")
+    check("the picture's clock is checked against the container's date for the same moment",
+          by["ps-00001.ps"]["clock"]["verdict"] == "agrees"
+          and by["ps-00001.ps"]["clock"]["frames_compared"] == 4,
+          str(by["ps-00001.ps"]["clock"]))
+    check("a stream with no container date is read, not compared",
+          by["ps-00002.ps"]["clock"]["verdict"] == "read, not compared")
+    check("the summary counts what the picture named and how the clocks compared",
+          r["summary"]["streams_named_by_the_picture"] == 2
+          and r["summary"]["clock_checks"] == {"agrees": 1, "read, not compared": 1},
+          str(r["summary"]))
+    check("osd.json is written with the rule and the status it may claim",
+          os.path.exists(os.path.join(case, "analytics", "osd.json"))
+          and r["rule"] == "osd.tesseract_title_clock.v1"
+          and r["status"] == "lead, not evidence")
+
+    # The same picture against a container date 400 s away: a recorder whose
+    # displayed clock and stored dates disagree must not be absorbed.
+    with open(os.path.join(case, "carve", "ps_report.json"), "w", encoding="utf-8") as fh:
+        json.dump({"streams": [{"id": "ps-00001", "time_first_local":
+                                (start - timedelta(seconds=400)).strftime("%Y-%m-%d %H:%M:%S")}]}, fh)
+    O.sample, O.ocr, O.have_tools = fake_sample, fake_ocr, lambda: None
+    try:
+        r2 = O.run(clips[:1], case, frames=4, log=lambda *a: None)
+    finally:
+        O.sample, O.ocr, O.have_tools = real
+    check("a picture 400 s from the container's date is reported as a disagreement",
+          r2["streams"][0]["clock"]["verdict"] == "disagrees"
+          and r2["streams"][0]["clock"]["offset_s"] == 400.0,
+          str(r2["streams"][0]["clock"]))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1444,6 +1602,8 @@ def main() -> int:
         test_timeline_recurring()
         test_ps_carver(tmp)
         test_static_detections()
+        test_osd_rules()
+        test_osd_reader(tmp)
         test_hikbtree(tmp)
         test_dahua_real_media()
     finally:

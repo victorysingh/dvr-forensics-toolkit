@@ -18,11 +18,12 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 234 pass, 0 fail: 226 on generated data with known ground truth, 8 on real media |
+| Automated tests | 279 pass, 0 fail: 271 on generated data with known ground truth, 8 on real media |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
 | Analytics (optional) | runs on recovered clips; detections reviewed by eye as plausible leads; no accuracy claimed |
+| OSD reader (optional) | rules and orchestration tested (§8c); **OCR accuracy not measured** — never yet run on a rendered frame |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts |
@@ -291,6 +292,27 @@ Stream with Hikvision `HK` stream-map descriptors.
 | Labels vs the picture | two decoded frames: burned-in "Camera 01" / "28-07-2024 08:19:42" where the index gave CH01 and the `HK` time 08:19:41; "Camera 03" / "22-07-2023 11:28:55" where it gave CH03 and 11:28:53 |
 | Analytics (subset of 50 streams, 22 GB) | 68,639 frames: person 517, face 73, bus 1. The two strongest "faces" (0.997, 0.978) were a floor and buckets; the "person" beside the first looks like a dog. 64 face boxes spanning most of the frame are now flagged implausible and not counted |
 
+## 8c. OSD reader (optional layer — never yet run on a rendered frame)
+
+`cli.py read-osd` reads the burned-in channel title and clock, which is the
+only camera attribution available for the 2,246 (drive 1) and 495 (drive 2)
+streams no index accounts for.
+
+| Check | Result |
+|---|---|
+| Rules under test | 22 checks in `tests/test_pipeline.py`: title normalisation, the agreement vote and its thresholds, band choice scored per stream, ambiguous-date handling, container-resolved dates, the clock comparison and its tolerance |
+| Reader end to end | passes with `sample` and `ocr` replaced by a stubbed recorder painting a known title in one corner and a known clock in another: calibration finds both corners, each stream is named from its own picture, a 400 s offset is reported as a disagreement, a stream with no container date is `read, not compared` |
+| OCR accuracy | **not measured.** Neither `ffmpeg` nor `tesseract` was installed on the machine this was written on, so the filter chain and the Tesseract call are unrun code paths |
+| Status | `synthetic_only` |
+
+**To reach `spec_only`:** run it over the same streams whose frames were
+already read by eye in §8a and §8b and compare — *Parking*, *Road View 1*,
+*Road View 2* on drive 1; *Camera 01*, *Camera 03* on drive 2; and the clocks
+in those rows, where the picture ran 1–2 s ahead of the `HK` time and should
+come back `agrees` inside the 3 s tolerance. A disagreement between the reader
+and the eye belongs in this report, with the frame as the arbiter.
+`docs/OSD_OCR.md` §6 has the full route.
+
 ## 9. Vendor format status
 
 | Vendor | Status | Why not better |
@@ -310,6 +332,7 @@ here with both files' SHA-256.
 ## 10. Open items
 
 - Why 2,087 frames after a keyframe still do not decode (suspected: a lost reference frame).
+- OSD reader against the frames already read by eye (§8c), on a machine with ffmpeg and Tesseract.
 - A native export for the validation in §9.
 - Hikvision drive acquisition and parser check.
 - Kaitai `.ksy` compiled and checked against the image.

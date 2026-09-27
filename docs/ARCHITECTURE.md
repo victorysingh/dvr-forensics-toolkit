@@ -177,7 +177,8 @@ against the hashes taken at acquisition.
 | A vendor | one file in `plugins/` (copy `_template.py`): signatures + a `VendorParser` | no |
 | An analysis during acquisition | a tap: `prepare(dev, start, end)`, `feed(offset, data)`, `finish(out_dir, info)` | no |
 | A presentation | read `report/case.py::load_case` | no |
-| AI analytics | planned optional `analytics/` layer (ONNX Runtime, ffmpeg — see TECH_STACK), reading extracted clips; never imported by the core | no |
+| AI analytics | optional `analytics/` layer (ONNX Runtime, ffmpeg — see TECH_STACK), reading extracted clips; never imported by the core | no |
+| Reading the picture itself | same layer: `analytics/osd.py` needs only the `ffmpeg` and `tesseract` binaries. Keep the rules in `analytics/osd_rules.py`, which is stdlib-only so the core suite tests them | no |
 
 ---
 
@@ -193,6 +194,9 @@ out/<case>/
   carve/carve_report.json streams, extents, index labels (scan --carve)
   carve/streams/          extracted footage (.dav + bare .h264/.h265)
   carve/extracted.json    per-file SHA-256 and frame checks
+  carve/ps_labels.json    cameras for carved MPEG-PS streams, from a surviving HIKBTREE
+  analytics/analytics.json  faces and objects in extracted clips (optional layer)
+  analytics/osd.json      camera titles and the clock read off the picture (optional layer)
   preserved/              filesystem metadata as whole scan blocks + manifest
   parse_<vendor>.json     volumes, recordings, field provenance
   timeline.json           events, gaps, correlations, anomalies, clock rule
@@ -203,7 +207,11 @@ out/<case>/
 
 ## 9. Not built yet
 
-Video decode to MP4 and AI analytics (optional
-layer) · Ed25519 report signing and RFC 3161 timestamping (TECH_STACK
-two-stage plan) · on-screen clock OCR · BSA 2023 s.63 certificate · CASE/UCO
-export · FastAPI + React product UI.
+Video decode to MP4 · Ed25519 report signing and RFC 3161 timestamping
+(TECH_STACK two-stage plan) · BSA 2023 s.63 certificate · CASE/UCO export ·
+FastAPI + React product UI.
+
+Built since this section was written, and listed here only to say what is still
+missing from them: AI analytics and the on-screen clock/title OCR both exist as
+the optional `analytics/` layer, but the OCR has never been run on a rendered
+frame (`docs/OSD_OCR.md` §6), and neither has a measured accuracy.
