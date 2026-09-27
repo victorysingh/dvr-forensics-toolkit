@@ -218,7 +218,7 @@ no single case - and records itself in every source case's ledger.
 ## 9. Not built yet
 
 Video decode to MP4 · Ed25519 report signing and RFC 3161 timestamping
-(TECH_STACK two-stage plan) · BSA 2023 s.63 certificate · CASE/UCO export ·
+(TECH_STACK two-stage plan) · CASE/UCO export ·
 FastAPI + React product UI.
 
 Built since this section was written, and listed here only to say what is still

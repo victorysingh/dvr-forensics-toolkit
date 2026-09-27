@@ -2268,6 +2268,75 @@ def test_honeywell(tmp: str) -> None:
           and man["output"]["frames"] == 90 and len(man["output"]["sha256"]) == 64)
 
 
+def test_s63_certificate(tmp: str) -> None:
+    """The s.63 certificate draft: the Schedule's wording, the case's own
+    hashes and device facts, and nothing said on a person's behalf."""
+    print("\n[BSA 2023 s.63 certificate (draft)]")
+    import argparse
+    import cli
+    from recover import annexb as A
+
+    img = os.path.join(tmp, "unknown_vendor.img")
+    case = os.path.join(tmp, "s63_case")
+    ScanSession(img, case, CaseInfo(case_id="S63", investigator="test"),
+                block_size=1 << 20, quiet=True, taps=[A.AnnexBTap()]).run()
+    cli.cmd_extract_carved(argparse.Namespace(device=img, out=case, format="annexb", ids="",
+                                              label="all"))
+    cli.cmd_record_device(argparse.Namespace(out=case, model="CP-UNR-104F1", serial="ABC123",
+                                             firmware="", read_from="label", photo=[]))
+    blank = {k: "" for k in ("name", "relation", "address", "designation", "date", "time",
+                             "place")}
+    rc_b = cli.cmd_certificate(argparse.Namespace(out=case, part="B", records="both",
+                                                  **dict(blank, name="A. Examiner",
+                                                         designation="Forensic examiner")))
+    rc_a = cli.cmd_certificate(argparse.Namespace(out=case, part="A", records="drive", **blank))
+    with open(os.path.join(case, "certificate_s63_partB.json"), encoding="utf-8") as fh:
+        cb = json.load(fh)
+    hb = open(os.path.join(case, "certificate_s63_partB.html"), encoding="utf-8").read()
+    ha = open(os.path.join(case, "certificate_s63_partA.html"), encoding="utf-8").read()
+    with open(os.path.join(case, "scan_report.json"), encoding="utf-8") as fh:
+        scan = json.load(fh)
+    drive = {h["algorithm"].upper(): h["value"] for h in scan["hashes"]
+             if h["scope"] == "full_device"}
+    with open(os.path.join(case, "carve", "es_extracted.json"), encoding="utf-8") as fh:
+        es = {v["sha256"] for v in json.load(fh)["streams"].values()}
+    vals = cb["fields"]["hash_values"]
+    check("the Schedule's wording, Part B for the expert, marked a draft",
+          rc_b == 0 and "[See section 63(4)(c)]" in hb and "(To be filled by the Expert)" in hb
+          and "do hereby solemnly affirm and sincerely state and submit as follows:-" in hb
+          and "(Hash report to be enclosed with the certificate)" in hb and "DRAFT" in hb)
+    check("hash values are the case's own: whole-drive SHA-256 and MD5, and every extracted file",
+          {v["value"] for v in vals if v["record"] == "whole drive"} == set(drive.values())
+          and {v["value"] for v in vals if v["record"] != "whole drive"} == es
+          and cb["fields"]["algorithm_ticks"] == ["MD5", "SHA256"], str(cb["fields"]["algorithm_ticks"]))
+    check("DVR ticked; make, model and serial from the examiner's record",
+          "DVR &#9745;" in hb and "Mobile &#9744;" in hb
+          and "recorder CP Plus CP-UNR-104F1" in cb["fields"]["make_model"]
+          and "recorder ABC123" in cb["fields"]["serial"], str(cb["fields"]["make_model"]))
+    check("nothing said for a person: ownership unticked, date/place blank, name only as given",
+          rc_a == 0 and all(f"{r} &#9744;" in ha for r in ("Owned", "Maintained", "Managed",
+                                                            "Operated"))
+          and "&#9745; Owned" not in ha and "A. Examiner" in hb and "A. Examiner" not in ha
+          and "Date (DD/MM/YYYY): __________" in ha)
+
+    tri = os.path.join(tmp, "s63_triage")
+    ScanSession(img, tri, CaseInfo(case_id="TRI", investigator="test"),
+                block_size=1 << 20, quiet=True).run(max_bytes=2 << 20)
+    with open(os.path.join(tri, "scan_report.json"), encoding="utf-8") as fh:
+        tscan = json.load(fh)
+    rc_t = cli.cmd_certificate(argparse.Namespace(out=tri, part="B", records="drive", **blank))
+    with open(os.path.join(tri, "certificate_s63_partB.json"), encoding="utf-8") as fh:
+        ct = json.load(fh)
+    check("a triage pass is not complete, its hash is a region's, and no drive hash is certified",
+          not tscan["stats"]["complete_pass"]
+          and all(h["scope"] != "full_device" for h in tscan["hashes"])
+          and rc_t == 1 and ct["fields"]["hash_values"] == [] and ct["notes"], str(ct["notes"]))
+    led = CustodyLedger(os.path.join(case, "custody_ledger.jsonl"))
+    check("each draft is recorded in the custody ledger, chain valid",
+          [e["action"] for e in led.entries][-2:] == ["s63_certificate_drafted"] * 2
+          and led.verify()["valid"])
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -2303,6 +2372,7 @@ def main() -> int:
         test_model(tmp)
         test_annexb_carver(tmp)
         test_honeywell(tmp)
+        test_s63_certificate(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
