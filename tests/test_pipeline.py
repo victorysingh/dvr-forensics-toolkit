@@ -1993,6 +1993,200 @@ def test_model(tmp: str) -> None:
           str(c["model"]["checks"]))
 
 
+class _BitWriter:
+    """Exp-Golomb bit writer, to build real parameter sets for the tests."""
+
+    def __init__(self):
+        self.bits: list[int] = []
+
+    def u(self, n: int, v: int) -> "_BitWriter":
+        self.bits += [(v >> (n - 1 - i)) & 1 for i in range(n)]
+        return self
+
+    def ue(self, v: int) -> "_BitWriter":
+        v += 1
+        self.bits += [0] * (v.bit_length() - 1)
+        return self.u(v.bit_length(), v)
+
+    def rbsp(self) -> bytes:
+        bits = self.bits + [1]                          # rbsp_stop_one_bit
+        bits += [0] * (-len(bits) % 8)
+        return bytes(int("".join(map(str, bits[i:i + 8])), 2) for i in range(0, len(bits), 8))
+
+
+def _emulation_prevent(rbsp: bytes) -> bytes:
+    out, zeros = bytearray(), 0
+    for b in rbsp:
+        if zeros >= 2 and b <= 3:
+            out.append(3)
+            zeros = 0
+        out.append(b)
+        zeros = zeros + 1 if b == 0 else 0
+    return bytes(out)
+
+
+def _h264_sps(w: int, h: int, profile: int = 66) -> bytes:
+    bw = _BitWriter().u(8, profile).u(8, 0xC0).u(8, 40).ue(0)
+    if profile == 100:
+        bw.ue(1).ue(0).ue(0).u(1, 0).u(1, 0)            # 4:2:0, 8-bit, no scaling lists
+    mbs_h = (h + 15) // 16
+    bw.ue(0).ue(2).ue(1).u(1, 0).ue(w // 16 - 1).ue(mbs_h - 1).u(1, 1).u(1, 1)
+    pad = mbs_h * 16 - h
+    bw.u(1, 1 if pad else 0)
+    if pad:
+        bw.ue(0).ue(0).ue(0).ue(pad // 2)
+    bw.u(1, 0)                                          # no VUI
+    return b"\x67" + _emulation_prevent(bw.rbsp())
+
+
+def _h265_sps(w: int, h: int) -> bytes:
+    bw = _BitWriter().u(4, 0).u(3, 0).u(1, 1)
+    bw.u(2, 0).u(1, 0).u(5, 1).u(32, 0x60000000).u(4, 0b1001).u(32, 0).u(11, 0).u(1, 0).u(8, 120)
+    coded_h = (h + 7) // 8 * 8
+    bw.ue(0).ue(1).ue(w).ue(coded_h).u(1, 1 if coded_h != h else 0)
+    if coded_h != h:
+        bw.ue(0).ue(0).ue(0).ue((coded_h - h) // 2)
+    bw.ue(0).ue(0).ue(4)                                # bit depths, log2_max_poc_lsb - 4
+    return b"\x42\x01" + _emulation_prevent(bw.rbsp())
+
+
+def _vendor_frames(rng, n: int, codec: str, w: int, h: int, seq0: int = 0) -> bytes:
+    """Frames of a camera in a container nobody has documented: a 12-byte
+    header whose length and counter produce stray 00 00 01 sequences, the
+    Annex-B access unit, and a 2-byte trailer."""
+    def body(k):
+        return rng.randbytes(k).replace(b"\x00", b"\x01")
+    if codec == "h265":
+        params = [b"\x40\x01" + body(20), _h265_sps(w, h), b"\x44\x01" + body(6)]
+        idr, p = b"\x26\x01", b"\x02\x01"
+    else:
+        params = [_h264_sps(w, h, 100), b"\x68" + body(5)]
+        idr, p = b"\x65", b"\x41"
+    out = bytearray()
+    for k in range(n):
+        nals = (params + [idr + body(1500)]) if k % 25 == 0 else [p + body(rng.randint(200, 500))]
+        au = b"".join(b"\x00\x00\x00\x01" + x for x in nals)
+        out += (b"VNDR" + struct.pack("<I", len(au)) + bytes([1, 0x80, (seq0 + k) & 0xFF, 0])
+                + au + b"\xaa\x55")
+    return bytes(out)
+
+
+def test_annexb_carver(tmp: str) -> None:
+    """Raw H.264/H.265 from an undocumented container: anchored on real
+    parameter sets, split at a new one or a gap, noise ignored."""
+    print("\n[raw H.264/H.265 carver]")
+    import argparse
+    import random
+    import cli
+    from recover import annexb as A
+
+    sizes = [(A.h264_sps(_h264_sps(1920, 1080)), (1920, 1080)),
+             (A.h264_sps(_h264_sps(1280, 720, 100)), (1280, 720)),
+             (A.h265_sps(_h265_sps(2560, 1440)), (2560, 1440)),
+             (A.h265_sps(_h265_sps(1920, 1080)), (1920, 1080))]
+    check("SPS parsed to the picture size: H.264 baseline/high, H.265, cropping applied",
+          all(p and (p["width"], p["height"]) == want for p, want in sizes),
+          str([(p and (p["width"], p["height"]), want) for p, want in sizes]))
+    rng = random.Random(9)
+    fp264 = sum(1 for _ in range(5000) if A.h264_sps(b"\x67" + rng.randbytes(30)))
+    fp265 = sum(1 for _ in range(5000) if A.h265_sps(b"\x42\x01" + rng.randbytes(30)))
+    check("random bytes behind an SPS header almost never pass as an SPS (< 0.1%)",
+          fp264 <= 5 and fp265 <= 5, f"h264 {fp264}/5000, h265 {fp265}/5000")
+
+    noise = rng.randbytes(256 << 10)
+    cam_a = _vendor_frames(rng, 120, "h265", 1280, 720)
+    cam_b = _vendor_frames(rng, 100, "h264", 1920, 1080)
+    cam_c = _vendor_frames(rng, 60, "h264", 1280, 720)
+    short = _vendor_frames(rng, 10, "h265", 1280, 720)
+    gap = bytes(5 << 20)
+    img = os.path.join(tmp, "unknown_vendor.img")
+    layout = [noise, cam_a, gap, cam_b + cam_c, gap, short, rng.randbytes(128 << 10)]
+    with open(img, "wb") as fh:
+        fh.write(b"".join(layout))
+    at_a = len(noise)
+    at_b = at_a + len(cam_a) + len(gap)
+    at_c = at_b + len(cam_b)
+
+    def first_sc(base, blob):                 # the first 00 00 01 of the first access unit
+        return base + blob.find(b"\x00\x00\x00\x01") + 1
+
+    def last_sc(base, blob):
+        return base + blob.rfind(b"\x00\x00\x00\x01") + 1
+
+    with BlockDevice(img) as dev:
+        streams, stats = A.carve(dev, chunk=1 << 20)
+    rows = [s.to_row() for s in streams]
+    got = [(r["codec"], r["width"], r["height"]) for r in rows]
+    check("three cameras found, codec and size from their own SPS; the short run is not footage",
+          got == [("h265", 1280, 720), ("h264", 1920, 1080), ("h264", 1280, 720)]
+          and stats["fragments"] >= 1, f"{got} {stats}")
+    check("streams start exactly at their first parameter set (the VPS on H.265)",
+          [r["offset"] for r in rows] == [first_sc(at_a, cam_a), first_sc(at_b, cam_b),
+                                          first_sc(at_c, cam_c)],
+          str([r["offset"] for r in rows]))
+    check("a new SPS ends one stream where the next begins; a gap ends it at its last "
+          "known NAL", rows[1]["offset"] + rows[1]["bytes"] == rows[2]["offset"]
+          and rows[0]["offset"] + rows[0]["bytes"] == last_sc(at_a, cam_a)
+          and stats["splits_on_new_parameter_set"] >= 1, str(stats))
+    check("the container's stray 00 00 01 are passed over, not taken as NAL units",
+          rows[0]["start_codes_passed_over"] >= 119 and rows[0]["slices"] == 119
+          and rows[0]["keyframes"] == 5, str(rows[0]))
+
+    with BlockDevice(img) as dev:
+        tap = A.AnnexBTap()
+        tap.prepare(dev, 0, dev.size_bytes, log=lambda *_: None)
+        off = 0
+        for n in [777_777, 1 << 20, 3_333_333] * 4:
+            data = dev.read_at(off, n)
+            if not data:
+                break
+            tap.feed(off, data)
+            off += len(data)
+        tap.feed(off, dev.read_at(off, dev.size_bytes - off))
+        res = tap.finish(os.path.join(tmp, "annexb_case"), dev.info())
+    with open(os.path.join(tmp, "annexb_case", "carve", "annexb_report.json"),
+              encoding="utf-8") as fh:
+        inline = [(r["offset"], r["bytes"]) for r in json.load(fh)["streams"]]
+    check("inside the scan, fed in uneven pieces: the same streams as a standalone carve",
+          inline == [(r["offset"], r["bytes"]) for r in rows] and res["streams_kept"] == 3)
+
+    only_noise = os.path.join(tmp, "noise.img")
+    with open(only_noise, "wb") as fh:
+        fh.write(random.Random(2).randbytes(4 << 20))
+    with BlockDevice(only_noise) as dev:
+        ns, _ = A.carve(dev)
+    check("4 MiB of noise yields no footage", ns == [])
+
+    case = os.path.join(tmp, "annexb_cli")
+    os.makedirs(case)
+    CustodyLedger(os.path.join(case, "custody_ledger.jsonl"),
+                  actor="t", case_id="ES").append("case_opened")
+    rc1 = cli.cmd_carve_annexb(argparse.Namespace(device=img, out=case))
+    rc2 = cli.cmd_extract_carved(argparse.Namespace(device=img, out=case, format="annexb",
+                                                    ids="", label="all"))
+    with open(os.path.join(case, "carve", "es_extracted.json"), encoding="utf-8") as fh:
+        man = json.load(fh)["streams"]
+    first = open(os.path.join(case, "carve", "es_streams", "es-00001.h265"), "rb").read()
+    led = CustodyLedger(os.path.join(case, "custody_ledger.jsonl"))
+    check("carve-annexb and extract: files as stored, hashed, both in the ledger",
+          rc1 == 0 and rc2 == 0 and len(man) == 3
+          and first == open(img, "rb").read()[rows[0]["offset"]:rows[0]["offset"] + rows[0]["bytes"]]
+          and man["es-00001"]["sha256"] == hashlib.sha256(first).hexdigest()
+          and [e["action"] for e in led.entries][-2:] == ["annexb_carved", "es_streams_extracted"]
+          and led.verify()["valid"])
+
+    from report.case import load_case
+    from report.html import render
+    scan_case = os.path.join(tmp, "annexb_scan")
+    ScanSession(img, scan_case, CaseInfo(case_id="ES-SCAN", investigator="test"),
+                block_size=1 << 20, quiet=True, taps=[A.AnnexBTap()]).run()
+    c = load_case(scan_case)
+    page = render(c)
+    check("scan --carve-annexb: the report shows the streams and says what they are not",
+          c["es_carve"]["streams_total"] == 3 and "5c. Raw H.264/H.265" in page
+          and "no date and no camera" in page)
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -2026,6 +2220,7 @@ def main() -> int:
         test_hikbtree(tmp)
         test_validate_export(tmp)
         test_model(tmp)
+        test_annexb_carver(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
