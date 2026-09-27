@@ -963,6 +963,57 @@ def _extract_annexb(args) -> int:
     return 0 if not bad else 1
 
 
+def cmd_decode_check(args) -> int:
+    """Which extracted DHAV frames did not decode, and was a frame missing
+    from the disk (a counter gap) since the last keyframe?"""
+    from core.contract import dump_json
+    from core.hashing import sha256_file
+    from analytics import decodecheck as D
+
+    man = _load_json(os.path.join(args.out, "carve", "extracted.json"))
+    if not man or not man.get("streams"):
+        print(f"[!] no extracted DHAV streams in {args.out} - run `extract-carved` first")
+        return 1
+    if not D.have_ffprobe():
+        print("[!] decode-check needs ffprobe (apt install ffmpeg); nothing else is affected")
+        return 1
+    ids = set(args.ids.split(",")) if args.ids else None
+    sdir = os.path.join(args.out, "carve", "streams")
+    print(f"{BANNER} - decode check against the DHAV counter\n")
+    per = {}
+    for sid, v in sorted(man["streams"].items()):
+        if (ids and sid not in ids) or (args.limit and len(per) >= args.limit):
+            continue
+        codec = v.get("codec") or "h265"
+        dav, es = os.path.join(sdir, sid + ".dav"), os.path.join(sdir, f"{sid}.{codec}")
+        if os.path.exists(dav) and os.path.exists(es):
+            per[sid] = D.check_stream(dav, es, codec)
+            if len(per) % 100 == 0:
+                print(f"    {len(per)} streams checked", flush=True)
+    s = D.summarise(per)
+    res = {"rule": D.RULE, "summary": s, "streams": per}
+    path = os.path.join(args.out, "analytics", "decode_check.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dump_json(res, path)
+    c = s["classes"]
+    print(f"  streams       {s['streams']}; {s['video_frames']:,} video frames, "
+          f"{s['decoded']:,} decoded, {s['not_decoded']:,} not")
+    print(f"  not decoded   before the first keyframe (expected)  {c['before_first_keyframe']:,}")
+    print(f"                after a counter gap (a frame missing)  {c['after_a_gap']:,}")
+    print(f"                unexplained                          {c['unexplained']:,}")
+    if s["share_explained_by_a_gap"] is not None:
+        print(f"\n  a missing frame explains {s['share_explained_by_a_gap']:.1%} of the "
+              f"failures after a keyframe")
+    ledger = _case_ledger(args.out)
+    if ledger:
+        ledger.append("decode_checked", {"result": "analytics/decode_check.json",
+                                         "streams": s["streams"], "classes": c},
+                      data_hash=sha256_file(path))
+        print("  result SHA-256 recorded in the custody ledger")
+    print(f"\n[+] {path}")
+    return 0
+
+
 def cmd_carve_annexb(args) -> int:
     """Carve raw H.264/H.265 from an image or drive, no parser needed."""
     from core.hashing import sha256_file
@@ -974,11 +1025,15 @@ def cmd_carve_annexb(args) -> int:
             info = dev.info()
             print(f"  device        {dev.path}  ({human_size(dev.size_bytes)}, "
                   f"{info.write_block_method})")
-            streams, stats = annexb.carve(dev)
+            end = min(dev.size_bytes, args.max_mb << 20) if args.max_mb else dev.size_bytes
+            if end < dev.size_bytes:
+                print(f"  range         first {human_size(end)} only (--max-mb)")
+            streams, stats = annexb.carve(dev, 0, end)
     except (PermissionNeeded, DeviceError) as exc:
         print(f"[!] {exc}")
         return 1
     rep = annexb.build_report(streams, stats, info, tool="carve-annexb")
+    rep["range"] = [0, end]
     res = annexb.write_report(rep, args.out, sha256_file)
     for r in rep["streams"][:20]:
         print(f"  {r['id']}  {r['codec']} {r['width']}x{r['height']}  at 0x{r['offset']:X}  "
@@ -1497,7 +1552,7 @@ def _print_model_checks(out: str) -> None:
 def cmd_identify_model(args) -> int:
     """Search the non-video parts of the disk for the recorder's model number."""
     from core.contract import dump_json
-    from core.hashing import sha256_file
+    from core.hashing import sha256_bytes, sha256_file
     from detect import model
     from detect.survey import sample_offsets
 
@@ -1509,11 +1564,23 @@ def cmd_identify_model(args) -> int:
             if os.path.exists(bm_path):
                 with open(bm_path, "r", encoding="utf-8") as fh:
                     blockmap = [json.loads(l) for l in fh if l.strip()]
-                if blockmap and blockmap[-1]["offset"] + blockmap[-1]["length"] > dev.size_bytes:
-                    print("[!] the block map is of a larger device - wrong drive?")
-                    return 1
+                head_image = bool(blockmap) and (blockmap[-1]["offset"] + blockmap[-1]["length"]
+                                                 > dev.size_bytes)
+                if head_image:
+                    # A head image of the drive (e.g. its first 20 GiB): search the
+                    # blocks it holds - once its first block hashes to the scan's.
+                    b0 = blockmap[0]
+                    if (b0["offset"] or b0["length"] > dev.size_bytes
+                            or sha256_bytes(dev.read_at(0, b0["length"])) != b0["sha256"]):
+                        print("[!] this device is not the drive the block map was made of "
+                              "(its first block's hash differs)")
+                        return 1
+                    blockmap = [b for b in blockmap if b["offset"] + b["length"] <= dev.size_bytes]
                 blocks, searched = model.select_blocks(blockmap, dev.size_bytes,
                                                        int(args.max_gb * (1 << 30)))
+                if head_image:
+                    searched["head_image"] = (f"the first {dev.size_bytes:,} bytes of the drive; "
+                                              f"block 0 matches the scan's hash")
             else:
                 sample = 1 << 20
                 blocks = [(o, min(sample, dev.size_bytes - o))
@@ -1918,11 +1985,21 @@ def main() -> int:
     p.add_argument("--user", default="", help="also grant this user READ-only access")
     p.set_defaults(func=cmd_writeblock_rule)
 
+    p = sub.add_parser("decode-check",
+                       help="optional: which recovered frames do not decode, and whether a "
+                            "missing frame explains it (needs ffprobe)")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--ids", default="", help="comma-separated stream ids (default: all extracted)")
+    p.add_argument("--limit", type=int, default=0, help="stop after this many streams")
+    p.set_defaults(func=cmd_decode_check)
+
     p = sub.add_parser("carve-annexb",
                        help="carve raw H.264/H.265 with no parser - last resort for an "
                             "unknown vendor")
     p.add_argument("--device", required=True)
     p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--max-mb", type=int, default=0,
+                   help="carve only the first N MiB (default: the whole device)")
     p.set_defaults(func=cmd_carve_annexb)
 
     p = sub.add_parser("extract-carved",
