@@ -45,7 +45,7 @@ flowchart LR
 | Custody | `acquire/ledger.py` | Append-only JSONL; each entry carries the SHA-256 of the previous one |
 | Integrity | `core/hashing.py` | Streaming hashes, Merkle root, inclusion proofs |
 | Contract | `core/contract.py` | Frozen shapes (`SCHEMA_VERSION 1.0.0`) every engine builds against |
-| Identification | `detect/` | Vendor signatures for all eight PS OEMs, confidence scoring, partitions; `survey.py` drafts an unknown disk's layout |
+| Identification | `detect/` | Vendor signatures for all eight PS OEMs, confidence scoring, partitions; `survey.py` drafts an unknown disk's layout; `model.py` finds model numbers outside the video and checks them against the unit and the format |
 | Parsing | `parsers/`, `plugins/` | Vendor filesystem plugins on one SDK with field provenance; drop-in loading |
 | Recovery | `recover/carver.py` | Indexless DHAV carve: streams by byte contiguity and stream continuity; splits rather than guesses |
 | | `parsers/hikbtree.py` | Hikvision HIKBTREE index records from real media: camera and time per 1 GiB data block; labels carved PS streams |
@@ -188,6 +188,8 @@ against the hashes taken at acquisition.
 ```
 out/<case>/
   scan_report.json        hashes, Merkle root, detections, bad regions, stats
+  model.json              model-numbered strings on the platter (identify-model)
+  device_record.json      the recorder as read off the unit, photo hashes (record-device)
   blockmap.jsonl          one line per 8 MiB block: offset, SHA-256, statistics
   custody_ledger.jsonl    hash-chained record of every action
   codec_profile.json      where the H.264/H.265 payload lives

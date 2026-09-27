@@ -1883,6 +1883,116 @@ def test_validate_export(tmp: str) -> None:
           and led.entries[-1]["data_hash"] == hashlib.sha256(open(res_path, "rb").read()).hexdigest())
 
 
+def test_model(tmp: str) -> None:
+    """The recorder's model: from its number's shape, from strings on the
+    platter outside the video, and checked against the format on the disk."""
+    print("\n[recorder model]")
+    import argparse
+    import random
+    import cli
+    from detect import model as M
+    from report.case import load_case
+    from report.html import render
+
+    ids = {m: M.identify(m) for m in ("CP-UNR-104F1", "DS-7B08HUHI-K1", "ds-7b08huhi-k1",
+                                      "DS-2CD1023G0-I", "DH-XVR5104HS-X", "XYZ-123")}
+    check("model numbers identified by shape: vendor and recorder vs camera",
+          ids["CP-UNR-104F1"]["vendor"] == "CP Plus" and ids["CP-UNR-104F1"]["kind"] == "recorder"
+          and ids["DS-7B08HUHI-K1"]["vendor"] == "Hikvision"
+          and ids["DS-7B08HUHI-K1"]["kind"] == "recorder"
+          and ids["ds-7b08huhi-k1"]["kind"] == "recorder"
+          and ids["DS-2CD1023G0-I"]["kind"] == "camera"
+          and ids["DH-XVR5104HS-X"]["vendor"] == "Dahua" and ids["XYZ-123"] is None, str(ids))
+
+    ms = M.ModelSearch()
+    block = bytearray(4096)
+    line = b"devType=NVR;model=CP-UNR-104F1;ver=4.0\x00"
+    block[100:100 + len(line)] = line
+    block[4090:4096] = b"DS-7B0"                      # straddles into the next block
+    nxt = bytearray(b"8HUHI-K1\x00" + bytes(4087))
+    nxt[2000:2020] = b"XDS-7208HGHI-F1 cam\x00"      # inside a longer token: not a model
+    ms.feed(0, bytes(block))
+    ms.feed(4096, bytes(nxt))
+    got = {c["model"]: c for c in ms.result({})["candidates"]}
+    check("model strings found with their offsets, one straddling two blocks found once",
+          set(got) == {"CP-UNR-104F1", "DS-7B08HUHI-K1"}
+          and got["CP-UNR-104F1"]["offsets"] == [118] and got["DS-7B08HUHI-K1"]["count"] == 1
+          and got["DS-7B08HUHI-K1"]["offsets"] == [4090], str(got))
+
+    bmap = [{"offset": i * 100, "length": 100,
+             "incompressibility": 1.0 if 3 <= i < 17 else 0.3,
+             "start_codes": 40 if 3 <= i < 17 else 0} for i in range(20)]
+    blocks, searched = M.select_blocks(bmap, 2000, max_bytes=10_000, ends=2)
+    check("video blocks are never searched; the two ends always are",
+          [o for o, _ in blocks] == [0, 100, 200, 1700, 1800, 1900]
+          and searched["video_blocks_skipped"] == 14 and searched["capped_at_bytes"] is None,
+          str(blocks))
+    blocks, searched = M.select_blocks(bmap, 2000, max_bytes=300, ends=2)
+    check("...and a byte cap is honoured and stated", len(blocks) == 3
+          and searched["capped_at_bytes"] == 300)
+
+    dahua = [{"vendor": "Dahua", "confidence": 0.9}]
+    both = [{"vendor": "Dahua", "confidence": 0.9}, {"vendor": "Hikvision", "confidence": 0.8}]
+    cp = [M.observation("CP-UNR-104F1")]
+    hk = [M.observation("DS-7B08HUHI-K1")]
+    c1 = M.check(cp, None, dahua)[0]
+    c2 = M.check(hk, None, both)[0]
+    check("a CP Plus unit on a Dahua-format disk agrees (Dahua-built)",
+          c1["verdict"] == "agree" and "Dahua-built" in c1["detail"], str(c1))
+    check("a Hikvision unit whose disk also carries Dahua structures is flagged",
+          c2["verdict"] == "differ" and "Dahua" in c2["detail"], str(c2))
+    plat = {"searched": {"bytes": 1}, "candidates": [
+        {"model": "DS-7B08HUHI-K1", "kind": "recorder", "count": 3},
+        {"model": "DS-2CD1023G0-I", "kind": "camera", "count": 9}]}
+    v_same = M.check(hk, plat, both)[1]["verdict"]
+    v_diff = M.check(cp, plat, dahua)[1]["verdict"]
+    check("platter model vs the unit: agree / differ; camera strings never name the recorder",
+          v_same == "agree" and v_diff == "differ", f"{v_same} {v_diff}")
+    check("no observation: every check says not determined",
+          all(c["verdict"] == "not determined" for c in M.check([], None, None)))
+
+    # -- the commands, end to end on an image -------------------------------
+    # A real scan of an image: a metadata block naming the model, 18 blocks
+    # of "video" (start codes + noise), an empty block.
+    case = os.path.join(tmp, "model_case")
+    rng = random.Random(5)
+    img = os.path.join(tmp, "model.img")
+    head = bytearray(4096)
+    line = b"sys: model=CP-UNR-104F1 fw=V4.001.0000\x00"
+    head[500:500 + len(line)] = line
+    video = b"".join(b"".join(b"\x00\x00\x00\x01" + rng.randbytes(1020) for _ in range(4))
+                     for _ in range(18))
+    with open(img, "wb") as fh:
+        fh.write(bytes(head) + video + bytes(4096))
+    ScanSession(img, case, CaseInfo(case_id="MODEL", investigator="test"),
+                block_size=4096, quiet=True).run()
+    photo = os.path.join(tmp, "label.jpg")
+    with open(photo, "wb") as fh:
+        fh.write(b"\xff\xd8 not really a jpeg")
+    rc1 = cli.cmd_identify_model(argparse.Namespace(device=img, out=case, max_gb=1.0))
+    rc2 = cli.cmd_record_device(argparse.Namespace(
+        out=case, model="CP-UNR-104F1", serial="ABC123", firmware="V4.001", read_from="label",
+        photo=[photo]))
+    with open(os.path.join(case, "model.json"), "r", encoding="utf-8") as fh:
+        res = json.load(fh)
+    led = CustodyLedger(os.path.join(case, "custody_ledger.jsonl"))
+    check("identify-model skips the video between the disk's ends and finds the model",
+          rc1 == 0 and res["searched"]["blocks"] == 8
+          and res["searched"]["video_blocks_skipped"] == 18
+          and [c["model"] for c in res["candidates"]] == ["CP-UNR-104F1"], str(res["searched"]))
+    check("record-device hashes the photo and both land in the ledger, chain valid",
+          rc2 == 0 and [e["action"] for e in led.entries][-2:] == ["model_searched",
+                                                                    "device_recorded"]
+          and led.entries[-1]["detail"]["photos"][0]["sha256"]
+          == hashlib.sha256(open(photo, "rb").read()).hexdigest() and led.verify()["valid"])
+    c = load_case(case)
+    page = render(c)
+    check("the report shows the model; with no vendor format detected, it says so",
+          "Recorder model" in page and "CP-UNR-104F1" in page
+          and [x["verdict"] for x in c["model"]["checks"]] == ["not determined", "agree"],
+          str(c["model"]["checks"]))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1915,6 +2025,7 @@ def main() -> int:
         test_osd_reader(tmp)
         test_hikbtree(tmp)
         test_validate_export(tmp)
+        test_model(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
