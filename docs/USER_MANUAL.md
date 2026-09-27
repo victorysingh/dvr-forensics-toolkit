@@ -170,6 +170,27 @@ is OCR of pixels: confirm it in the frame before it goes near a finding. The
 OCR's accuracy has not yet been measured on real footage — `docs/OSD_OCR.md`
 §6 says exactly what that means and how to settle it.
 
+### 3.4c More than one recorder in the same case
+
+```bash
+python cli.py combine --cases out/CASE-001 out/CASE-002 --out out/COMBINED     --title "Premises X: two recorders"
+```
+
+Writes `combined.json` and `combined.html`, and records the view in each
+source case's custody ledger.
+
+**Two recorders share no clock.** Each has its own crystal, its own timezone
+setting and no knowledge of the other, so the command will only draw them on
+one axis when *every* case states its recorder's timezone (`timeline
+--tz-offset`). Where one does not, the cases are shown side by side, each on
+its own recorder clock, the page says plainly that they are not aligned, and
+section 3 makes no statement about what was recorded at the same time. The
+command prints exactly which case is missing what.
+
+Even on a shared axis, a recorder whose clock error was never measured
+(`--clock-observed/--clock-reference`) carries an unknown offset, and that is
+listed as a caveat rather than absorbed.
+
 ### 3.5 Look at the results
 
 ```bash
