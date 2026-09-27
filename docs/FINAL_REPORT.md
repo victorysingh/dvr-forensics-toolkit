@@ -1,0 +1,321 @@
+# Final project report
+
+**SIH 2026, Problem Statement 26150 (NTRO):** *Development of a Multi-Vendor
+DVR/NVR Forensic Analysis Tool for Standardized Acquisition, Recovery, and
+Analysis of Surveillance Evidence.* Theme: Blockchain & Cybersecurity.
+Category: Software.
+
+Repository `dvr-forensics-toolkit`. Report as of 28 Sep 2026. Every figure
+below is taken from the document named beside it, which holds the evidence.
+
+---
+
+## Abstract
+
+Surveillance recorders store video in proprietary filesystems that general
+forensic tools cannot read, and each vendor's own software reads only its own
+format. We built a vendor-agnostic tool that:
+
+- acquires a DVR/NVR drive **read-only, in one pass**, with MD5, SHA-256 and a
+  per-block Merkle map;
+- identifies the vendor by scored evidence and the recorder model from the
+  disk and the unit;
+- parses Dahua/CP Plus and Hikvision structures, and Honeywell's from
+  published research;
+- recovers deleted footage without an index, including from a drive that
+  another recorder had reformatted;
+- builds a timeline that refuses to invent a time zone;
+- keeps a hash-chained custody record of every action;
+- reports in HTML and JSON, with a draft BSA 2023 s.63 certificate.
+
+It was run on two real 1 TB surveillance drives:
+
+- **Drive 1 (CP Plus):** 2,029 indexed recordings, and **2,246 streams of
+  deleted footage outside every index**.
+- **Drive 2 (reformatted by a Dahua-family recorder):** **2,516 streams,
+  about 6,300 hours of Hikvision footage**, attributed to cameras from a
+  surviving index. The carve recovered **99.6–99.7%** of what that index says
+  each camera recorded.
+
+No vendor format is yet `validated`. That status needs a byte-match against
+the recorder's own export; the tool to make it is built, and the export is
+not yet taken.
+
+---
+
+## 1. The problem
+
+The problem statement (`PROBLEM_STATEMENT.md`) names eight OEMs (Dahua, CP
+Plus, Honeywell, Hikvision, TP-Link, Godrej, Uniview, Matrix) and asks for at
+least five to six. Its required modules are Device Identification,
+Acquisition, File System & Format Parsing, Recovery, Timeline Analysis,
+Reporting and Machine Learning. It closes with its success criteria: parse
+proprietary filesystems, decode video formats, recover deleted recordings,
+verify integrity by hashing, produce standardized reports, reduce analysis
+time, and give reliable and legally defensible results.
+
+Its trap is breadth. Eight vendors cannot be supported honestly by a team
+that holds media for two or three. So the project was built around one rule:
+**claim only what has been demonstrated, and say how strongly.**
+
+## 2. Design principles
+
+| Principle | Why | Where |
+|---|---|---|
+| **Never write to the evidence** | a single write destroys deleted footage and admissibility | no write path exists in `acquire/device.py`; kernel read-only flag and udev rules survive reconnects |
+| **One pass** | a 1 TB drive over USB 2 is an 11-hour read; a second read is another 11 hours and another chance of failure | `acquire/scanner.py`; carvers and analyses run as taps inside it |
+| **A hash per block plus a Merkle root** | a single linear hash cannot survive an interruption or say which region changed | `core/hashing.py`; inclusion proofs per clip (`prove`) |
+| **The weakest evidence sets the status** | `validated` / `spec_only` / `synthetic_only` / `detected_not_parsed`; nothing is `validated` without an export byte-match | `detect/engine.py::_weakest`, `parsers/base.py::weakest_source` |
+| **Confidence, never yes/no** | CP Plus units are commonly Dahua-built; a disk has evidence that scores, not a vendor | `detect/engine.py` |
+| **Split, never guess** | carved footage whose camera cannot be told apart is split, never merged | `recover/carver.py`, `recover/annexb.py` |
+| **No UTC without stated inputs** | recorders keep local time on unaudited clocks | `analyse/timeline.py::ClockModel`, `analyse/combined.py` |
+| **Analytics are leads, not evidence** | a detector scored a steel pot as a face at 0.99 | `analytics/`, `analyse/activity.py` |
+| **Stdlib-only forensic core** | auditable, and runs air-gapped on a bare Python install | `TECH_STACK.md` |
+
+## 3. Architecture
+
+The full description is in `ARCHITECTURE.md`. In short, a read-only device
+layer feeds one acquisition pass. During that pass, "taps" (carvers, motion
+activity) see every block the hasher sees, but none of them can alter a
+hash. Parsers are plugins on one SDK that records where each decoded field's
+layout came from. Everything the pipeline produces is bound into a
+hash-chained custody ledger. The report and the local viewer are built from
+one case view.
+
+| PS module | Implementation |
+|---|---|
+| Device Identification | `detect/` signatures for all eight OEMs, confidence-scored; `detect/model.py` model numbers from the disk and the unit, cross-checked |
+| Acquisition | `acquire/`: read-only device, single pass, bad-sector zero-fill in place, verified reconnect after USB drops, write-block rules |
+| File System & Format Parsing | `parsers/dahua.py` (DHFS 4.1), `parsers/hikbtree.py` (Hikvision index), `parsers/hikvision.py` (full FS, fixture only), `plugins/honeywell.py` (from Yoon & Hwang 2026) |
+| Recovery | `recover/carver.py` (DHAV), `recover/pscarve.py` (MPEG-PS, Hikvision), `recover/annexb.py` (raw H.264/H.265 for vendors with no parser), `recover/preserve.py` (metadata) |
+| Timeline Analysis | `analyse/timeline.py` (clock rule, gaps, recurring patterns, coverage), `analyse/combined.py` (several recorders) |
+| Reporting | `report/` (HTML + JSON, hashed into the ledger), `report/s63.py` (certificate draft), `viewer/` |
+| Machine Learning | `analyse/activity.py` (motion from frame sizes); `analytics/` (faces, objects, on-screen text), all labelled leads |
+| Validation | `validate/exportmatch.py` (recovered footage against the recorder's export) |
+
+## 4. Results on real media
+
+### 4.1 Drive 1: CP Plus unit (Seagate ST1000VX013, s/n `WWD4A3NX`)
+
+Sources: `STATUS.md` §2, `VALIDATION_REPORT.md` §3, §7, §8, `FORENSIC_IMAGE.md`.
+
+| | |
+|---|---|
+| Acquisition | one complete read-only pass of 931.5 GiB; 0 unreadable sectors; one USB drop survived by verified reconnect. SHA-256 `78eb8a4ac306691cacc1b3f0da911ded8edf1b9f9bf0819f483d95f467f8d909` |
+| Filesystem | Dahua DHFS 4.1, four volumes; **2,029 recordings**, three cameras, 27 Aug to 23 Sep 2026 (recorder clock), written circularly |
+| Deleted footage | 349.5 M frames carved without the index; **2,246 streams (5.4 GB) outside every index**, March to August 2026, all extracted |
+| Timeline | 6 recorder-wide gaps (three on 23 Sep, the day the drive was pulled); a nightly 02:00–02:09 interruption across all three cameras; 2 streams dated 2000-01-01 05:30, a reset clock whose 05:30 suggests the zone is IST (an inference, not applied) |
+| Checked against the picture | decoded frame's burned-in clock `01/05/2026 01:20:26 PM` equals its DHAV date `2026-05-01 13:20:26` to the second |
+| Analytics (leads) | 4,802 sampled frames of recovered footage: a person in 51, a car in 63 |
+
+### 4.2 Drive 2: Hikvision footage under a Dahua-family format (Seagate ST1000VX005, s/n `Z9C2632A`)
+
+Sources: `STATUS.md` §2, `VALIDATION_REPORT.md` §8b.
+
+| | |
+|---|---|
+| Acquisition | one complete pass; 0 unreadable sectors; two USB drops healed by verified reconnects. SHA-256 `04d7d4e05b14524b9f53b175ccc7e2b4156463b18e467e326da2a763405921d1` |
+| Top layer | Dahua DHFS 4.1 with an **empty** index: a Dahua-family recorder formatted it and never recorded |
+| Underneath | Hikvision MPEG-PS footage, recovered by structure alone: **2,516 streams, 923 GiB, about 6,300 h**, every one dated from its `HK` descriptors, April 2021 (H.264) to 30 Aug 2024 (H.265 + audio) |
+| Surviving index | a master-sector copy and two HIKBTREE copies near the end of the disk: **922 records, 8 channels**; **2,021 of 2,516 streams** attributed to a camera |
+| Measured against that index | the carve recovered **99.6–99.7%** of the hours each camera recorded |
+| Checked against the picture | burned-in "Camera 01" / "Camera 03" where the index gave CH01 / CH03; on-screen clocks within 2 s of the decoded times |
+| Analytics (leads) | 68,639 frames of a 22 GB subset: person 517, face 73, bus 1; 64 implausible face boxes (a floor, buckets) flagged and not counted |
+
+## 5. Validation
+
+Full account: `VALIDATION_REPORT.md`.
+
+- **Automated tests:** 336 on generated data with known ground truth, plus
+  8 on real media. They cover the Merkle tree, the custody chain, bad
+  sectors, device loss, every parser and carver, the timeline, the model
+  check, the export comparison, the Honeywell plugin and the certificate.
+- **Write blocking:** root writes refused on a sacrificial loop device, and
+  the block re-applied automatically after 2 of 2 real reconnects.
+- **Reproducibility:** five independent reads over three days agree bit for
+  bit, apart from two blocks that the bug below corrupted.
+- **Bugs found and fixed, each with a regression test that fails on the old
+  code:**
+  - a lost device was recorded as 180 GB of bad sectors (real hardware);
+  - a short read was zero-padded into the evidence hash (real hardware);
+  - a triage pass was reported as complete (found in review, §6.4).
+- **Vendor formats:** none `validated`.
+  - Dahua/CP Plus: `spec_only`.
+  - Hikvision container and index: `spec_only`.
+  - Hikvision full-filesystem parser: `synthetic_only`.
+  - Honeywell: `spec_only`.
+  - TP-Link, Godrej, Uniview, Matrix: `detected_not_parsed`.
+- **The route to `validated`** is built (`validate-export`, USER_MANUAL
+  §3.4d). The evidence drives must not go back into their recorders, so the
+  export comes from a **reference disk**: a spare disk that the same recorder
+  formats, records on and exports from, then acquired like evidence.
+
+## 6. Analysis time
+
+Source: `PERFORMANCE.md`. Over the USB 2 bridge actually used, which gave a
+measured 23.4 MiB/s on drive 1, a 1 TB drive takes:
+
+- **about 11.3 h in one pass**;
+- about 56.6 h with one read of the drive per task;
+- about 21.9 h if the drive is imaged first, and that also needs ~931 GiB
+  free. The workstation had 669 GB.
+
+The saving is fewer reads of the evidence. On fast media the pass is
+CPU-bound (26.7 MiB/s measured), and `TECH_STACK.md` records the planned fix.
+
+## 7. Legal defensibility
+
+- **Integrity:**
+  - MD5 and SHA-256 of the whole drive;
+  - SHA-256 per 8 MiB block with a Merkle root, so any clip can be proven
+    later without re-reading the drive;
+  - preserved filesystem metadata provable block by block.
+- **Custody:** an append-only ledger in which each entry carries the SHA-256
+  of the one before. Every action is bound in with the hash of what it
+  produced: acquisition, carving, extraction, timeline, analytics, OCR,
+  validation, model record, certificate.
+- **India:** *Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal* (2020)
+  made the certificate mandatory where the original is not produced, and BSA
+  2023 s.63 carries it forward. `cli.py certificate` drafts Part A or Part B
+  from the case's own hashes and device record, with the hash report
+  enclosed. It never ticks ownership, never makes the "working properly"
+  statement, and never signs. Its wording is to be checked against the
+  Gazette before use.
+- **Procedure:** `SOP_EXAMINATION.md` and `LINUX_ACQUISITION.md` follow SWGDE
+  DVR acquisition practice, ISO/IEC 27037 and NIST SP 800-86. Step 1.2 reads
+  the recorder's clock against true time before anything else.
+
+## 8. What sets it apart
+
+Source: `RESEARCH_BASIS.md`. Published DVR forensics is mostly one vendor per
+paper: Hikvision in Han, Jeong & Lee 2015; DHFS in Rzayeva et al. 2025;
+Honeywell in Yoon & Hwang 2026; or carving without a filesystem in Ariffin,
+Slay & Choo 2013. This tool puts those ideas into one read-only pass over
+real drives, and adds:
+
+- per-block proofs;
+- a custody chain over every derived artefact;
+- a status for every vendor claim that only an export byte-match can raise;
+- measurement on two real drives, including the failures they exposed.
+
+Three findings go beyond the published work:
+
+- **Cameras separated by stream continuity where the frames carry no camera
+  number.** On our CP Plus unit the DHAV channel byte is 0 for every camera,
+  where identifier-based demultiplexing, as in Information 2026, cannot help.
+- **A whole reformatted drive's footage recovered, and measured** against
+  the index that survived the reformat.
+- **The disk's history surfaced as a finding.** A Hikvision unit's disk
+  carrying Dahua structures is flagged by the model check.
+
+## 9. Coverage of the eight OEMs
+
+| OEM | Status | Basis |
+|---|---|---|
+| Dahua | `spec_only` | DHFS 4.1 and DHAV read off real media (the CP Plus drive) |
+| CP Plus | `spec_only` | the same format on our unit; CP Plus listed as a current Dahua OEM (IPVM, May 2024) |
+| Hikvision | container and index `spec_only`; full-FS parser `synthetic_only` | real footage and a surviving index on drive 2 |
+| Honeywell | `spec_only` | drop-in plugin from Yoon & Hwang (DFRWS USA 2026); older units were Dahua-built until April 2022, so the Dahua parser may apply |
+| TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand strings and model numbering; video recoverable with no parser by `carve-annexb`; sourced first answers in `OEM_COMPARISON.md` §5.1 |
+
+**Three vendors are read from real media and one from published research;
+all eight are detected; and footage can be recovered from any vendor that
+stores standard H.264/H.265.** That is our honest answer to "five to six".
+
+## 10. Limitations
+
+- **Nothing is `validated`.** It needs a native export and a reference disk.
+- **No UTC.** The time zone and clock error of neither recorder have been
+  read, so every time is the recorder's own clock. The combined two-recorder
+  view says "not aligned" for this reason.
+- **The OCR of burned-in camera titles and clocks has never run on a real
+  frame.** It needs ffmpeg and Tesseract, and so remains `synthetic_only`.
+- **2,087 frames on drive 1 do not decode** even after a keyframe. The
+  suspected cause, a lost reference frame, is unverified.
+- **No real disk has been read for** the Honeywell plugin, the raw
+  H.264/H.265 carver, or the Hikvision full-filesystem parser.
+- **On fast media the single pass is CPU-bound.**
+- **The s.63 certificate wording has not been checked against the Gazette.**
+- **The 23 Sep gaps on drive 1** may be the team's own handling of the unit.
+  This is to be confirmed and recorded.
+
+## 11. Future work
+
+1. **The field visit** (USER_MANUAL §3.4d–e, SOP 1.2–1.4):
+   - photograph each recorder's clock against true time, and its time-zone
+     setting;
+   - record its model, serial and firmware;
+   - take a native export from a reference disk.
+
+   These make the first vendor `validated`, give UTC, and put both drives on
+   one axis.
+2. **Date drive 2's reformat from its own logs.** Dahua log records note hard
+   drive formatting (Dragonas et al. 2024).
+3. **Run OCR on the frames already read by eye**, on a machine with ffmpeg
+   and Tesseract.
+4. **Speed:** one regex pass, threaded hashes, and a process pool.
+5. **Any real disk** from Honeywell, TP-Link, Godrej, Uniview or Matrix: run
+   `survey` and `carve-annexb`, then write a plugin.
+
+## 12. Deliverables named in the PS
+
+| Deliverable | Where |
+|---|---|
+| Comparative analysis of major OEMs | `OEM_COMPARISON.md`, `formats/*.ksy` |
+| DVR/NVR forensic image | `FORENSIC_IMAGE.md` (whole-drive hashes, block map, 20 GiB head image, preserved metadata) |
+| System architecture documentation | `ARCHITECTURE.md`, `TECH_STACK.md`, `DATA_CONTRACT.md` |
+| Functional prototype | `cli.py` and the viewer (`python cli.py serve`) |
+| Standard Operating Procedures | `SOP_EXAMINATION.md`, `LINUX_ACQUISITION.md` |
+| Validation reports | `VALIDATION_REPORT.md`, `PERFORMANCE.md` |
+| User manuals | `USER_MANUAL.md` |
+| Final project report | this document; `RESEARCH_BASIS.md` for differentiators and references |
+
+## 13. Team
+
+Six members, working as coder + researcher pairs (`MEMORY_SEED.md`). The
+code contributions below are taken from the repository history.
+
+- **Aakash** (coder; UI and presentation):
+  - the acquisition and detection engine: read-only scan, block Merkle map,
+    custody ledger;
+  - Linux device enumeration and the tech-stack decisions;
+  - the burned-in OSD reader and the combined multi-recorder view.
+- **Shrestha** (coder):
+  - the vendor parser SDK and the Dahua DHFS 4.1 and Hikvision parsers;
+  - the DHAV and MPEG-PS carvers and the HIKBTREE index;
+  - the single pass with USB-drop recovery, the timeline, the report and
+    viewer, the analytics layer and the survey tool;
+  - both drive acquisitions and most of the documentation.
+- **JP** (coder):
+  - the export comparison, model identification, the raw H.264/H.265 carver,
+    the Honeywell plugin and the s.63 certificate;
+  - the triage-pass fix, the performance measurement, the OEM research
+    answers, the research basis, and this report.
+- **Researchers**, as planned in `MEMORY_SEED.md`:
+  - **Shrini** (specifications, hex inspection, test cases), paired with
+    Shrestha;
+  - **Prathyushree** (H.264 and timestamp research, output verification),
+    paired with JP;
+  - **Hriday** (BSA 2023 s.63, ISO 27037 and NIST SP 800-86, QA), paired with
+    Aakash. Hriday is to make the s.63 wording check (§7).
+
+## References
+
+Full list with links in `RESEARCH_BASIS.md`. The principal ones are:
+
+- Han, Jeong & Lee, ICDF2C 2015 (Hikvision FS)
+- Rzayeva et al., *Information* 16:983, 2025 (Hikvision/Dahua recovery)
+- *Information* 17(5):493, 2026 (DHAV demultiplexing)
+- Yoon & Hwang, DFRWS USA 2026 (Honeywell FS)
+- Ariffin, Slay & Choo, IFIP 2013 (proprietary CCTV carving)
+- Dragonas, Lambrinoudakis & Kotsis, J. Forensic Sci. 2024 (Dahua logs)
+- Garfinkel, DFRWS 2007 (carving with object validation)
+- Merkle, CRYPTO '87
+- Schneier & Kelsey, ACM TISSEC 1999 (secure audit logs)
+- Boyd & Forster, Digital Investigation 2004 (time in forensics)
+- Poppe et al., JVCIR 2009 (compressed-domain motion)
+- SWGDE *Best Practices for Data Acquisition from DVRs* (2025)
+- ISO/IEC 27037:2012; NIST SP 800-86
+- *Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal* (SC, 2020)
+- Bharatiya Sakshya Adhiniyam 2023, s.63 and Schedule
+- IPVM *Dahua OEM Directory* (May 2024)
