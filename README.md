@@ -60,6 +60,7 @@ python cli.py validate-export --export clip.dav --against out/REF-001/clips --ou
 
 python tests/test_pipeline.py               # 336 regression tests, no hardware
 python demo/tamper_demo.py                  # 2-minute stage demo
+python demo/bench_single_pass.py            # one pass vs one read per task (docs/PERFORMANCE.md)
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
 
