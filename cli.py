@@ -95,19 +95,17 @@ def cmd_scan(args) -> int:
     if args.device.startswith("\\\\.\\") and not is_admin():
         print("!! Raw device access needs Administrator. Relaunch elevated.\n")
 
-    taps = []
-    if args.carve:
-        from recover.carver import CarveTap
-        taps.append(CarveTap(tz_offset_min=args.tz_offset))
-    if args.activity:
-        from analyse.activity import ActivityTap
-        taps.append(ActivityTap())
-    if args.carve_ps:
-        from recover.pscarve import PsCarveTap
-        taps.append(PsCarveTap())
-    if args.carve_annexb:
-        from recover.annexb import AnnexBTap
-        taps.append(AnnexBTap())
+    wanted = [("carve", {"tz_offset_min": args.tz_offset}) if args.carve else None,
+              ("activity", {}) if args.activity else None,
+              ("carve_ps", {}) if args.carve_ps else None,
+              ("carve_annexb", {}) if args.carve_annexb else None]
+    wanted = [w for w in wanted if w]
+    from acquire.parallel import TAPS, ProcessTap, _resolve
+    # Each tap in its own process unless told otherwise: same code, same
+    # output, and the taps stop waiting for each other (docs/PERFORMANCE.md).
+    parallel = not args.no_parallel and (os.cpu_count() or 1) > 1 and len(wanted) > 0
+    taps = [ProcessTap(TAPS[n], **kw) if parallel else _resolve(TAPS[n])(**kw)
+            for n, kw in wanted]
     session = ScanSession(args.device, out_dir, case,
                           block_size=args.block_size * 1024 * 1024,
                           resume=args.resume, taps=taps,
@@ -1944,6 +1942,9 @@ def main() -> int:
                    help="also measure motion activity from frame sizes (lead, not evidence)")
     p.add_argument("--carve-ps", action="store_true",
                    help="also carve MPEG Program Stream footage (Hikvision and others)")
+    p.add_argument("--no-parallel", action="store_true",
+                   help="run carvers and activity in the scanning process instead of one "
+                        "process each (same output, slower)")
     p.add_argument("--carve-annexb", action="store_true",
                    help="also carve raw H.264/H.265 - the last resort for a vendor with no "
                         "parser (no dates, no cameras)")

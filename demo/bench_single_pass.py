@@ -46,6 +46,7 @@ from core.contract import CaseInfo                                # noqa: E402
 from recover.annexb import AnnexBTap                              # noqa: E402
 from recover.carver import CarveTap                               # noqa: E402
 from recover.pscarve import PsCarveTap                            # noqa: E402
+from acquire.parallel import TAPS, ProcessTap                     # noqa: E402
 from tests.test_pipeline import _dav, _h26x_stream, _hik_ps, _vendor_frames  # noqa: E402
 
 USB2_MIBS = 1_000_204_884_992 / (11 * 3600 + 19 * 60) / 2**20     # drive 1, attempt 4
@@ -117,6 +118,8 @@ def main() -> int:
         r = {"read only": read_only(img)}
         r["one pass"] = scan(img, os.path.join(work, "single"),
                              [CarveTap(), PsCarveTap(), AnnexBTap(), ActivityTap()])
+        r["one pass, taps in parallel"] = scan(img, os.path.join(work, "parallel"),
+                                               [ProcessTap(TAPS[n]) for n in TAPS])
         sep = {"scan (hashes, Merkle, detection)": scan(img, os.path.join(work, "s0"), [])}
         for name, tap in (("carve (DHAV)", CarveTap()), ("carve-ps", PsCarveTap()),
                           ("carve-annexb", AnnexBTap()), ("activity", ActivityTap())):
@@ -134,6 +137,7 @@ def main() -> int:
         return sum(ONE_TB / 2**20 / min(USB2_MIBS, speed[k]) for k in passes) / 3600
 
     one = projected({"one pass": 1})
+    one_par = projected({"one pass, taps in parallel": 1})
     many = projected(sep)
     # The usual alternative: image the drive once over the bridge, then run
     # each tool on the local image, where the CPU sets the pace.  Faster than
@@ -142,6 +146,7 @@ def main() -> int:
                   + sum(ONE_TB / 2**20 / speed[k] for k in sep)) / 3600
     usb3 = 120.0                                        # assumed, not measured by the team
     one_usb3 = ONE_TB / 2**20 / min(usb3, speed["one pass"]) / 3600
+    par_usb3 = ONE_TB / 2**20 / min(usb3, speed["one pass, taps in parallel"]) / 3600
     res = {
         "machine": f"{platform.processor()}, {os.cpu_count()} logical CPUs, "
                    f"Python {platform.python_version()}, {platform.system()} {platform.release()}",
@@ -156,6 +161,7 @@ def main() -> int:
         "image_then_analyse_needs_free_bytes": ONE_TB,
         "projected_hours_1tb_usb3_assumed_120_mib_s": {
             "one pass": round(one_usb3, 1),
+            "one pass, taps in parallel": round(par_usb3, 1),
             "bound_by": "CPU" if speed["one pass"] < usb3 else "drive"},
         "note": "repeat reads here come from the OS cache; on a real drive each extra pass "
                 "is another read over the bridge, which the projection accounts for",
@@ -164,6 +170,8 @@ def main() -> int:
     print(f"  {'':34} {'seconds':>8} {'MiB/s':>8}")
     print(f"  {'read only':34} {r['read only']:8.2f} {speed['read only']:8.1f}")
     print(f"  {'ONE PASS (all of the below)':34} {r['one pass']:8.2f} {speed['one pass']:8.1f}")
+    print(f"  {'ONE PASS, taps in parallel':34} {r['one pass, taps in parallel']:8.2f} "
+          f"{speed['one pass, taps in parallel']:8.1f}")
     for k, v in sep.items():
         print(f"  {'  separately: ' + k:34} {v:8.2f} {speed[k]:8.1f}")
     print(f"  {'ONE READ A TASK (sum)':34} {r['one read a task']:8.2f}")
@@ -174,7 +182,9 @@ def main() -> int:
     print(f"    one read a task                  ~{many:5.1f} h")
     print(f"    image, then analyse the image    ~{image_then:5.1f} h, and ~931 GiB free")
     print(f"  over USB 3 (assumed {usb3:.0f} MiB/s): one pass ~{one_usb3:.1f} h - bound by the "
-          f"{'CPU' if speed['one pass'] < usb3 else 'drive'}, at {speed['one pass']:.0f} MiB/s")
+          f"{'CPU' if speed['one pass'] < usb3 else 'drive'}, at {speed['one pass']:.0f} MiB/s;")
+    print(f"    with taps in parallel ~{par_usb3:.1f} h, at "
+          f"{speed['one pass, taps in parallel']:.0f} MiB/s")
     if args.json:
         os.makedirs(os.path.dirname(os.path.abspath(args.json)), exist_ok=True)
         with open(args.json, "w", encoding="utf-8") as fh:
