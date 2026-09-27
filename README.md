@@ -58,7 +58,8 @@ python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, p
 python cli.py prove  --out out/CASE-001 --offset 8388608
 python cli.py validate-export --export clip.dav --against out/REF-001/clips --out out/REF-001
 
-python tests/test_pipeline.py               # 336 regression tests, no hardware
+python tests/test_pipeline.py               # 340 regression tests, no hardware
+python -m validate.realmedia --case1 out/CASE-001 --image1 head.dd   # every real-media check
 python demo/tamper_demo.py                  # 2-minute stage demo
 python demo/bench_single_pass.py            # one pass vs one read per task (docs/PERFORMANCE.md)
 python tests/synth_dvr.py fixture.img --vendor mixed
