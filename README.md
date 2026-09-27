@@ -58,7 +58,7 @@ python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, p
 python cli.py prove  --out out/CASE-001 --offset 8388608
 python cli.py validate-export --export clip.dav --against out/REF-001/clips --out out/REF-001
 
-python tests/test_pipeline.py               # 330 regression tests, no hardware
+python tests/test_pipeline.py               # 336 regression tests, no hardware
 python demo/tamper_demo.py                  # 2-minute stage demo
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
@@ -121,7 +121,8 @@ demo/      tamper_demo.py
 | Unknown-vendor survey | working |
 | Motion activity from frame sizes (lead, not evidence) | working |
 | Video decode, face/object detection | not started (optional layer) |
-| BSA s.63 certificate, CASE/UCO export | not started |
+| BSA s.63 certificate (draft from the case record) | working; wording to be checked against the Gazette |
+| CASE/UCO export | not started |
 
 Nothing is `validated`: that needs a byte-match between recovered footage and
 the recorder's own export. The CP Plus drive (Dahua-family DHFS) is real

@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 330 tests, all should pass
+python tests/test_pipeline.py     # 336 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -112,7 +112,8 @@ If those pass, the engine below is intact:
 | Motion activity from frame sizes (no decode; lead, not evidence) | `analyse/activity.py` | working |
 | Burned-in OSD: camera titles and the clock, for footage no index names | `analytics/osd.py`, `analytics/osd_rules.py`, `cli.py read-osd` | rules and orchestration tested, `synthetic_only` — **never run on a rendered frame**; see `docs/OSD_OCR.md` §6 |
 | Video decode (MP4), face/object detection | — | not started (optional layer: ffmpeg, ONNX Runtime — see TECH_STACK) |
-| BSA s.63 certificate, CASE/UCO export | — | not started |
+| BSA s.63 certificate (draft, Part A/B, from the case's own hashes) | `report/s63.py`, `cli.py certificate` | working; wording to be checked against the Gazette |
+| CASE/UCO export | — | not started |
 
 **Real media:** two DVR drives are held. The CP Plus unit's SkyHawk
 (`WWD4A3NX`) carries Dahua-family DHFS 4.1 — the Dahua parser was built
@@ -225,5 +226,6 @@ contradicts that file, the file wins.
 Two things remain unverified and should not be stated as fact in any report
 or slide until someone confirms them:
 
-- the exact BSA 2023 Section 63 certificate format, against the Act's schedule
+- the exact BSA 2023 Section 63 certificate wording against the Gazette text
+  (`certificate` follows a bare-act reproduction checked 28 Sep 2026)
 - the CFReDS Heimvision `.E01` download link and licence terms
