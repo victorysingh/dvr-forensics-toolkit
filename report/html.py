@@ -191,6 +191,33 @@ def render(case: dict, examiner_notes: str = "") -> str:
         add(f"<p class='muted'><b>{e(d['vendor'])}</b> evidence: " +
             "; ".join(e(x) for x in d.get("evidence", [])) + "</p>")
 
+    md = case.get("model")
+    if md:
+        add("<h3>Recorder model</h3>")
+        add("<p>Two sources, kept apart: what the examiner read off the unit, and model-numbered "
+            "strings found on the platter. A string on the platter shows the text is on this "
+            "disk, not that the disk was seized from that model.</p>")
+        if md["observations"]:
+            add(table(["Model", "Identified as", "Serial", "Firmware", "Read from", "Photos"],
+                      [[o["model"],
+                        (f"{o['identified']['vendor']} {o['identified']['kind']}"
+                         if o.get("identified") else "unknown numbering"),
+                        o.get("serial") or "", o.get("firmware") or "",
+                        o.get("read_from") or "",
+                        "; ".join(f"{p['file']} {p['sha256'][:16]}…" for p in o.get("photo") or [])]
+                       for o in md["observations"]]))
+        pl = md.get("platter")
+        if pl:
+            sr = pl["searched"]
+            add(f"<p class='muted'>Platter searched: {size(sr['bytes'])} in {sr['blocks']} blocks "
+                f"({e(sr['rule'])}).</p>")
+            if pl["candidates"]:
+                add(table(["String", "Vendor", "Kind", "Count", "First offset"],
+                          [[c["model"], c["vendor"], c["kind"], c["count"],
+                            mono(f"0x{c['offsets'][0]:X}")] for c in pl["candidates"][:20]]))
+        add(table(["Check", "Verdict", "Detail"],
+                  [[c["check"], c["verdict"], c["detail"]] for c in md["checks"]]))
+
     # -- filesystem ------------------------------------------------------
     if p:
         add("<h2>4. Filesystem and recordings</h2>")

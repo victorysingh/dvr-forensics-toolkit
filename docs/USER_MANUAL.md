@@ -235,6 +235,34 @@ and into the custody ledger. The vendor's status is **not** changed for you:
 record an `identical` result in `VALIDATION_REPORT.md` §9, and the status
 moves in review.
 
+### 3.4e The recorder's model
+
+The disk says whose *format* it carries; it rarely says which *model* wrote
+it — that lives in the recorder's flash. Two sources, kept apart:
+
+```bash
+# what the examiner read off the unit, with the photos that show it (hashed, not copied)
+python cli.py record-device --out out/CASE-001 --model CP-UNR-104F1 \
+    --serial <label> --firmware <System Info> --read-from label --photo label.jpg sysinfo.jpg
+
+# model-numbered strings on the platter, outside the video (uses the scan's block map)
+python cli.py identify-model --device /dev/sdb --out out/CASE-001
+```
+
+`identify-model` reads only blocks the scan did not classify as video, plus
+both ends of the disk — minutes, not another full pass — and lists every
+model-shaped string (`CP-UNR-…`, `DS-7…`, `DH-XVR…`, `VIGI NVR…`, `SATATYA…`)
+with its offsets. A string on the platter shows the text is on this disk, not
+that the disk was seized from that model; a camera's model on an NVR's disk
+names the camera.
+
+Both commands print, and the report shows (section 3), the checks between the
+sources: the model's vendor against the format found on the disk (a CP Plus
+unit on a Dahua-format disk agrees — CP Plus units are commonly Dahua-built),
+and the platter's model strings against the unit. A disagreement is a finding
+to explain, not an error: a Hikvision unit whose disk carries Dahua
+structures is a disk that another recorder formatted.
+
 ### 3.5 Look at the results
 
 ```bash
