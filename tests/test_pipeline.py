@@ -2557,6 +2557,61 @@ def test_parallel_taps(tmp: str) -> None:
           and any(e["action"] == "inline_exploding_failed" for e in led.entries))
 
 
+def test_case_export(tmp: str) -> None:
+    """CASE/UCO JSON-LD: the drive, the recorder, every ledger action and
+    every extracted file with its hash and its byte ranges on the drive."""
+    print("\n[CASE/UCO export]")
+    import argparse
+    import cli
+    from recover.carver import CarveTap
+
+    img = os.path.join(tmp, "e01src.img")
+    case = os.path.join(tmp, "case_uco")
+    ScanSession(img, case, CaseInfo(case_id="UCO-1", investigator="J. Examiner"),
+                block_size=1 << 20, quiet=True, taps=[CarveTap()]).run()
+    cli.cmd_extract_carved(argparse.Namespace(device=img, out=case, format="dhav", ids="",
+                                              label="all"))
+    cli.cmd_record_device(argparse.Namespace(out=case, model="CP-UNR-104F1", serial="ABC123",
+                                             firmware="", read_from="label", photo=[]))
+    rc = cli.cmd_case_export(argparse.Namespace(out=case))
+    first = open(os.path.join(case, "case.jsonld"), encoding="utf-8").read()
+    doc = json.loads(first)
+    nodes = {n["@id"]: n for n in doc["@graph"]}
+    by_type: dict = {}
+    for n in doc["@graph"]:
+        by_type.setdefault(n["@type"], []).append(n)
+    led = CustodyLedger(os.path.join(case, "custody_ledger.jsonl"))
+    man = json.load(open(os.path.join(case, "carve", "extracted.json"), encoding="utf-8"))
+    want = {f"carve/streams/{name}": (f["sha256"], v["extents"])
+            for v in man["streams"].values() for name, f in v["files"].items()}
+    got = {}
+    for f in by_type.get("uco-observable:File", []):
+        cdf = next(x for x in f["uco-core:hasFacet"] if x["@type"] == "uco-observable:ContentDataFacet")
+        rel = next(r for r in by_type["uco-observable:ObservableRelationship"]
+                   if r["uco-core:source"]["@id"] == f["@id"])
+        got[f["uco-core:name"]] = (cdf["uco-observable:hash"][0]["uco-types:hashValue"]["@value"].lower(),
+                                   [[r["uco-observable:rangeOffset"], r["uco-observable:rangeSize"]]
+                                    for r in rel.get("uco-core:hasFacet", [])])
+    check("every extracted file: its SHA-256 and its byte ranges on the drive",
+          rc == 0 and got == want and len(want) > 0, f"{len(got)} vs {len(want)}")
+    drive = next(n for n in by_type["uco-observable:Device"] if n["uco-core:name"].startswith("evidence"))
+    cdf = next(x for x in drive["uco-core:hasFacet"] if x["@type"] == "uco-observable:ContentDataFacet")
+    scan = json.load(open(os.path.join(case, "scan_report.json"), encoding="utf-8"))
+    sha = next(h["value"] for h in scan["hashes"] if h["algorithm"] == "sha256")
+    check("the drive carries its whole-drive hashes; the recorder its model, with a relationship",
+          any(h["uco-types:hashValue"]["@value"].lower() == sha for h in cdf["uco-observable:hash"])
+          and any(r["uco-core:kindOfRelationship"] == "Contained_Within"
+                  and nodes[r["uco-core:target"]["@id"]]["uco-core:name"] == "recorder CP-UNR-104F1"
+                  for r in by_type["uco-observable:ObservableRelationship"]))
+    check("one InvestigativeAction per custody-ledger entry before the export",
+          len(by_type["case-investigation:InvestigativeAction"]) == len(led.entries) - 1
+          and led.entries[-1]["action"] == "case_exported")
+    cli.cmd_case_export(argparse.Namespace(out=case))
+    again = json.load(open(os.path.join(case, "case.jsonld"), encoding="utf-8"))
+    check("exporting twice gives the same identifiers (UUIDv5 from the case)",
+          {n["@id"] for n in doc["@graph"]} <= {n["@id"] for n in again["@graph"]})
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -2596,6 +2651,7 @@ def main() -> int:
         test_real_media_tools(tmp)
         test_ewf(tmp)
         test_parallel_taps(tmp)
+        test_case_export(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
