@@ -48,6 +48,7 @@ flowchart LR
 | Identification | `detect/` | Vendor signatures for all eight PS OEMs, confidence scoring, partitions; `survey.py` drafts an unknown disk's layout; `model.py` finds model numbers outside the video and checks them against the unit and the format |
 | Parsing | `parsers/`, `plugins/` | Vendor filesystem plugins on one SDK with field provenance; drop-in loading |
 | Recovery | `recover/carver.py` | Indexless DHAV carve: streams by byte contiguity and stream continuity; splits rather than guesses |
+| | `recover/annexb.py` | Last resort for a vendor with no parser: raw H.264/H.265 anchored on parameter sets held to the standards' ranges; split at a new one or a gap |
 | | `parsers/hikbtree.py` | Hikvision HIKBTREE index records from real media: camera and time per 1 GiB data block; labels carved PS streams |
 | | `recover/pscarve.py` | Indexless MPEG-PS carve (Hikvision and others): packs accepted only when their packets end exactly on the next pack; dated from Hikvision `HK` descriptors |
 | | `recover/preserve.py` | Filesystem metadata kept as whole scan blocks, provable to the Merkle root |
@@ -198,6 +199,7 @@ out/<case>/
   carve/streams/          extracted footage (.dav + bare .h264/.h265)
   carve/extracted.json    per-file SHA-256 and frame checks
   carve/ps_labels.json    cameras for carved MPEG-PS streams, from a surviving HIKBTREE
+  carve/annexb_report.json  raw H.264/H.265 streams (carve-annexb); es_streams/ when extracted
   validation/export_<clip>.json  recovered footage vs the recorder's own export
   analytics/analytics.json  faces and objects in extracted clips (optional layer)
   analytics/osd.json      camera titles and the clock read off the picture (optional layer)

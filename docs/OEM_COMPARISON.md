@@ -104,7 +104,9 @@ footage exist regardless:
 
 - **Carving** — if the recorder stores a raw H.264/H.265 stream or a known
   container, a codec-level carve recovers footage with no filesystem parser
-  (the planned generic carver in the add-a-vendor pipeline).
+  (`carve-annexb`: raw H.264/H.265 anchored on parameter sets — no dates, no
+  cameras, and the unknown container's bytes left between frames; see
+  USER_MANUAL §3.4f).
 - **The plugin route** — one file in `plugins/` once the layout is known
   (`plugins/_template.py`).
 

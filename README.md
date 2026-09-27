@@ -51,13 +51,14 @@ python cli.py timeline --out out/CASE-001 --tz-offset 330
 python cli.py report   --out out/CASE-001    # HTML + JSON, hashed into the ledger
 python cli.py serve                          # viewer on http://127.0.0.1:8150
 python cli.py survey --device unknown.img    # draft the layout of an unknown vendor's disk
+python cli.py carve-annexb --device unknown.img --out out/CASE-009   # its video, no parser needed
 python cli.py identify-model --device /dev/sdb --out out/CASE-001    # model strings outside the video
 python cli.py record-device --out out/CASE-001 --model CP-UNR-104F1 --photo label.jpg
 python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, preserved blocks
 python cli.py prove  --out out/CASE-001 --offset 8388608
 python cli.py validate-export --export clip.dav --against out/REF-001/clips --out out/REF-001
 
-python tests/test_pipeline.py               # 310 regression tests, no hardware
+python tests/test_pipeline.py               # 320 regression tests, no hardware
 python demo/tamper_demo.py                  # 2-minute stage demo
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
@@ -109,6 +110,7 @@ demo/      tamper_demo.py
 | Dahua DHFS 4.1 parser + extract | working on real media, `spec_only` |
 | Indexless carver, inline in the scan | working on real media, `spec_only` |
 | MPEG-PS carver (Hikvision video, dated) | working on real media, `spec_only` |
+| Raw H.264/H.265 carver for vendors with no parser | working, `synthetic_only` |
 | Hikvision index records → cameras for carved footage | working on real media, `spec_only` |
 | Byte-match against the recorder's own export (`validate-export`) | working on generated footage; no real export yet |
 | Metadata preservation | working |

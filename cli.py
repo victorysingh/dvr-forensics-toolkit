@@ -105,6 +105,9 @@ def cmd_scan(args) -> int:
     if args.carve_ps:
         from recover.pscarve import PsCarveTap
         taps.append(PsCarveTap())
+    if args.carve_annexb:
+        from recover.annexb import AnnexBTap
+        taps.append(AnnexBTap())
     session = ScanSession(args.device, out_dir, case,
                           block_size=args.block_size * 1024 * 1024,
                           resume=args.resume, taps=taps,
@@ -863,6 +866,84 @@ def _extract_ps(args) -> int:
     return 0 if not bad else 1
 
 
+def _extract_annexb(args) -> int:
+    """Save raw H.264/H.265 carved without a parser, as stored, hashed."""
+    from acquire.device import DeviceLost
+    from core.hashing import sha256_file
+    from recover import annexb
+
+    rpath = os.path.join(args.out, "carve", "annexb_report.json")
+    report = _load_json(rpath)
+    if report is None:
+        print(f"[!] no raw H.264/H.265 carve in {args.out} - run `carve-annexb` or "
+              f"`scan --carve-annexb` first")
+        return 1
+    rows = list(annexb.iter_rows(report, set(args.ids.split(",")) if args.ids else None))
+    out_dir = os.path.join(args.out, "carve", "es_streams")
+    manifest_path = os.path.join(args.out, "carve", "es_extracted.json")
+    print(f"{BANNER} - extract raw H.264/H.265 streams\n")
+    print(f"  selected      {len(rows)} stream(s)")
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            if dev.size_bytes != report.get("source_bytes"):
+                print(f"[!] {dev.path} is not the size of the carved device - wrong drive?")
+                return 1
+            m = annexb.extract(dev, rows, out_dir, manifest_path)
+    except DeviceLost as exc:
+        print(f"\n[!] {exc}\n    finished streams are kept; re-run to continue")
+        return 3
+    except (DeviceError, IOError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    bad = [k for k, v in m["streams"].items() if not v["bytes_match"]]
+    ledger = _case_ledger(args.out)
+    if ledger:
+        ledger.append("es_streams_extracted", {
+            "manifest": "carve/es_extracted.json", "streams": len(m["streams"]),
+            "size_mismatches": bad, "write_block_method": info.write_block_method},
+            data_hash=sha256_file(manifest_path))
+        print("  manifest SHA-256 recorded in the custody ledger")
+    print(f"\n  [+] {len(m['streams'])} stream(s) in {out_dir}")
+    print("  these play, but are not the recorder's bitstream byte for byte: an unknown "
+          "container's bytes sit between frames")
+    return 0 if not bad else 1
+
+
+def cmd_carve_annexb(args) -> int:
+    """Carve raw H.264/H.265 from an image or drive, no parser needed."""
+    from core.hashing import sha256_file
+    from recover import annexb
+
+    print(f"{BANNER} - raw H.264/H.265, anchored on parameter sets\n")
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            print(f"  device        {dev.path}  ({human_size(dev.size_bytes)}, "
+                  f"{info.write_block_method})")
+            streams, stats = annexb.carve(dev)
+    except (PermissionNeeded, DeviceError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    rep = annexb.build_report(streams, stats, info, tool="carve-annexb")
+    res = annexb.write_report(rep, args.out, sha256_file)
+    for r in rep["streams"][:20]:
+        print(f"  {r['id']}  {r['codec']} {r['width']}x{r['height']}  at 0x{r['offset']:X}  "
+              f"{human_size(r['bytes'])}  {r['slices']} slices, {r['keyframes']} keyframes")
+    print(f"\n  kept {stats['streams_kept']} stream(s); {stats['fragments']} fragment(s) too "
+          f"short to report; {stats['splits_on_new_parameter_set']} split(s) at a new "
+          f"parameter set, {stats['splits_on_gap']} at a gap")
+    ledger = _case_ledger(args.out)
+    if ledger:
+        ledger.append("annexb_carved", {"report": res["report"],
+                                        "streams": res["streams_kept"], "bytes": res["bytes"],
+                                        "write_block_method": info.write_block_method},
+                      data_hash=res["sha256"])
+        print("  report SHA-256 recorded in the custody ledger")
+    print(f"\n[+] {os.path.join(args.out, res['report'])}")
+    return 0
+
+
 def cmd_extract_carved(args) -> int:
     """Save carved streams as files, from the scan's carve report."""
     import shutil
@@ -876,6 +957,8 @@ def cmd_extract_carved(args) -> int:
                        and not _has_dhav_streams(args.out)) else "dhav"
     if fmt == "ps":
         return _extract_ps(args)
+    if fmt == "annexb":
+        return _extract_annexb(args)
     rpath = os.path.join(args.out, "carve", "carve_report.json")
     if not os.path.exists(rpath):
         print(f"[!] no carve report in {args.out} - run `scan --carve` first")
@@ -1664,6 +1747,9 @@ def main() -> int:
                    help="also measure motion activity from frame sizes (lead, not evidence)")
     p.add_argument("--carve-ps", action="store_true",
                    help="also carve MPEG Program Stream footage (Hikvision and others)")
+    p.add_argument("--carve-annexb", action="store_true",
+                   help="also carve raw H.264/H.265 - the last resort for a vendor with no "
+                        "parser (no dates, no cameras)")
     p.add_argument("--tz-offset", type=int, default=None,
                    help="recorder zone in minutes east of UTC, for carved timestamps")
     p.add_argument("--reconnect-wait", type=float, default=30,
@@ -1744,6 +1830,13 @@ def main() -> int:
     p.add_argument("--user", default="", help="also grant this user READ-only access")
     p.set_defaults(func=cmd_writeblock_rule)
 
+    p = sub.add_parser("carve-annexb",
+                       help="carve raw H.264/H.265 with no parser - last resort for an "
+                            "unknown vendor")
+    p.add_argument("--device", required=True)
+    p.add_argument("--out", required=True, help="case directory")
+    p.set_defaults(func=cmd_carve_annexb)
+
     p = sub.add_parser("extract-carved",
                        help="save carved streams as files, from the scan's carve report")
     p.add_argument("--device", required=True)
@@ -1752,8 +1845,9 @@ def main() -> int:
                    help="index label to extract: outside_index (default), CH01.., "
                         "mixed-evidence, or all")
     p.add_argument("--ids", default="", help="comma-separated stream ids instead")
-    p.add_argument("--format", choices=["auto", "dhav", "ps"], default="auto",
-                   help="which carve to extract from (auto: DHAV if it found streams, else MPEG-PS)")
+    p.add_argument("--format", choices=["auto", "dhav", "ps", "annexb"], default="auto",
+                   help="which carve to extract from (auto: DHAV if it found streams, else "
+                        "MPEG-PS; annexb only when asked)")
     p.set_defaults(func=cmd_extract_carved)
 
     p = sub.add_parser("survey", help="draft the layout of an unknown disk, or diff two scans")

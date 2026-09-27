@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 307 pass, 0 fail: 299 on generated data with known ground truth, 8 on real media |
+| Automated tests | 328 pass, 0 fail: 320 on generated data with known ground truth, 8 on real media |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
@@ -196,6 +196,7 @@ the same hashes continued from the first unhashed byte. Recorded as
 | `extract-carved`, outside-index footage | real, 20 GiB | 49 streams, 42,638 frames, 209 MB; every frame count equals the carve's |
 | Extracted H.265 structure | real | Annex-B; VPS/SPS/PPS and an IDR repeating, P-frames between |
 | Extracted H.265 decode (ffmpeg 8.1.2) | real, 20 GiB | HEVC Main, 1920×1080. 13,706 of 20,773 video frames decode (66%). 4,980 precede their stream's first surviving keyframe — the keyframe was overwritten, so they cannot decode alone; the other 2,087 most likely follow a reference frame lost mid-stream (not yet verified). 4 streams have no keyframe at all |
+| Raw H.264/H.265 carver (`carve-annexb`), an undocumented container with stray start codes, noise, two codecs, a gap | synthetic | three cameras found at their exact first parameter set; split at a new SPS and at a gap; the container's stray 00 00 01 passed over; a 10-frame run not reported; 4 MiB of noise yields nothing; random bytes pass as an SPS 3 times in 20,000 (H.264), never for H.265; inline and standalone identical. Not yet run on a real disk: status `synthetic_only` |
 | Full-drive carve, inside the acquisition pass | real, 931.5 GiB | 349,519,550 validated frames; 3,523 streams kept; 1,196 ambiguous boundaries split, never guessed. Labels: CH01 478, CH02 578, CH03 221 streams (~115.8 M frames each), **outside every index 2,246 streams, 1.99 M frames, 5.4 GiB**, first-frame dates from March to late August 2026 |
 
 ## 8. Timestamps
