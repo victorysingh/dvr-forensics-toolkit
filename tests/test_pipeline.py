@@ -1417,6 +1417,87 @@ def test_hikbtree(tmp: str) -> None:
           lab["unused"] == "outside_index")
 
 
+def test_combined(tmp: str) -> None:
+    """Two recorders share no clock. A combined view may only put them on one
+    axis when every case states its recorder's timezone; without that it must
+    make no statement at all about what happened at the same time."""
+    print("\n[combined view across recorders]")
+    from analyse import combined as C
+
+    def case(name: str, tz, drift_source: str, first_local: str, last_local: str,
+             first_utc, last_utc) -> str:
+        d = os.path.join(tmp, "comb", name)
+        os.makedirs(d, exist_ok=True)
+        ev = [{"id": "e1", "kind": "indexed", "camera": "CH01",
+               "start_local": first_local, "end_local": last_local,
+               "start_utc": first_utc, "end_utc": last_utc, "duration_s": 3600.0}]
+        tl = {"clock": {"tz_offset_min": tz, "drift_s": 0.0,
+                        "drift_source": drift_source or None, "rule": "..."},
+              "events": ev, "cameras": {"CH01": {"recordings": 1, "first_local": first_local,
+                                                 "last_local": last_local,
+                                                 "covered_s": 3600.0, "gaps": 0}},
+              "gaps": [], "anomalies": [], "counts": {"indexed": 1}}
+        with open(os.path.join(d, "timeline.json"), "w", encoding="utf-8") as fh:
+            json.dump(tl, fh)
+        with open(os.path.join(d, "scan_report.json"), "w", encoding="utf-8") as fh:
+            json.dump({"case": {"case_id": name}, "stats": {"complete_pass": True},
+                       "device": {"path": f"/dev/{name}", "model": "ST1000VX013",
+                                  "serial": name.upper(), "size_bytes": 1000 << 20},
+                       "hashes": [{"algorithm": "sha256", "value": "ab" * 32}]}, fh)
+        return d
+
+    a = case("rec-a", 330, "examiner observation", "2026-09-01 12:00:00",
+             "2026-09-01 13:00:00", "2026-09-01T06:30:00Z", "2026-09-01T07:30:00Z")
+    b = case("rec-b", 330, "", "2026-09-01 12:30:00", "2026-09-01 13:30:00",
+             "2026-09-01T07:00:00Z", "2026-09-01T08:00:00Z")
+    c_notz = case("rec-c", None, "", "2026-09-01 12:30:00", "2026-09-01 13:30:00", None, None)
+
+    v = C.build([a, b])
+    check("two recorders that both state a timezone share a UTC axis",
+          v["axis"]["axis"] == "utc" and v["axis"]["shared"], str(v["axis"]["axis"]))
+    check("a recorder whose clock error was never measured is named as a caveat, not hidden",
+          len(v["axis"]["caveats"]) == 1 and "rec-b" in v["axis"]["caveats"][0],
+          str(v["axis"]["caveats"]))
+    check("overlapping coverage on the shared axis is reported once, with its duration",
+          len(v["overlaps"]) == 1 and v["overlaps"][0]["from_utc"] == "2026-09-01T07:00:00Z"
+          and v["overlaps"][0]["duration_s"] == 1800.0, str(v["overlaps"]))
+
+    v2 = C.build([a, c_notz])
+    check("one recorder without a timezone denies the whole view a shared axis",
+          v2["axis"]["axis"] == "recorder_local" and not v2["axis"]["shared"])
+    check("with no shared axis, NOTHING is claimed about recorders running at the same time",
+          v2["overlaps"] == [], str(v2["overlaps"]))
+    check("the view says which case is missing what, rather than only that it cannot",
+          any("rec-c" in n and "timezone" in n for n in v2["axis"]["needs"]),
+          str(v2["axis"]["needs"]))
+    check("the separate-axes warning leads the notes",
+          "SEPARATE axes" in v2["notes"][0], v2["notes"][0][:60])
+
+    # Recorders whose spans merely touch are not "running at the same time".
+    d = case("rec-d", 330, "x", "2026-09-01 13:00:00", "2026-09-01 13:00:30",
+             "2026-09-01T07:30:00Z", "2026-09-01T07:30:30Z")
+    check("an overlap shorter than the minimum is not reported",
+          C.build([a, d])["overlaps"] == [])
+
+    v3 = C.build([a, b])
+    check("totals add up the recorders, and each case's timeline is cited by hash",
+          v3["totals"]["recorders"] == 2 and v3["totals"]["events"] == 2
+          and len(v3["inputs"]) == 2 and all(len(h) == 64 for h in v3["inputs"].values()),
+          str(v3["totals"]))
+
+    try:
+        C.build([a, a])
+        dup = False
+    except ValueError:
+        dup = True
+    check("the same case given twice is refused, not counted as two recorders", dup)
+
+    from report.html import render_combined
+    page = render_combined(dict(v2, title="T", generated_utc="2026-09-27T00:00:00Z"))
+    check("the page states the recorders are not aligned, and makes no simultaneity claim",
+          "not aligned" in page and "Not determined" in page and "<h1>T</h1>" in page)
+
+
 def test_osd_rules() -> None:
     """The rules for reading a burned-in OSD: a title only when frames agree,
     a band chosen by the footage rather than hardcoded, and an ambiguous date
@@ -1602,6 +1683,7 @@ def main() -> int:
         test_timeline_recurring()
         test_ps_carver(tmp)
         test_static_detections()
+        test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)
         test_hikbtree(tmp)

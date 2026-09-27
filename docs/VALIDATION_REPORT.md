@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 279 pass, 0 fail: 271 on generated data with known ground truth, 8 on real media |
+| Automated tests | 290 pass, 0 fail: 282 on generated data with known ground truth, 8 on real media |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
@@ -313,6 +313,23 @@ come back `agrees` inside the 3 s tolerance. A disagreement between the reader
 and the eye belongs in this report, with the frame as the arbiter.
 `docs/OSD_OCR.md` §6 has the full route.
 
+## 8d. Combined view across recorders
+
+`cli.py combine` places several cases in one view. The property under test is
+what it refuses to assert: two recorders share no clock, so a single axis is
+drawn only where every case states its recorder's timezone.
+
+| Check | Result |
+|---|---|
+| Shared axis | granted only when every case states a timezone; a recorder whose clock error was never measured is granted the axis but named as a caveat |
+| No shared axis | the cases are shown side by side on their own recorder clocks, the page says they are not aligned, and **no** overlap is computed — tested directly |
+| Overlaps | reported once per pair with their duration; an overlap shorter than 60 s is not a finding |
+| Provenance | each case's `timeline.json` cited by SHA-256; every source case's ledger records the view, and `verify` still passes afterwards |
+| Status | 11 tests; no real media involved — the inputs are each case's own timeline, which is validated in §8 |
+
+On the two drives held, this reports **not aligned**: neither recorder's
+timezone has been read off the unit (§10).
+
 ## 9. Vendor format status
 
 | Vendor | Status | Why not better |
@@ -334,5 +351,6 @@ here with both files' SHA-256.
 - Why 2,087 frames after a keyframe still do not decode (suspected: a lost reference frame).
 - OSD reader against the frames already read by eye (§8c), on a machine with ffmpeg and Tesseract.
 - A native export for the validation in §9.
+- Recorder timezones, which are what keep the two drives on separate axes in §8d.
 - Hikvision drive acquisition and parser check.
 - Kaitai `.ksy` compiled and checked against the image.
