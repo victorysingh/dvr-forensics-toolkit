@@ -353,6 +353,21 @@ reads every chunk and compares. A match proves the bytes the tool sees are
 the bytes that were acquired. A chunk whose data fails its checksum is
 reported by `scan` as an unreadable region, never read as good data.
 
+### 3.4j Export to other forensic tools (CASE/UCO)
+
+```bash
+python cli.py case-export --out out/CASE-001        # writes out/CASE-001/case.jsonld
+```
+
+CASE (caseontology.org) is the standard JSON-LD format for exchanging digital
+forensic results. The export holds the evidence drive with its whole-drive
+hashes, the recorder as the examiner recorded it, every custody-ledger action
+as an `InvestigativeAction` with its tool, examiner and time, and every
+extracted file with its SHA-256 and - through `DataRangeFacet` - the exact
+byte ranges of the drive it came from. Identifiers are derived from the case,
+so exporting twice gives the same graph. Check a file with the official
+validator: `pip install case-utils`, then `case_validate case.jsonld`.
+
 ### 3.5 Look at the results
 
 ```bash
