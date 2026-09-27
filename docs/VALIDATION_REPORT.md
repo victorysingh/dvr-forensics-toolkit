@@ -18,17 +18,18 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 290 pass, 0 fail: 282 on generated data with known ground truth, 8 on real media |
+| Automated tests | 307 pass, 0 fail: 299 on generated data with known ground truth, 8 on real media |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
 | Analytics (optional) | runs on recovered clips; detections reviewed by eye as plausible leads; no accuracy claimed |
 | OSD reader (optional) | rules and orchestration tested (§8c); **OCR accuracy not measured** — never yet run on a rendered frame |
+| Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
-| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`, Hikvision `synthetic_only` |
+| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container and index records `spec_only`, full-filesystem parser `synthetic_only` |
 
 ## 2. Environment
 
@@ -340,17 +341,49 @@ timezone has been read off the unit (§10).
 | Hikvision — full-filesystem parser (`parsers/hikvision.py`) | `synthetic_only` | written before we held media; its master-sector layout is still fixture-only |
 | Honeywell, TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand-string detection only |
 
-**To reach `validated` for Dahua/CP Plus:** export one clip with the DVR's
-own export function for a known camera and period, locate the same period in
-the parsed recordings, extract it, and byte-compare the video payload. A
-match (or an explained difference, e.g. container rewrapping) is recorded
-here with both files' SHA-256.
+**To reach `validated`** — Dahua/CP Plus, and Hikvision the same way.
+
+*The comparison is built:* `cli.py validate-export` (USER_MANUAL §3.4d,
+`validate/exportmatch.py`). It compares every picture slice (VCL NAL unit) of
+the recorder's export with the footage recovered from the disk, **in order**,
+and reports `identical`, `partial` (naming the export frames not found), or
+`none`. Slices are located by anchors — slices of at least 64 bytes that occur
+once in the export — so the tiny identical slices a still scene produces can
+never make a match on their own. Container differences (DHAV headers
+rewritten, SEI added by the export) are measured and reported separately and
+never decide the verdict. It writes both files' SHA-256 to
+`validation/export_<clip>.json` and the custody ledger, and it does **not**
+change a vendor's status: that stays a reviewed change.
+
+Tested on generated footage only (17 tests): an export with new frame
+counters and an added SEI is `identical`; one frame missing from the disk is
+`partial` and names that frame; another camera at the same times is `none`;
+two still scenes sharing identical tiny slices match nothing; an export
+spanning two recovered files is found in both; a Hikvision `.mp4` (IMKH header
++ Program Stream) with its PES packets cut at different places is
+`identical`, `HK` times equal.
+
+*What is missing is the export.* It has to be of footage we can also
+recover, and the evidence drives are out of their recorders — they must not
+go back in, because a recorder writes to its disk the moment it runs. So the
+route is a **reference disk**: a spare disk that the same recorder formats and
+records on, a native export from it, the reference disk acquired and parsed
+exactly like evidence, and the two compared. The same model and firmware is
+what carries the result over to the evidence drive's format; both are
+recorded with the result.
+
+On the Hikvision unit the same reference disk does more: it would be the first
+disk that recorder formatted *itself* that we hold, so it is also the check
+for `parsers/hikvision.py`, which is still `synthetic_only`.
+
+A match (or an explained difference) is recorded here with both files'
+SHA-256.
 
 ## 10. Open items
 
 - Why 2,087 frames after a keyframe still do not decode (suspected: a lost reference frame).
 - OSD reader against the frames already read by eye (§8c), on a machine with ffmpeg and Tesseract.
-- A native export for the validation in §9.
+- A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
 - Recorder timezones, which are what keep the two drives on separate axes in §8d.
-- Hikvision drive acquisition and parser check.
+- The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
 - Kaitai `.ksy` compiled and checked against the image.

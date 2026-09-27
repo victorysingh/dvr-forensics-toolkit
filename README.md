@@ -53,8 +53,9 @@ python cli.py serve                          # viewer on http://127.0.0.1:8150
 python cli.py survey --device unknown.img    # draft the layout of an unknown vendor's disk
 python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, preserved blocks
 python cli.py prove  --out out/CASE-001 --offset 8388608
+python cli.py validate-export --export clip.dav --against out/REF-001/clips --out out/REF-001
 
-python tests/test_pipeline.py               # 247 regression tests, no hardware
+python tests/test_pipeline.py               # 299 regression tests, no hardware
 python demo/tamper_demo.py                  # 2-minute stage demo
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
@@ -106,6 +107,7 @@ demo/      tamper_demo.py
 | Indexless carver, inline in the scan | working on real media, `spec_only` |
 | MPEG-PS carver (Hikvision video, dated) | working on real media, `spec_only` |
 | Hikvision index records → cameras for carved footage | working on real media, `spec_only` |
+| Byte-match against the recorder's own export (`validate-export`) | working on generated footage; no real export yet |
 | Metadata preservation | working |
 | Timeline (normalization, gaps, correlation) | working |
 | Report (HTML + JSON) and local UI | working |

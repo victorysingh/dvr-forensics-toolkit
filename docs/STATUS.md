@@ -86,6 +86,8 @@ timeline                             clock rule, gaps, recurring patterns, cover
 activity / analyse-video             leads: motion, faces, objects
 read-osd                             camera titles and the clock from the burned-in picture,
                                      for the streams no index accounts for
+validate-export                      recovered footage byte-matched against the recorder's own
+                                     export - the test for `validated`
 combine                              several recorders in one view - on one axis only where
                                      every case states its recorder's timezone
 report / verify / prove / serve      report, re-verification, Merkle proofs, viewer
@@ -93,7 +95,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 282 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 299 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 
@@ -115,7 +117,7 @@ writeblock-rule                      udev rule keeping a drive read-only across 
 
 | Item | Why it matters | Needs |
 |---|---|---|
-| Byte-match a recovered clip against a native DVR export | the only route to `validated` for any vendor | the physical CP Plus DVR |
+| Byte-match a recovered clip against a native DVR export | the only route to `validated` for any vendor | the comparison is built (`validate-export`); needs a reference disk recorded on and exported from each unit — never the evidence drive (`VALIDATION_REPORT.md` §9) |
 | Recorder time zone + clock error | to state UTC; today every time is the recorder's own clock — and, since `combine` landed, the only thing keeping the two drives off one axis | read from the units' settings, or the seizure-time photo method in the SOP |
 | Were the 23 Sep gaps on drive 1 the team's handling? | our own footprint must be stated | team memory |
 | Final project report | named deliverable | everyone |
