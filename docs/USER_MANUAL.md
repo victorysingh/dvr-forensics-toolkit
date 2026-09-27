@@ -25,7 +25,7 @@ to it:
 
 It measures motion activity from compressed frame sizes (§3.4a) as a lead for
 review. It does **not** yet: decode video to MP4, run face/object detection, read the
-on-screen clock, sign reports, or generate the BSA s.63 certificate. Nothing
+on-screen clock, or sign reports; the BSA s.63 certificate is produced as a draft (§3.4g). Nothing
 it produces is labelled `validated` — see §6.
 
 ## 2. Requirements
@@ -286,6 +286,31 @@ footage plays, decoders conceal the rest, but it is not the recorder's
 bitstream byte for byte. Two cameras with identical settings interleaved on
 the disk may share a stream. The next step for that vendor is `survey`, then
 a plugin (§8).
+
+### 3.4g Section 63 certificate (BSA 2023) — a draft
+
+```bash
+python cli.py certificate --out out/CASE-001 --part B --records both \
+    --name "A. Examiner" --designation "Forensic examiner"
+python cli.py certificate --out out/CASE-001 --part A          # for the party producing it
+```
+
+Writes `certificate_s63_partA|B.html` (print it) and `.json`, and records
+both in the custody ledger. The form is the Schedule's: Part A for the party
+producing the record, Part B for the expert, each stating the hash value(s)
+and the algorithm, with a hash report enclosed.
+
+The tool fills only what it recorded: DVR ticked; the recorder's make, model
+and serial from `record-device`, the drive's from the scan; the whole-drive
+SHA-256 and MD5 (only if the acquisition pass covered the whole drive) and
+the SHA-256 of every extracted file; the case, Merkle root and ledger head.
+It **never** ticks Owned / Maintained / Managed / Operated, never makes the
+"working properly" statement, and leaves name, relation, residence,
+signature, date, time and place blank unless you pass them.
+
+It is a **draft**: the wording follows the Schedule as reproduced by a
+bare-act site on 28 Sep 2026. Check it against the Gazette / India Code text
+before it is used.
 
 ### 3.5 Look at the results
 

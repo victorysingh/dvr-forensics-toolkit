@@ -27,7 +27,7 @@ they are evidence).
 | Normalize timestamps | **partly** — recorder clock decoded and cross-checked against burned-in clocks on both vendors (by eye on three frames; `read-osd` now does it per stream, untested against real pixels); conversion to UTC needs the recorder's zone and clock error, which we have not read from the units | `analyse/timeline.py`, `analytics/osd.py` |
 | Correlate events across cameras | **done** — gaps per camera, recorder-wide gaps, recurring patterns, multi-camera activity peaks | `analyse/timeline.py`, `analyse/activity.py` |
 | Chain of custody | **done** — hash-chained ledger; every action recorded with the hash of what it produced | `acquire/ledger.py` |
-| Reports | **done** — HTML + JSON, hashed into the ledger | `report/` |
+| Reports | **done** — HTML + JSON, hashed into the ledger; BSA 2023 s.63 certificate drafted from the case (Part A/B, hash report enclosed), wording to be checked against the Gazette | `report/`, `report/s63.py` |
 | AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence" | `analyse/activity.py`, `analytics/` |
 | Support 5–6 OEMs | **honest answer**: 3 decoded from real media (Dahua, CP Plus, Hikvision); **Honeywell parsed from published research** (Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) as a drop-in plugin, `spec_only`, no media; 4 detected (TP-Link, Godrej, Uniview, Matrix) with a plugin route and a survey tool for onboarding. For those 4, their video can still be recovered with no parser: `carve-annexb` finds raw H.264/H.265 by its parameter sets (no dates or cameras; `synthetic_only`) | `plugins/`, `detect/survey.py`, `recover/annexb.py` |
 
@@ -90,6 +90,8 @@ identify-model / record-device       the recorder's model: strings on the platte
                                      video, and as read off the unit - checked against each other
 carve-annexb                         raw H.264/H.265 by parameter sets - footage from a vendor
                                      with no parser (no dates, no cameras)
+certificate                          BSA 2023 s.63 certificate, Part A or B, drafted from the
+                                     case's own hashes and device record
 validate-export                      recovered footage byte-matched against the recorder's own
                                      export - the test for `validated`
 combine                              several recorders in one view - on one axis only where
@@ -99,7 +101,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 330 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 336 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 
