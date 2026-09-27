@@ -61,7 +61,8 @@ python cli.py validate-export --export clip.dav --against out/REF-001/clips --ou
 python tests/test_pipeline.py               # 351 regression tests, no hardware
 python cli.py ewf-info --image case.E01 --verify   # any command also takes an .E01
 python -m validate.realmedia --case1 out/CASE-001 --image1 head.dd   # every real-media check
-python demo/tamper_demo.py                  # 2-minute stage demo
+python demo/tamper_demo.py                  # tamper detection, end to end
+python demo/stage_demo.py                   # every capability in eight steps, ~5 s (synthetic disks)
 python demo/bench_single_pass.py            # one pass vs one read per task (docs/PERFORMANCE.md)
 python tests/synth_dvr.py fixture.img --vendor mixed
 ```
