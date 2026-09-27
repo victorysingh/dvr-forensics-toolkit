@@ -2161,7 +2161,7 @@ def test_annexb_carver(tmp: str) -> None:
     os.makedirs(case)
     CustodyLedger(os.path.join(case, "custody_ledger.jsonl"),
                   actor="t", case_id="ES").append("case_opened")
-    rc1 = cli.cmd_carve_annexb(argparse.Namespace(device=img, out=case))
+    rc1 = cli.cmd_carve_annexb(argparse.Namespace(device=img, out=case, max_mb=0))
     rc2 = cli.cmd_extract_carved(argparse.Namespace(device=img, out=case, format="annexb",
                                                     ids="", label="all"))
     with open(os.path.join(case, "carve", "es_extracted.json"), encoding="utf-8") as fh:
@@ -2337,6 +2337,84 @@ def test_s63_certificate(tmp: str) -> None:
           and led.verify()["valid"])
 
 
+def test_real_media_tools(tmp: str) -> None:
+    """The pieces of the real-media run: the decode check's classes, the
+    head-image model search, and the carver coverage score."""
+    print("\n[real-media tools]")
+    import argparse
+    import random
+    from datetime import datetime
+    import cli
+    from analytics import decodecheck as D
+    from validate import realmedia as RM
+
+    # A stream with 5 frames before its first keyframe, one frame missing
+    # from the disk (counter 26), and one frame that fails for no visible reason.
+    rng = random.Random(4)
+    t0 = datetime(2026, 5, 1, 13, 20, 0)
+    numbers = list(range(10, 26)) + list(range(27, 43))
+    keys = {15, 32}
+    dav, es = bytearray(), bytearray()
+    for n in numbers:
+        pay = b"\x00\x00\x00\x01" + (b"\x26\x01" if n in keys else b"\x02\x01") \
+            + rng.randbytes(300).replace(b"\x00", b"\x01")
+        dav += synth_dahua.dhav(0xFD if n in keys else 0xFC, n, t0, n * 40, pay,
+                                synth_dahua.EXT_VIDEO)
+        es += pay
+    case = os.path.join(tmp, "decode_case")
+    sdir = os.path.join(case, "carve", "streams")
+    os.makedirs(sdir)
+    with open(os.path.join(sdir, "carve-00001.dav"), "wb") as fh:
+        fh.write(bytes(dav))
+    with open(os.path.join(sdir, "carve-00001.h265"), "wb") as fh:
+        fh.write(bytes(es))
+    with open(os.path.join(case, "carve", "extracted.json"), "w", encoding="utf-8") as fh:
+        json.dump({"streams": {"carve-00001": {"codec": "h265", "files": {}}}}, fh)
+    frames = D.video_frames(os.path.join(sdir, "carve-00001.dav"))
+    fail = set(range(10, 15)) | set(range(27, 32)) | {38}
+
+    def fake_probe(_es, _codec):
+        return ([f["es_offset"] for f in frames],
+                [f["es_offset"] for f in frames if f["number"] not in fail])
+
+    got = D.classify(frames, *fake_probe(None, None))
+    check("undecodable frames sorted: before a keyframe, after a missing frame, unexplained",
+          got["classes"] == {"before_first_keyframe": 5, "after_a_gap": 5, "unexplained": 1}
+          and got["counter_gaps"] == 1 and got["unexplained_examples"][0]["counter"] == 38,
+          str(got["classes"]))
+    real = D.probe, D.have_ffprobe
+    D.probe, D.have_ffprobe = fake_probe, (lambda: True)
+    try:
+        rc = cli.cmd_decode_check(argparse.Namespace(out=case, ids="", limit=0))
+    finally:
+        D.probe, D.have_ffprobe = real
+    res = json.load(open(os.path.join(case, "analytics", "decode_check.json"), encoding="utf-8"))
+    check("decode-check: a missing frame explains 5 of the 6 failures after a keyframe",
+          rc == 0 and res["summary"]["share_explained_by_a_gap"] == round(5 / 6, 4))
+
+    # identify-model on a head image of a scanned drive
+    img = os.path.join(tmp, "unknown_vendor.img")
+    full = os.path.join(tmp, "head_case")
+    ScanSession(img, full, CaseInfo(case_id="HEAD", investigator="test"),
+                block_size=1 << 20, quiet=True).run()
+    head = os.path.join(tmp, "head.img")
+    other = os.path.join(tmp, "not_head.img")
+    with open(img, "rb") as src:
+        first = src.read(4 << 20)
+    open(head, "wb").write(first)
+    open(other, "wb").write(b"\x01" + first[1:])
+    rc_head = cli.cmd_identify_model(argparse.Namespace(device=head, out=full, max_gb=1.0))
+    m = json.load(open(os.path.join(full, "model.json"), encoding="utf-8"))["searched"]
+    rc_other = cli.cmd_identify_model(argparse.Namespace(device=other, out=full, max_gb=1.0))
+    check("identify-model reads a head image once block 0 proves it is the same drive",
+          rc_head == 0 and "head_image" in m and m["bytes"] <= 4 << 20 and rc_other == 1, str(m))
+
+    cov = RM.coverage([[0, 100], [200, 100]], [[50, 200]], end=1000)
+    check("carver coverage: bytes of the known carve also found, and bytes found beyond it",
+          cov["known_bytes"] == 200 and cov["known_bytes_also_found"] == 100
+          and cov["share_of_known_found"] == 0.5 and cov["found_bytes_not_known"] == 100, str(cov))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -2373,6 +2451,7 @@ def main() -> int:
         test_annexb_carver(tmp)
         test_honeywell(tmp)
         test_s63_certificate(tmp)
+        test_real_media_tools(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

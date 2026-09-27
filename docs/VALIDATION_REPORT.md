@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 344 pass, 0 fail: 336 on generated data with known ground truth, 8 on real media |
+| Automated tests | 348 pass, 0 fail: 340 on generated data with known ground truth, 8 on real media |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
@@ -400,7 +400,8 @@ SHA-256.
 
 ## 10. Open items
 
-- Why 2,087 frames after a keyframe still do not decode (suspected: a lost reference frame).
+- Why 2,087 frames after a keyframe still do not decode (suspected: a lost reference frame) — `decode-check` now tests it against the DHAV counter.
+- All of the checks that need only the case folders: `python -m validate.realmedia --case1 out/cpplus_WWD4A3NX --image1 skyhawk_WWD4A3NX_first20GiB.dd --case2 out/drive2_Z9C2632A` (USER_MANUAL §3.4h); its SUMMARY.md belongs here.
 - OSD reader against the frames already read by eye (§8c), on a machine with ffmpeg and Tesseract.
 - A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
 - Recorder timezones, which are what keep the two drives on separate axes in §8d.

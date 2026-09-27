@@ -312,6 +312,30 @@ It is a **draft**: the wording follows the Schedule as reproduced by a
 bare-act site on 28 Sep 2026. Check it against the Gazette / India Code text
 before it is used.
 
+### 3.4h Real-media checks in one command
+
+Several tools have run only on generated data. On the machine that holds the
+case folders (and, if possible, the drives), one command runs every check
+that needs no recorder and writes `out/realchecks/SUMMARY.md` for the
+validation report:
+
+```bash
+sudo apt install ffmpeg tesseract-ocr        # for steps 3 and 4
+python -m validate.realmedia --case1 out/cpplus_WWD4A3NX --image1 skyhawk_WWD4A3NX_first20GiB.dd --case2 out/drive2_Z9C2632A
+```
+
+1. `identify-model` on each drive — also on a head image, once its first
+   block's hash proves it is the same drive;
+2. `carve-annexb` over the first 2 GiB, scored by how much of the footage
+   the DHAV / MPEG-PS carver found there it also covers;
+3. `decode-check` on drive 1: every extracted frame that does not decode,
+   classed as before the first keyframe (expected), after a gap in the DHAV
+   counter (a frame missing from the disk), or unexplained;
+4. `read-osd` on the streams whose titles and clocks were read by eye
+   (VALIDATION_REPORT §8a–8b), compared with what the eye read.
+
+Anything its inputs do not allow is skipped, with the reason in the summary.
+
 ### 3.5 Look at the results
 
 ```bash

@@ -102,7 +102,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 336 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 340 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 
@@ -181,8 +181,11 @@ real media; the rest is open, and there is new work that fits it.
    take.
 4. **Frames that do not decode.** On drive 1, 2,087 video frames after a
    keyframe still fail to decode (4,980 more precede an overwritten keyframe,
-   which is expected). Suspected: a reference frame lost mid-stream. Needs
-   checking frame by frame.
+   which is expected). Suspected: a reference frame lost mid-stream.
+   **Now checkable:** `cli.py decode-check` classes every undecodable frame
+   against the DHAV counter (before a keyframe / after a missing frame /
+   unexplained). Run it — with everything else that needs only the case
+   folders — as `python -m validate.realmedia --case1 out/cpplus_WWD4A3NX --image1 skyhawk_WWD4A3NX_first20GiB.dd --case2 out/drive2_Z9C2632A` (USER_MANUAL §3.4h).
 5. ~~**Timeline across the two drives.**~~ **Built:** `cli.py combine --cases
    out/A out/B --out out/COMBINED` writes `combined.json` and a
    `combined.html` page, and records the view in each source case's ledger.
