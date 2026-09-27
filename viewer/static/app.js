@@ -182,7 +182,7 @@ function viewFs() {
 // ---------------------------------------------------------------- recovered
 function viewRec() {
   const c = state.case?.carve, p = state.case?.parse;
-  if (!c && !p?.remnants_total && !state.case?.ps_carve && !state.case?.analytics) return `<p class="muted">${state.case?.in_progress ? "Carving is running inside the acquisition pass; results appear when it completes." : "No recovery results for this case yet."}</p>`;
+  if (!c && !p?.remnants_total && !state.case?.ps_carve && !state.case?.analytics && !state.case?.osd) return `<p class="muted">${state.case?.in_progress ? "Carving is running inside the acquisition pass; results appear when it completes." : "No recovery results for this case yet."}</p>`;
   let h = "";
   if (c && c.stats?.frames) {
     h += `<h2>Indexless carve ${pill(c.validation_status)}</h2>
@@ -212,6 +212,18 @@ function viewRec() {
     if (an.thumbnails.length) {
       h += `<div class="grid">${an.thumbnails.map((t) => `<div class="card"><img src="/thumb/${encodeURIComponent(state.case.id)}/${encodeURIComponent(t.file)}" alt="${esc(t.clip)} at ${t.t_s}s" style="width:100%;border-radius:6px"><p class="muted">${esc(t.clip)} · ${t.t_s}s</p></div>`).join("")}</div>`;
     }
+  }
+  const osd = state.case?.osd;
+  if (osd) {
+    const s = osd.summary || {}, lay = osd.layout || {};
+    h += `<h2>Camera names read from the picture <span class="pill s-synthetic_only">lead, not evidence</span></h2>
+      <div class="note warn">OCR of the burned-in OSD — the channel title the recorder painted into the frame. This is the only camera attribution left for footage no index accounts for, and it is <b>pixels read by a machine</b>, not a decoded field: each label carries the share of sampled frames that agreed. It names a camera and identifies nobody.</div>
+      <p class="muted">${s.streams_named_by_the_picture || 0} of ${s.streams || 0} streams named${lay.title ? ` · title in the <b>${esc(lay.title.band)}</b> band, clock in the <b>${esc((lay.clock || {}).band || "-")}</b> band` : ""} · ${Object.entries(s.titles || {}).map(([k, v]) => `${esc(k)} ${v}`).join(" · ") || "no titles read"}</p>
+      <p class="muted">Clock in the picture vs the date in the container: ${Object.entries(s.clock_checks || {}).map(([k, v]) => `${esc(k)} ${v}`).join(" · ") || "nothing compared"}. Both are the recorder's own clock by different routes; a disagreement says one is wrong, not which.</p>` +
+      table(["Stream", "Title read", "Confidence", "Frames agreeing", "Clock check", "Picture − container (s)"], (osd.named || []).map((r) =>
+        [`<code>${esc(r.clip)}</code>`, esc(r.title), r.confidence.toFixed(2), esc(r.frames),
+          r.clock === "disagrees" ? `<b class="warn">${esc(r.clock)}</b>` : esc(r.clock || "-"),
+          r.offset_s === null || r.offset_s === undefined ? "-" : (r.offset_s > 0 ? "+" : "") + r.offset_s.toFixed(0)]), true);
   }
   if (p?.remnants_total) {
     h += `<h2>Remnants in reused clusters (${p.remnants_total})</h2><div class="note">Older footage found by the index-guided parser at the tail of clusters since reassigned to a newer recording.</div>` +

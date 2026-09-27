@@ -254,6 +254,27 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
             "thumbnails": [dict(t, clip=c["clip"]) for c in an.get("clips", [])
                            for t in c.get("thumbnails", [])][:60]}
 
+    osd = _load(j("analytics", "osd.json"))
+    if osd:
+        named = [s for s in osd.get("streams", []) if s.get("label")]
+        named.sort(key=lambda s: -s["label"]["confidence"])
+        case["osd"] = {
+            "sha256": _hashed(j("analytics", "osd.json")), "rule": osd.get("rule"),
+            "status": osd.get("status"), "notes": osd.get("notes", []),
+            "layout": osd.get("layout"), "summary": osd.get("summary", {}),
+            "frames_per_stream": osd.get("frames_per_stream"),
+            "named": [{"clip": s["clip"], "title": s["label"]["title"],
+                       "confidence": s["label"]["confidence"],
+                       "frames": f"{s['label']['frames_agreeing']}/{s['label']['frames_read']}",
+                       "clock": s.get("clock", {}).get("verdict"),
+                       "offset_s": s.get("clock", {}).get("offset_s")}
+                      for s in named[:200]],
+            "clock_disagreements": [
+                {"clip": s["clip"], "offset_s": s["clock"].get("offset_s"),
+                 "detail": s["clock"].get("detail")}
+                for s in osd.get("streams", [])
+                if s.get("clock", {}).get("verdict") == "disagrees"][:50]}
+
     case["vendors"] = vendor_matrix((scan or {}).get("detections"))
     case["files"] = {n: _hashed(j(n)) for n in ("scan_report.json", "blockmap.jsonl",
                                                 "custody_ledger.jsonl")

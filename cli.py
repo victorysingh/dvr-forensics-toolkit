@@ -1136,6 +1136,93 @@ def cmd_analyse_video(args) -> int:
     return 0
 
 
+def cmd_read_osd(args) -> int:
+    """Read the burned-in OSD of carved streams: camera title, and the clock.
+
+    The attribution route for footage no index accounts for - those streams
+    carry no camera anywhere in their bytes, but the recorder painted the
+    channel title into the picture.  Also cross-checks the clock in the picture
+    against the date decoded from the container, which is the output
+    verification the validation report asks for.
+    """
+    import glob
+    try:
+        from analytics.osd import run
+        from analytics.osd_rules import OSD_RULE
+    except ImportError as exc:                      # pragma: no cover - defensive
+        print(f"[!] the optional OSD reader is not available ({exc}).")
+        return 2
+    from core.hashing import sha256_file
+
+    src = os.path.join(args.out, "carve")
+    clips = sorted(glob.glob(os.path.join(src, "streams", "*.h265"))
+                   + glob.glob(os.path.join(src, "streams", "*.h264"))
+                   + glob.glob(os.path.join(src, "ps_streams", "*.ps")))
+    if args.unlabelled:
+        clips = [c for c in clips if _unlabelled(args.out, c)]
+    if args.ids:
+        want = set(args.ids.split(","))
+        clips = [c for c in clips if os.path.splitext(os.path.basename(c))[0] in want]
+    if args.limit:
+        clips = clips[:args.limit]
+    if not clips:
+        print(f"[!] no extracted clips in {src} - run `extract-carved` first"
+              + (" (or none are unlabelled)" if args.unlabelled else ""))
+        return 1
+    print(f"{BANNER} - burned-in OSD: camera titles and the recorder's clock\n")
+    print(f"  clips         {len(clips)}"
+          + ("  (only streams no index labelled)" if args.unlabelled else "")
+          + f", {args.frames} frames each from the first {args.window}s")
+    try:
+        r = run(clips, args.out, frames=args.frames, window_s=args.window, log=print)
+    except RuntimeError as exc:
+        print(f"[!] {exc}")
+        return 1
+    s = r["summary"]
+    print(f"\n  named         {s['streams_named_by_the_picture']} of {s['streams']} streams")
+    for title, n in list(s["titles"].items())[:12]:
+        print(f"    {title:<24}{n:5d} streams")
+    print("  clock         " + ", ".join(f"{k}: {v}" for k, v in s["clock_checks"].items()))
+    if "clock_offset_s" in s:
+        o = s["clock_offset_s"]
+        print(f"                picture minus container: median {o['median']:+.0f} s, "
+              f"range {o['min']:+.0f} to {o['max']:+.0f} s")
+    path = os.path.join(args.out, "analytics", "osd.json")
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("osd_read", {
+            "report": "analytics/osd.json", "rule": OSD_RULE, "clips": len(clips),
+            "layout": {k: (r["layout"].get(k) or {}).get("band") for k in ("title", "clock")},
+            "named": s["streams_named_by_the_picture"],
+            "clock_checks": s["clock_checks"], "status": "lead, not evidence"},
+            data_hash=sha256_file(path))
+    print(f"\n[+] {path}\n  a title read from pixels is a lead: confirm it in the frame itself")
+    return 0
+
+
+def _unlabelled(out: str, clip: str) -> bool:
+    """True when no index gave this stream a camera - the streams the OSD is
+    for.  Reads whichever label set the case has (HIKBTREE labels for PS
+    streams, the DHFS cross-reference for DHAV)."""
+    sid = os.path.splitext(os.path.basename(clip))[0]
+    lp = os.path.join(out, "carve", "ps_labels.json")
+    if os.path.exists(lp):
+        with open(lp, "r", encoding="utf-8") as fh:
+            for row in json.load(fh).get("streams", []):
+                if row["id"] == sid:
+                    return row.get("label") in (None, "", "outside_index")
+    cp = os.path.join(out, "carve", "carve_report.json")
+    if os.path.exists(cp):
+        with open(cp, "r", encoding="utf-8") as fh:
+            for row in json.load(fh).get("streams", []):
+                if row.get("recording", {}).get("id") == sid:
+                    return row.get("index_label") in (None, "", "outside_index",
+                                                      "mixed-evidence")
+    return True
+
+
 def cmd_label_ps(args) -> int:
     """Label carved MPEG-PS streams with cameras from a surviving HIKBTREE."""
     from core.hashing import sha256_file
@@ -1357,6 +1444,18 @@ def main() -> int:
     p.add_argument("--recount", action="store_true",
                    help="re-apply the static/implausible rules to stored results, no decoding")
     p.set_defaults(func=cmd_analyse_video)
+
+    p = sub.add_parser("read-osd",
+                       help="optional: camera titles and the clock from the burned-in OSD")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--frames", type=int, default=6, help="frames sampled per stream")
+    p.add_argument("--window", type=int, default=30,
+                   help="seconds from the start of a stream the frames come from")
+    p.add_argument("--unlabelled", action="store_true",
+                   help="only streams no index accounts for - what the OSD is for")
+    p.add_argument("--ids", default="", help="comma-separated clip ids (default: all extracted)")
+    p.add_argument("--limit", type=int, default=0, help="stop after this many streams")
+    p.set_defaults(func=cmd_read_osd)
 
     p = sub.add_parser("label-ps",
                        help="camera labels for carved MPEG-PS streams from a surviving HIKBTREE")

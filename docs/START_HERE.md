@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 247 tests, all should pass
+python tests/test_pipeline.py     # 271 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -105,6 +105,7 @@ If those pass, the engine below is intact:
 | Drop-in vendor plugins | `plugins/`, `parsers/__init__.py` | working |
 | Unknown-vendor survey (headers, length/date fields, before/after diff) | `detect/survey.py` | working; rediscovered DHAV unaided |
 | Motion activity from frame sizes (no decode; lead, not evidence) | `analyse/activity.py` | working |
+| Burned-in OSD: camera titles and the clock, for footage no index names | `analytics/osd.py`, `analytics/osd_rules.py`, `cli.py read-osd` | rules and orchestration tested, `synthetic_only` — **never run on a rendered frame**; see `docs/OSD_OCR.md` §6 |
 | Video decode (MP4), face/object detection | — | not started (optional layer: ffmpeg, ONNX Runtime — see TECH_STACK) |
 | BSA s.63 certificate, CASE/UCO export | — | not started |
 
