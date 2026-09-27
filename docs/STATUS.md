@@ -43,7 +43,7 @@ Named deliverables:
 | SOPs | `SOP_EXAMINATION.md`, `LINUX_ACQUISITION.md` |
 | Validation reports | `VALIDATION_REPORT.md` |
 | User manual | `USER_MANUAL.md` |
-| Final project report | **not started** |
+| Final project report | `FINAL_REPORT.md` (with `RESEARCH_BASIS.md` for differentiators and references) |
 
 ## 2. The two real drives
 
@@ -127,7 +127,7 @@ writeblock-rule                      udev rule keeping a drive read-only across 
 | Byte-match a recovered clip against a native DVR export | the only route to `validated` for any vendor | the comparison is built (`validate-export`); needs a reference disk recorded on and exported from each unit — never the evidence drive (`VALIDATION_REPORT.md` §9) |
 | Recorder time zone + clock error | to state UTC; today every time is the recorder's own clock — and, since `combine` landed, the only thing keeping the two drives off one axis | read from the units' settings, or the seizure-time photo method in the SOP |
 | Were the 23 Sep gaps on drive 1 the team's handling? | our own footprint must be stated | team memory |
-| Final project report | named deliverable | everyone |
+| Final project report | drafted in `FINAL_REPORT.md`; needs the team's review, and its limitations section updated after the field visit | everyone |
 
 ## 6. For JP — your lane
 
