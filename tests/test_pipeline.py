@@ -1656,6 +1656,233 @@ def test_osd_reader(tmp: str) -> None:
           str(r2["streams"][0]["clock"]))
 
 
+def _h26x_stream(rng, n: int, codec: str = "h265", gop: int = 25,
+                 static_every: int = 0) -> list[list[bytes]]:
+    """Access units of a synthetic H.264/H.265 stream, as lists of NAL units:
+    parameter sets and an IDR slice every `gop` frames, one P slice otherwise.
+    With `static_every`, that share of P slices is a tiny slice identical
+    every time, like a camera watching a still scene.  Slice bytes contain no
+    0x00, so no start code can appear inside a NAL."""
+    def body(k):
+        return rng.randbytes(k).replace(b"\x00", b"\x01")
+    if codec == "h265":
+        params = [b"\x40\x01" + body(20), b"\x42\x01" + body(40), b"\x44\x01" + body(8)]
+        idr, p = b"\x26\x01", b"\x02\x01"
+    else:
+        params = [b"\x67" + body(20), b"\x68" + body(6)]
+        idr, p = b"\x65", b"\x41"
+    aus = []
+    for f in range(n):
+        if f % gop == 0:
+            aus.append(params + [idr + body(rng.randint(2000, 3000))])
+        elif static_every and f % static_every == 0:
+            aus.append([p + b"\x9a\x7c\x11"])
+        else:
+            aus.append([p + body(rng.randint(200, 600))])
+    return aus
+
+
+def _annexb(nals: list[bytes]) -> bytes:
+    return b"".join(b"\x00\x00\x00\x01" + n for n in nals)
+
+
+def _dav(aus, first: int, t0, fn0: int = 1000, sei: bool = False) -> bytes:
+    """DHAV frames for access units, frame `first + k` dated as the k-th
+    frame of a 25 fps recording starting at t0.  `sei` inserts a prefix SEI
+    in every keyframe, as an export might."""
+    from datetime import timedelta
+    out = bytearray()
+    for k, nals in enumerate(aus):
+        key = nals[0][:1] == b"\x40"
+        if sei and key:
+            nals = nals[:3] + [b"\x4e\x01\x05\x10" + b"export-sei" * 2] + nals[3:]
+        out += synth_dahua.dhav(0xFD if key else 0xFC, fn0 + k,
+                                t0 + timedelta(seconds=(first + k) // 25), 40 * k,
+                                _annexb(nals), synth_dahua.EXT_VIDEO)
+    return bytes(out)
+
+
+def _hik_ps(aus, first: int, t0, pes_max: int, imkh: bool = False) -> bytes:
+    """A Hikvision-style Program Stream of H.264 access units: one pack per
+    frame, a stream map with the `HK` time before each keyframe, the frame's
+    bytes split into MPEG-2 PES packets of at most `pes_max` bytes."""
+    from datetime import timedelta
+
+    def pack_header(scr):
+        b = bytearray(14)
+        b[0:4] = b"\x00\x00\x01\xba"
+        b[4] = 0x44 | ((scr >> 30) & 0x07) << 3 | ((scr >> 28) & 0x03)
+        b[5] = (scr >> 20) & 0xFF
+        b[6] = ((scr >> 15) & 0x1F) << 3 | 0x04 | ((scr >> 13) & 0x03)
+        b[7] = (scr >> 5) & 0xFF
+        b[8] = (scr & 0x1F) << 3 | 0x04
+        b[9], b[10], b[11], b[12], b[13] = 0x01, 0x89, 0xC3, 0xF8, 0xF8
+        return bytes(b)
+
+    def psm(t):
+        v = ((t.month << 28) | (t.day << 23) | (t.hour << 18) | (t.minute << 12)
+             | (t.second << 6) | 32)
+        hk = (b"\x40\x0e" + b"HK\x01\x00" + bytes([t.year - 2000]) + v.to_bytes(4, "big")
+              + b"\x00\xff\xff\xff")
+        es = b"\x1b\xe0\x00\x00"
+        body = (b"\xf8\xff" + struct.pack(">H", len(hk)) + hk + struct.pack(">H", len(es))
+                + es + b"\x00\x00\x00\x00")
+        return b"\x00\x00\x01\xbc" + struct.pack(">H", len(body)) + body
+
+    out = bytearray(b"IMKH" + bytes(36) if imkh else b"")
+    for k, nals in enumerate(aus):
+        f = first + k
+        pkt = pack_header(f * 3600)
+        if nals[0][:1] == b"\x67":
+            pkt += psm(t0 + timedelta(seconds=f // 25))
+        es = _annexb(nals)
+        for j in range(0, len(es), pes_max):
+            piece = b"\x80\x80\x05" + bytes(5) + es[j:j + pes_max]    # MPEG-2 PES header
+            pkt += b"\x00\x00\x01\xe0" + struct.pack(">H", len(piece)) + piece
+        out += pkt
+    return bytes(out)
+
+
+def test_validate_export(tmp: str) -> None:
+    """Recovered footage against a recorder's export: the verdict rests on
+    the picture slices, in order - never on container bytes, and never on
+    tiny slices that repeat."""
+    print("\n[validate-export]")
+    import argparse
+    import random
+    from datetime import datetime
+    import cli
+    from validate import exportmatch as X
+
+    d = os.path.join(tmp, "vx")
+    os.makedirs(d)
+    t0 = datetime(2026, 9, 28, 11, 0, 0)
+
+    def put(name, data):
+        path = os.path.join(d, name)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        return path
+
+    # -- NAL splitting ---------------------------------------------------
+    rng = random.Random(28)
+    nals = [bytes([0x02, 0x01]) + rng.randbytes(50).replace(b"\x00", b"\x01") for _ in range(40)]
+    buf = b"".join((b"\x00\x00\x01" if k % 2 else b"\x00\x00\x00\x01") + n
+                   for k, n in enumerate(nals))
+    check("Annex-B split: 3- and 4-byte start codes, trailing zeros not in the NAL",
+          list(X.split_annexb(buf)) == nals)
+    sp, got, k = X.NalSplitter(), [], 0
+    while k < len(buf):
+        step = rng.randint(1, 90)                       # pieces cut anywhere, even mid start code
+        got += [n for n, _ in sp.feed(buf[k:k + step], k)]
+        k += step
+    got += [n for n, _ in sp.flush()]
+    check("NAL units split across arbitrary pieces come out whole", got == nals)
+
+    h265 = _h26x_stream(random.Random(1), 60, "h265")
+    h264 = _h26x_stream(random.Random(1), 60, "h264")
+    check("codec told apart from NAL headers alone",
+          X.guess_codec([n for au in h265 for n in au]) == "h265"
+          and X.guess_codec([n for au in h264 for n in au]) == "h264")
+
+    # -- Dahua: the disk's recording and exports of part of it -------------
+    cam = _h26x_stream(random.Random(7), 400, "h265")
+    rec = put("rec.dav", _dav(cam, 0, t0, fn0=5000))
+    ex_rewrap = put("export_rewrap.dav", _dav(cam[100:250], 100, t0, fn0=1, sei=True))
+    r = X.compare(ex_rewrap, [rec])
+    m, c = r["match"], r["container"]
+    check("export re-wrapped (new counters, SEI added): every slice found, verdict identical",
+          m["verdict"] == "identical" and m["slices_matched"] == m["slices_total"] == 150
+          and r["meets_criterion"], str(m))
+    check("...its container differences are measured, not counted against it",
+          c["frames_compared"] == 150 and c["frames_byte_identical"] == 0
+          and c["date_equal"] == 150 and c["frame_counter_equal"] == 0, str(c))
+
+    with open(rec, "rb") as fh:
+        raw = fh.read()
+    frames = list(dahua.walk_frames(raw, 0))
+    cut = raw[frames[100].offset:frames[250].offset]
+    r = X.compare(put("export_cut.dav", cut), [rec])
+    check("an export that kept the frames as stored: frames byte-identical, header and all",
+          r["match"]["verdict"] == "identical"
+          and r["container"]["frames_byte_identical"] == 150, str(r["container"]))
+
+    r = X.compare(put("export.h265", b"".join(_annexb(au) for au in cam[100:250])), [rec])
+    check("a bare H.265 export matches the same recording", r["match"]["verdict"] == "identical"
+          and r["export"]["codec"] == "h265")
+
+    lost = put("rec_lost.dav", _dav(cam[:180], 0, t0, fn0=5000)
+               + _dav(cam[181:], 181, t0, fn0=5181))
+    r = X.compare(ex_rewrap, [lost])
+    m = r["match"]
+    check("a frame lost on the disk: partial, and exactly that frame is named",
+          m["verdict"] == "partial" and m["unmatched_ranges_total"] == 1
+          and m["unmatched_ranges"][0]["from"]["frame"] == 80
+          and m["frames_fully_matched"] == 149 and not r["meets_criterion"], str(m))
+
+    other = put("other_cam.dav", _dav(_h26x_stream(random.Random(8), 400, "h265"), 0, t0))
+    r = X.compare(ex_rewrap, [other])
+    check("another camera at the same times: verdict none", r["match"]["verdict"] == "none"
+          and r["match"]["slices_matched"] == 0)
+
+    still_a = _h26x_stream(random.Random(11), 300, "h265", static_every=2)
+    still_b = _h26x_stream(random.Random(12), 300, "h265", static_every=2)
+    rec_a = put("still_a.dav", _dav(still_a, 0, t0))
+    ex_b = put("still_b_export.dav", _dav(still_b[50:200], 50, t0))
+    r = X.compare(ex_b, [rec_a])
+    check("two still scenes share identical tiny slices - and that alone matches nothing",
+          r["match"]["slices_matched"] == 0 and r["match"]["verdict"] == "none",
+          str(r["match"]))
+    r = X.compare(put("still_a_export.dav", _dav(still_a[50:200], 50, t0)), [rec_a])
+    check("...while the same scene's tiny slices are checked in place and all match",
+          r["match"]["verdict"] == "identical", str(r["match"]))
+
+    part1 = put("hour_10.dav", _dav(cam[:200], 0, t0))
+    part2 = put("hour_11.dav", _dav(cam[200:], 200, t0))
+    r = X.compare(put("export_span.dav", _dav(cam[150:250], 150, t0)), [part1, part2])
+    check("an export across two recovered files: identical, each file credited its part",
+          r["match"]["verdict"] == "identical"
+          and [x["export_range"] for x in r["recovered"]] == [[0, 49], [50, 99]],
+          str([x["export_range"] for x in r["recovered"]]))
+
+    # -- Hikvision: Program Stream, packets split differently --------------
+    hik = _h26x_stream(random.Random(21), 300, "h264")
+    rec_ps = put("hik_rec.ps", _hik_ps(hik, 0, t0, pes_max=1000))
+    ex_ps = put("hik_export.mp4", _hik_ps(hik[50:150], 50, t0, pes_max=700, imkh=True))
+    r = X.compare(ex_ps, [rec_ps])
+    check("Hikvision .mp4 export (IMKH + PS) read as a Program Stream",
+          X.sniff_file(ex_ps) == "ps" and r["export"]["codec"] == "h264")
+    check("...PES packets cut at different places: identical, HK times equal",
+          r["match"]["verdict"] == "identical"
+          and r["container"].get("time_equal") == r["container"]["frames_compared"] == 100,
+          str(r["match"]) + str(r["container"]))
+
+    # -- the command -------------------------------------------------------
+    case = os.path.join(tmp, "vx_case")
+    os.makedirs(os.path.join(case, "clips"))
+    shutil.copy(rec, os.path.join(case, "clips", "rec.dav"))
+    with open(os.path.join(case, "clips", "rec.h265"), "wb") as fh:
+        fh.write(b"".join(_annexb(au) for au in cam))
+    check("a stream extracted twice (.dav and .h265) is searched once",
+          cli._recovered_files([os.path.join(case, "clips")])
+          == [os.path.join(case, "clips", "rec.dav")])
+    led = CustodyLedger(os.path.join(case, "custody_ledger.jsonl"), actor="t", case_id="VX")
+    led.append("case_opened")
+    rc = cli.cmd_validate_export(argparse.Namespace(
+        export=ex_rewrap, against=[os.path.join(case, "clips")], out=case, codec="auto",
+        recorder="synthetic"))
+    res_path = os.path.join(case, "validation", "export_export_rewrap.dav.json")
+    led = CustodyLedger(os.path.join(case, "custody_ledger.jsonl"))
+    with open(res_path, "r", encoding="utf-8") as fh:
+        res = json.load(fh)
+    check("validate-export writes the result with both files' SHA-256",
+          rc == 0 and res["export"]["sha256"] == hashlib.sha256(open(ex_rewrap, "rb").read()).hexdigest()
+          and len(res["recovered"]) == 1 and len(res["recovered"][0]["sha256"]) == 64)
+    check("...and records it in the custody ledger, chain still valid",
+          led.entries[-1]["action"] == "export_compared" and led.verify()["valid"]
+          and led.entries[-1]["data_hash"] == hashlib.sha256(open(res_path, "rb").read()).hexdigest())
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     try:
@@ -1687,6 +1914,7 @@ def main() -> int:
         test_osd_rules()
         test_osd_reader(tmp)
         test_hikbtree(tmp)
+        test_validate_export(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
