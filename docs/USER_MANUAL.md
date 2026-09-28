@@ -381,6 +381,30 @@ byte ranges of the drive it came from. Identifiers are derived from the case,
 so exporting twice gives the same graph. Check a file with the official
 validator: `pip install case-utils`, then `case_validate case.jsonld`.
 
+### 3.4k The recorder's own log (Hikvision)
+
+A Hikvision disk keeps the recorder's system log next to its master sector:
+power-on and abnormal shutdown, logins, configuration, playback, disk format,
+recording starts - each with the recorder's time and, for operations, the
+user.
+
+```bash
+python cli.py hik-log --device /dev/sdb --out out/CASE-001     # or a head image of the drive
+```
+
+It finds the master sector (at 0x200, or a surviving copy - a reformat often
+destroys the primary), checks its fields against each other and against the
+HIKBTREE copies the scan found, reads every record in the log area it names,
+and writes `hik_log.json`: the records, counts by event type, power cycles and
+the actions a named user took. Event names are Hikvision's SDK codes; a code
+that SDK version does not list is reported as undefined, never guessed.
+
+Times are the recorder's clock, like the footage's. When the case holds
+carved footage, `hik-log` checks that: power-on records should be followed by
+a new stream once the recorder has booted. It reports which clock the log
+keeps, or "not determined" - it never converts to UTC. Given a head image,
+the image's first block must hash to the scan's, or it refuses.
+
 ### 3.5 Look at the results
 
 ```bash

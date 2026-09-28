@@ -1691,6 +1691,94 @@ def cmd_identify_model(args) -> int:
     return 0
 
 
+def cmd_hik_log(args) -> int:
+    """Read a Hikvision disk's own system log: power cycles, logins,
+    configuration, playback, disk events - each with the recorder's time."""
+    from datetime import datetime, timezone
+    from core.contract import dump_json
+    from core.hashing import sha256_bytes, sha256_file
+    from parsers import hiklog
+
+    print(f"{BANNER} - Hikvision system log\n")
+    starts = None
+    ps = os.path.join(args.out, "carve", "ps_report.json")
+    if os.path.exists(ps):
+        with open(ps, "r", encoding="utf-8") as fh:
+            starts = [int(datetime.strptime(s["time_first_local"], "%Y-%m-%d %H:%M:%S")
+                          .replace(tzinfo=timezone.utc).timestamp())
+                      for s in json.load(fh).get("streams", []) if s.get("time_first_local")]
+    try:
+        with BlockDevice(args.device) as dev:
+            info = dev.info()
+            bm_path = os.path.join(args.out, "blockmap.jsonl")
+            if os.path.exists(bm_path):
+                with open(bm_path, "r", encoding="utf-8") as fh:
+                    b0 = json.loads(fh.readline())
+                if (b0["length"] <= dev.size_bytes
+                        and sha256_bytes(dev.read_at(0, b0["length"])) != b0["sha256"]):
+                    print("[!] this device is not the drive the case was made of "
+                          "(its first block's hash differs)")
+                    return 1
+            res = hiklog.read(dev, starts)
+    except (PermissionNeeded, DeviceError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    if "error" in res:
+        print(f"[!] {res['error']}")
+        return 1
+    # HIKBTREE copies beyond a head image: check the master's offsets against
+    # where the scan found them.
+    idx = os.path.join(args.out, "carve", "hik_index.json")
+    if os.path.exists(idx):
+        with open(idx, "r", encoding="utf-8") as fh:
+            found = set(json.load(fh).get("headers", []))
+        for c, k in zip(res["checks"][-2:], ("hikbtree1", "hikbtree2")):
+            if c["ok"] is None:
+                c["ok"] = res["master"][f"{k}_offset"] + 0x10 in found
+                c["detail"] = "against the HIKBTREE copies the scan found (hik_index.json)"
+    res.update({"source_device": info.path, "write_block_method": info.write_block_method})
+    path = os.path.join(args.out, "hik_log.json")
+    dump_json(res, path)
+
+    m, s = res["master"], res["summary"]
+    print(f"  device        {info.path}  ({info.write_block_method})")
+    print(f"  master        0x{m['offset']:X}  {m['fs_version']}  initialised "
+          f"{res['init_time_local']} (recorder clock)")
+    for n in res["notes"]:
+        print(f"                {n}")
+    for c in res["checks"]:
+        mark = {True: "agree", False: "DIFFER", None: "not checked"}[c["ok"]]
+        print(f"    {mark:<12} {c['check']}{' - ' + c['detail'] if c.get('detail') else ''}")
+    print(f"  log area      0x{m['log_offset']:X} - 0x{m['log_end']:X}")
+    print(f"  records       {s['records']:,}, {s['first_local']} -> {s['last_local']} "
+          f"(recorder clock); {s['defined_by_the_sdk']:,} named by Hikvision's SDK")
+    for t, n in list(s["by_type"].items())[:10]:
+        print(f"    {n:>7,}  {t}")
+    print(f"  power         {s['power']['power on']} power-on, "
+          f"{s['power']['abnormal shutdown']} abnormal shutdown, "
+          f"{s['power']['power off']} orderly power-off")
+    if s["user_actions"]:
+        print(f"  by a user     {len(s['user_actions'])}")
+        for a in s["user_actions"][:20]:
+            print(f"    {a['time_local']}  {a['user']:<10} {a['type']}")
+    cv = res.get("clock_vs_footage")
+    if cv:
+        print(f"  clock         {cv['verdict']} ({cv['followed_by_a_stream']} of "
+              f"{cv['power_on_records']} power-ons followed by a new stream within "
+              f"{cv['window_s']} s; next best shift {cv['next_best']})")
+    ledger = _case_ledger(args.out)
+    if ledger:
+        ledger.append("hik_log_read", {"result": "hik_log.json", "records": s["records"],
+                                       "log_area": res["log_area"],
+                                       "write_block_method": info.write_block_method},
+                      data_hash=sha256_file(path))
+        print("  result SHA-256 recorded in the custody ledger")
+    print(f"\n  status {res['validation_status'].upper()} - read off real media; not yet "
+          f"matched against the log the recorder itself shows or exports")
+    print(f"\n[+] {path}")
+    return 0
+
+
 def cmd_record_device(args) -> int:
     """Record the recorder's model, serial and firmware as the examiner read
     them off the unit, with the SHA-256 of each photo that shows them."""
@@ -2157,6 +2245,13 @@ def main() -> int:
     p.add_argument("--max-gb", type=float, default=4.0,
                    help="most bytes to read (default 4 GiB)")
     p.set_defaults(func=cmd_identify_model)
+
+    p = sub.add_parser("hik-log",
+                       help="read a Hikvision disk's own system log (power, logins, playback)")
+    p.add_argument("--device", required=True, help="the drive, or a head image of it")
+    p.add_argument("--out", required=True,
+                   help="case directory (its footage checks which clock the log keeps)")
+    p.set_defaults(func=cmd_hik_log)
 
     p = sub.add_parser("record-device",
                        help="record the recorder's model/serial/firmware as read off the unit")
