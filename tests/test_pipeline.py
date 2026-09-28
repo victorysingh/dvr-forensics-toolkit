@@ -1432,7 +1432,9 @@ def _ps_recording(rng, t0, seconds: int, scr0: int) -> bytes:
 
     def psm(t):
         v = (t.month << 28) | (t.day << 23) | (t.hour << 18) | (t.minute << 12) | (t.second << 6) | 32
-        hk = b"\x40\x0e" + b"HK\x01\x00" + bytes([t.year - 2000]) + v.to_bytes(4, "big") + b"\x00\xff\xff\xff"
+        # 14 bytes, as the length byte (0x0e) says and as on real footage: HK,
+        # version, year, 4 packed bytes, 5 tail bytes (observed to start 00 FF FF FF)
+        hk = b"\x40\x0e" + b"HK\x01\x00" + bytes([t.year - 2000]) + v.to_bytes(4, "big") + b"\x00\xff\xff\xff\xff"
         es = b"\x1b\xe0\x00\x00"
         body = b"\xf8\xff" + struct.pack(">H", len(hk)) + hk + struct.pack(">H", len(es)) + es + b"\x00\x00\x00\x00"
         return pes(0xBC, body)
@@ -1896,7 +1898,7 @@ def _hik_ps(aus, first: int, t0, pes_max: int, imkh: bool = False) -> bytes:
         v = ((t.month << 28) | (t.day << 23) | (t.hour << 18) | (t.minute << 12)
              | (t.second << 6) | 32)
         hk = (b"\x40\x0e" + b"HK\x01\x00" + bytes([t.year - 2000]) + v.to_bytes(4, "big")
-              + b"\x00\xff\xff\xff")
+              + b"\x00\xff\xff\xff\xff")                   # 14 bytes, as declared
         es = b"\x1b\xe0\x00\x00"
         body = (b"\xf8\xff" + struct.pack(">H", len(hk)) + hk + struct.pack(">H", len(es))
                 + es + b"\x00\x00\x00\x00")

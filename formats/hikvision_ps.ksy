@@ -4,8 +4,16 @@ meta:
   endian: be
 doc: |
   Documentation artifact (docs/TECH_STACK.md: Kaitai as documentation;
-  recover/pscarve.py is the hand-written reader). Not yet machine-checked
-  with kaitai-struct-compiler.
+  recover/pscarve.py is the hand-written reader). Compiled with
+  kaitai-struct-compiler 0.11.0 and checked against the hand-written reader
+  by validate/ksy_check.py (VALIDATION_REPORT.md section 9a) - so far on
+  synthetic streams; the real drive is still to run.
+
+  The stream is read as a flat run of start-code units: a pack header
+  (00 00 01 BA) is one unit, and each PES packet after it another, until the
+  next pack header. (The first version nested packets inside packs and read
+  them to the end of the stream - it compiled, but failed on the first
+  stream it was given.)
 
   The container is ISO/IEC 13818-1 (STANDARD). The "HK" descriptors are
   Hikvision's private data (OBSERVED on the team's second drive, Seagate
@@ -20,14 +28,30 @@ doc: |
   copies survived near the end of the disk; `hikbtree_record` below is their
   leaf record (OBSERVED, 922 records). parsers/hikbtree.py reads it.
 seq:
-  - id: packs
-    type: pack
+  - id: units
+    type: unit
     repeat: eos
+    doc: |
+      A pack header, then its PES packets, then the next pack header. Each
+      unit must begin with 00 00 01, so a length field that does not land
+      exactly on the next start code stops the parse - the same test the
+      carver applies before it accepts a pack.
 types:
-  pack:
+  unit:
     seq:
       - id: start_code
-        contents: [0x00, 0x00, 0x01, 0xba]
+        contents: [0x00, 0x00, 0x01]
+      - id: stream_id
+        type: u1
+        doc: STANDARD. 0xBA pack header, 0xBC stream map, 0xE0-0xEF video, 0xC0-0xDF audio, 0xBD private.
+      - id: body
+        type:
+          switch-on: stream_id
+          cases:
+            0xba: pack_header
+            _: pes
+  pack_header:
+    seq:
       - id: scr
         size: 6
         doc: STANDARD. 33-bit SCR base (90 kHz) + 9-bit extension, with marker bits. A relative clock, not a date.
@@ -38,26 +62,14 @@ types:
         doc: low 3 bits = number of stuffing bytes that follow
       - id: stuffing_bytes
         size: stuffing & 0x07
-      - id: packets
-        type: pes
-        repeat: until
-        repeat-until: _io.eof or _io.pos + 4 > _io.size
-        doc: |
-          Until the next pack header. The carver accepts a pack only when
-          these length fields land EXACTLY on the next 00 00 01 BA.
   pes:
     seq:
-      - id: start_code
-        contents: [0x00, 0x00, 0x01]
-      - id: stream_id
-        type: u1
-        doc: STANDARD. 0xBC stream map, 0xE0-0xEF video, 0xC0-0xDF audio, 0xBD private.
       - id: length
         type: u2
       - id: body
         size: length
         type:
-          switch-on: stream_id
+          switch-on: _parent.stream_id
           cases:
             0xbc: program_stream_map
   program_stream_map:
@@ -74,6 +86,9 @@ types:
       - id: es_entries
         size: es_map_length
         type: es_entries
+      - id: crc32
+        type: u4
+        doc: STANDARD. Not checked here or by the carver.
   descriptors:
     seq:
       - id: items

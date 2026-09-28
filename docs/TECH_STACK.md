@@ -149,6 +149,12 @@ on media that is frequently failing. So the shipped parsers are hand-written
 against the `.ksy` spec, and the `.ksy` files are the documentation artifact
 and the cross-check, not the runtime.
 
+The cross-check is real, not nominal: both `.ksy` files are compiled by
+kaitai-struct-compiler into `formats/generated/`, and `validate/ksy_check.py`
+compares what the generated parser reads with what the hand-written one
+reads, field by field. Its first run found that `hikvision_ps.ksy` compiled
+but could not read a stream (`VALIDATION_REPORT.md` §9a).
+
 ---
 
 ## Packaging
