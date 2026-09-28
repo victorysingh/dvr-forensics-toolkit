@@ -12,7 +12,8 @@ OBSERVED LAYOUT (one real drive - `spec_only`)
   sits just before the data area.
 * Leaf records, 48 bytes:
       +0x00  8 x FF
-      +0x11  u8   channel (1..N; 255 = an initialised, never-used block)
+      +0x11  u8   channel (1..N; 255 = a block reserved when the disk was
+                  initialised - not a camera, and not always empty)
       +0x18  u32  start time  } seconds since 1970 on the RECORDER'S clock -
       +0x1C  u32  end time    } they equal the "HK" stream-map times of the
                                 footage, so they are local time, zone unknown

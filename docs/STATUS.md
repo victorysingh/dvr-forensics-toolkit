@@ -21,7 +21,7 @@ they are evidence).
 | MD5 and SHA-256 | **done** — both drives | `scan` |
 | Parse proprietary file systems | **done on real media** — Dahua/CP Plus DHFS 4.1 (2 drives); Hikvision HIKBTREE index records (surviving copies); **HeimVision** FAT32 ring + `luo`/`liu` frames (a third real image, NIST CFReDS) | `parsers/dahua.py`, `parsers/hikbtree.py` |
 | Decode proprietary formats | **done on real media** — Dahua DHAV → H.265; Hikvision MPEG-PS + `HK` descriptors → H.264/H.265; ffmpeg decodes both | `recover/carver.py`, `recover/pscarve.py` |
-| Extract video and metadata | **done** — `.dav`/`.h265` and `.ps`, per-file SHA-256 | `extract-carved`, `extract` |
+| Extract video and metadata | **done** — `.dav`/`.h265` and `.ps`, per-file SHA-256; the Hikvision recorder's own system log (43,108 events on drive 2: power cycles, a local `admin` session, disk events) | `extract-carved`, `extract`, `hik-log` |
 | Recover deleted footage | **done on real media** — Dahua: 2,246 streams outside every index; Hikvision: a whole reformatted drive, 2,516 streams | carvers |
 | Attribute recovered footage to a camera | **done where an index survived** — 2,021 of 2,516 Hikvision streams from HIKBTREE records. For the 2,741 streams no index covers, `read-osd` reads the title the recorder painted into the picture; built and tested, OCR accuracy not yet measured | `parsers/hikbtree.py`, `analytics/osd.py` |
 | Normalize timestamps | **partly** — recorder clock decoded and cross-checked against burned-in clocks on both vendors (by eye on three frames; `read-osd` now does it per stream, untested against real pixels); conversion to UTC needs the recorder's zone and clock error, which we have not read from the units | `analyse/timeline.py`, `analytics/osd.py` |
@@ -89,6 +89,8 @@ read-osd                             camera titles and the clock from the burned
                                      for the streams no index accounts for
 identify-model / record-device       the recorder's model: strings on the platter outside the
                                      video, and as read off the unit - checked against each other
+hik-log                              a Hikvision disk's own system log: power cycles, logins,
+                                     playback, disk events - on the recorder's clock
 ewf-info --verify                    an E01 image's stored MD5/SHA-1 reproduced (every command
                                      also reads .E01 directly)
 carve-annexb                         raw H.264/H.265 by parameter sets - footage from a vendor

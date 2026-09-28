@@ -53,6 +53,7 @@ python cli.py serve                          # viewer on http://127.0.0.1:8150
 python cli.py survey --device unknown.img    # draft the layout of an unknown vendor's disk
 python cli.py carve-annexb --device unknown.img --out out/CASE-009   # its video, no parser needed
 python cli.py identify-model --device /dev/sdb --out out/CASE-001    # model strings outside the video
+python cli.py hik-log --device /dev/sdb --out out/CASE-001           # a Hikvision disk's own system log
 python cli.py record-device --out out/CASE-001 --model CP-UNR-104F1 --photo label.jpg
 python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, preserved blocks
 python cli.py prove  --out out/CASE-001 --offset 8388608

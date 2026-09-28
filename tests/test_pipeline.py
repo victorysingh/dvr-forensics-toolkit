@@ -39,7 +39,7 @@ from parsers import get_parser
 from parsers import dahua
 from parsers import hikvision as hik
 from recover import carver
-from tests import synth_dahua, synth_dvr
+from tests import synth_dahua, synth_dvr, synth_hiklog
 
 PASSED: list[str] = []
 FAILED: list[tuple[str, str]] = []
@@ -608,6 +608,77 @@ def test_dahua_chain_split(tmp: str) -> None:
             check(f"[{seed}] no frame is emitted twice", dup == 0, f"{dup} duplicates")
     check("the fixture exercises both intact and overwritten split frames",
           joined_total > 0 and lost_splits > 0, f"joined {joined_total}, lost {lost_splits}")
+
+
+def test_hik_log(tmp: str) -> None:
+    """The Hikvision system log: the master sector finds it, every record is
+    read and named, nothing outside the log area or inside a payload is
+    taken for a record, and the footage says which clock the log keeps."""
+    print("\n[Hikvision system log - synthetic, ground truth known]")
+    import argparse
+    import cli
+    from parsers import hiklog
+    img = os.path.join(tmp, "hiklog.img")
+    meta = synth_hiklog.build(img)
+    with BlockDevice(img) as dev:
+        res = hiklog.read(dev)
+    m, s = res["master"], res["summary"]
+    check("master sector found at 0x200, with its backup after the log area",
+          res["master_copies"] == [0x200, 0x108000], str(res["master_copies"]))
+    check("log area from the master sector", res["log_area"] == [0x8200, 0x108200])
+    check("every master-sector check agrees", all(c["ok"] for c in res["checks"]),
+          str(res["checks"]))
+    check("every record read; the marker inside a payload and the record outside the "
+          "log area are not", s["records"] == meta["records"], str(s["records"]))
+    check("power cycles counted", s["power"] == {"power on": 2, "power off": 0,
+                                                "abnormal shutdown": 2}, str(s["power"]))
+    ua = s["user_actions"]
+    check("the user's session: login, configuration, playback, logout - by 'admin'",
+          len(ua) == meta["user_actions"] and {a["user"] for a in ua} == {"admin"}
+          and ua[0]["type"] == "Operation: Login (local)"
+          and ua[-1]["type"] == "Operation: Logout (local)", str(ua))
+    check("a code the SDK does not list is reported undefined, with its text",
+          any(r["type"] == "Information: undefined 0xAA" and "Main CVBS" in r["text"]
+              for r in res["recorder_log"]))
+    check("times are the recorder's clock, never presented as UTC",
+          "not UTC" in res["time_basis"]
+          and all("time_utc" not in r for r in res["recorder_log"]))
+
+    backup_only = os.path.join(tmp, "hiklog-backup.img")
+    synth_hiklog.build(backup_only, primary=False)
+    with BlockDevice(backup_only) as dev:
+        res2 = hiklog.read(dev)
+    check("a reformatted primary: the backup master still finds the log",
+          res2["master_copies"] == [0x108000] and res2["summary"]["records"] == meta["records"]
+          and any("0x108000" in n for n in res2["notes"]), str(res2["notes"]))
+
+    bad = os.path.join(tmp, "hiklog-bad.img")
+    synth_hiklog.build(bad, bad_log_end=True)
+    with BlockDevice(bad) as dev:
+        res3 = hiklog.read(dev)
+    check("an inconsistent master sector is flagged, not trusted silently",
+          any(c["ok"] is False for c in res3["checks"])
+          and any("check failed" in n for n in res3["notes"]), str(res3["checks"]))
+
+    pon = [1_700_000_000 + k * 86400 for k in range(20)]
+    same = hiklog.log_clock_vs_footage(pon, [t + 80 for t in pon])
+    ist = hiklog.log_clock_vs_footage(pon, [t + 19800 + 80 for t in pon])
+    none = hiklog.log_clock_vs_footage(pon[:3], [t + 80 for t in pon[:3]])
+    check("footage restarting after each power-on: the log keeps the footage's clock",
+          same["best_shift_s"] == 0 and same["verdict"] == "the log keeps the footage's clock",
+          str(same))
+    check("footage 5:30 later: that offset is reported, not assumed away",
+          ist["best_shift_s"] == 19800, str(ist))
+    check("too few power-ons: no verdict", none["best_shift_s"] is None
+          and none["verdict"] == "not determined", str(none))
+
+    case = os.path.join(tmp, "hiklog_case")
+    os.makedirs(case, exist_ok=True)
+    rc = cli.cmd_hik_log(argparse.Namespace(device=img, out=case))
+    out = json.load(open(os.path.join(case, "hik_log.json"), encoding="utf-8"))
+    check("hik-log writes the result and says spec_only",
+          rc == 0 and out["validation_status"] == "spec_only"
+          and out["summary"]["records"] == meta["records"])
 
 
 def test_dahua_robustness(tmp: str) -> None:
@@ -1588,7 +1659,7 @@ def test_hikbtree(tmp: str) -> None:
           lab["in"] == "CH05", str(lab))
     check("older footage left in a reused block is outside_index",
           lab["older"] == "outside_index")
-    check("an initialised, never-used block (channel 255) labels nothing",
+    check("a block reserved at initialisation (channel 255) labels nothing",
           lab["unused"] == "outside_index")
 
 
@@ -2802,6 +2873,7 @@ def main() -> int:
         test_dahua_frames()
         test_dahua_parser(tmp)
         test_dahua_chain_split(tmp)
+        test_hik_log(tmp)
         test_dahua_robustness(tmp)
         test_carver(tmp)
         test_preserve(tmp)
