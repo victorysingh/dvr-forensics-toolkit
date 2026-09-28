@@ -105,8 +105,10 @@ UTC.
   (17,557 occurrences) — identical titles separate nothing. The *painted*
   titles on that drive do differ, which is exactly why this reads the picture
   and not the string in the aux frame.
-- **Not possible where footage does not decode.** 2,087 frames on drive 1 do
-  not decode after a keyframe (`STATUS.md` §6). No frame, no reading, no label.
+- **Not possible where footage does not decode.** On drive 1 each frame
+  missing from the disk breaks the rest of its group of pictures, and 221
+  outside-index streams have no keyframe at all (`VALIDATION_REPORT.md` §7).
+  No frame, no reading, no label.
 
 ## 6. Validation status — what has NOT been run
 

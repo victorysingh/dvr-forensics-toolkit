@@ -184,12 +184,16 @@ real media; the rest is open, and there is new work that fits it.
    that was deliberately *not* taken — the channel title in Dahua `0xF1` aux
    frames, which is on-platter bytes rather than pixels, and what it would
    take.
-4. **Frames that do not decode.** On drive 1, 2,087 video frames after a
-   keyframe still fail to decode (4,980 more precede an overwritten keyframe,
-   which is expected). Suspected: a reference frame lost mid-stream.
-   **Now checkable:** `cli.py decode-check` classes every undecodable frame
-   against the DHAV counter (before a keyframe / after a missing frame /
-   unexplained). Run it — with everything else that needs only the case
+4. ~~**Frames that do not decode.**~~ **Answered (Shrestha, #24, 28 Sep):**
+   a reference frame missing from the disk. About 0.3-0.4% of CP Plus video
+   frames are missing, and each breaks the rest of its ~8.6 s group of
+   pictures, so only ~61% decode strictly. Streams with a complete frame
+   counter lose 0.13% after their keyframe, streams with a gap 22.2%. Most
+   missing frames have no intact copy on the disk; the 29 split across a
+   chain boundary are now rejoined (62.1%). `VALIDATION_REPORT.md` §7.
+   **Left:** `cli.py decode-check` classes every undecodable frame against
+   the DHAV counter (before a keyframe / after a missing frame /
+   unexplained) - the same answer, frame by frame. Run it — with everything else that needs only the case
    folders — as `python -m validate.realmedia --case1 out/cpplus_WWD4A3NX --image1 skyhawk_WWD4A3NX_first20GiB.dd --case2 out/drive2_Z9C2632A` (USER_MANUAL §3.4h).
 5. ~~**Timeline across the two drives.**~~ **Built:** `cli.py combine --cases
    out/A out/B --out out/COMBINED` writes `combined.json` and a

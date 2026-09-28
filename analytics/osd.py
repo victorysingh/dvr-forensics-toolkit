@@ -83,8 +83,8 @@ def sample(clip: str, band: tuple[float, float, float, float], out_dir: str,
 
     Decoding stops after `window_s` seconds of footage, so this reads the head
     of a stream rather than all of it.  A stream that does not decode at all
-    yields nothing and is not an error: on the CP Plus drive 2,087 frames after
-    a keyframe never decoded (docs/STATUS.md section 6, item 4)."""
+    yields nothing and is not an error: on the CP Plus drive 221 outside-index
+    streams have no keyframe at all (docs/VALIDATION_REPORT.md section 7)."""
     fps = max(frames / float(window_s), 0.01)
     vf = [_crop(band), f"fps={fps}", "format=gray",
           f"scale=iw*{UPSCALE}:ih*{UPSCALE}:flags=lanczos"]

@@ -492,7 +492,7 @@ SHA-256.
 
 ## 10. Open items
 
-- Why 2,087 frames after a keyframe still do not decode (suspected: a lost reference frame) — `decode-check` now tests it against the DHAV counter.
+- ~~Why 2,087 frames after a keyframe still do not decode.~~ **Answered on 28 Sep (§7):** a reference frame missing from the disk. Streams with a complete frame counter lose 0.13% of their frames after the keyframe, streams with a gap 22.2%; 90% of the missing frames sit on a 2 MiB cluster boundary, and most have no intact copy anywhere on the disk. Still to run: `decode-check`, which makes the same test frame by frame (it is in `validate.realmedia`).
 - All of the checks that need only the case folders: `python -m validate.realmedia --case1 out/cpplus_WWD4A3NX --image1 skyhawk_WWD4A3NX_first20GiB.dd --case2 out/drive2_Z9C2632A` (USER_MANUAL §3.4h); its SUMMARY.md belongs here.
 - OSD reader against the frames already read by eye (§8c), on a machine with ffmpeg and Tesseract.
 - A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
