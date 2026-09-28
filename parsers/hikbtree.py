@@ -64,10 +64,12 @@ def find_records(buf: bytes, base_offset: int, disk_size: int) -> list[dict]:
     return out
 
 
-def read_index(dev, header_offsets: list[int], window: int = 4 << 20) -> dict:
+def read_index(dev, header_offsets: list[int], window: int = 4 << 20,
+               block: int = BLOCK) -> dict:
     """Read the region around each HIKBTREE header and return the index:
     de-duplicated records (the copies are identical), the data-area base,
-    and a verdict on whether the records agree with a 1 GiB block grid."""
+    and a verdict on whether the records agree with the block grid (1 GiB
+    observed; the master sector's block size where it has been read)."""
     raw: list[dict] = []
     for h in sorted(set(header_offsets)):
         start = max(0, h - 0x10000)
@@ -76,21 +78,22 @@ def read_index(dev, header_offsets: list[int], window: int = 4 << 20) -> dict:
     raw = list({r["at"]: r for r in raw}.values())
     if not raw:
         return {"records": [], "base": None, "notes": ["no HIKBTREE records found"]}
-    residue, votes = Counter(r["block_offset"] % BLOCK for r in raw).most_common(1)[0]
-    on_grid = [r for r in raw if r["block_offset"] % BLOCK == residue]
+    residue, votes = Counter(r["block_offset"] % block for r in raw).most_common(1)[0]
+    on_grid = [r for r in raw if r["block_offset"] % block == residue]
     seen: dict[tuple, dict] = {}
     for r in on_grid:
         key = (r["channel"], r["start"], r["end"], r["block_offset"])
         if key in seen:
             seen[key]["copies"] += 1
         else:
-            seen[key] = dict(r, copies=1, block=(r["block_offset"] - residue) // BLOCK)
+            seen[key] = dict(r, copies=1, block=(r["block_offset"] - residue) // block)
     recs = sorted(seen.values(), key=lambda r: (r["block"], r["start"]))
+    grid = f"{block >> 30} GiB" if block % (1 << 30) == 0 else f"{block:,}-byte"
     return {"rule": RULE, "records": recs, "base": residue,
-            "block_bytes": BLOCK, "records_on_grid": len(on_grid),
+            "block_bytes": block, "records_on_grid": len(on_grid),
             "records_off_grid": len(raw) - len(on_grid),
             "channels": dict(sorted(Counter(r["channel"] for r in recs).items())),
-            "notes": [f"{len(raw) - len(on_grid)} candidate records off the 1 GiB grid "
+            "notes": [f"{len(raw) - len(on_grid)} candidate records off the {grid} grid "
                       f"were discarded"] if len(raw) != len(on_grid) else []}
 
 
@@ -112,7 +115,8 @@ def label_streams(index: dict, ps_rows: list[dict]) -> list[dict]:
     out = []
     for row in ps_rows:
         a, z = secs(row.get("time_first_local")), secs(row.get("time_last_local"))
-        block = (row["offset"] - base) // BLOCK if base is not None and row["offset"] >= base else None
+        size = index.get("block_bytes", BLOCK)
+        block = (row["offset"] - base) // size if base is not None and row["offset"] >= base else None
         hit = None
         if a is not None and z is not None and block is not None:
             hit = next((r for r in by_block.get(block, [])
