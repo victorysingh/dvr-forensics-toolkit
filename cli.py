@@ -1660,7 +1660,13 @@ def cmd_identify_model(args) -> int:
             print(f"  device        {dev.path}  ({info.write_block_method})")
             print(f"  searching     {human_size(searched['bytes'])} in {len(blocks)} blocks - "
                   f"{searched['rule']}")
-            ms = model.ModelSearch()
+            rec = _load_json(os.path.join(args.out, "device_record.json")) or {}
+            forms = model.identifier_forms((rec.get("observations") or [None])[-1])
+            if forms:
+                print("  also for      the unit's own " + ", ".join(sorted(
+                    {f"{f['identifier']} {f['value']}" for f in forms}))
+                      + " (record-device)")
+            ms = model.ModelSearch(forms)
             for k, (off, n) in enumerate(blocks):
                 ms.feed(off, dev.read_at(off, n))
                 if k and k % 500 == 0:
@@ -1678,12 +1684,20 @@ def cmd_identify_model(args) -> int:
     for c in res["candidates"][:15]:
         print(f"  {c['kind']:<9} {c['model']:<26} {c['vendor']:<10} {c['count']:>6}x  "
               f"first at 0x{c['offsets'][0]:X}")
+    ui = res.get("unit_identifiers")
+    for r in (ui or {}).get("found", []):
+        print(f"  unit's    {r['identifier'] + ' ' + r['value']:<36} {r['form']:<20} "
+              f"{r['count']:>6}x  first at 0x{r['offsets'][0]:X}")
+    if ui and not ui["found"]:
+        print("  none of the unit's own identifiers found in what was searched")
     _print_model_checks(args.out)
     ledger = _case_ledger(args.out)
     if ledger:
         ledger.append("model_searched", {"result": "model.json", "blocks": searched["blocks"],
                                          "bytes": searched["bytes"],
                                          "candidates": len(res["candidates"]),
+                                         "unit_identifiers_found":
+                                             sum(r["count"] for r in (ui or {}).get("found", [])),
                                          "write_block_method": info.write_block_method},
                       data_hash=sha256_file(path))
         print("  result SHA-256 recorded in the custody ledger")
@@ -1793,9 +1807,14 @@ def cmd_record_device(args) -> int:
             return 1
         photos.append({"file": os.path.basename(p), "bytes": os.path.getsize(p),
                        "sha256": sha256_file(p)})
+    mac_typed = getattr(args, "mac", "") or ""
+    if mac_typed and not model.normalize_mac(mac_typed):
+        print(f"[!] not a MAC address: {mac_typed!r} (12 hex digits expected)")
+        return 1
     ledger = _case_ledger(args.out)
     obs = model.observation(args.model, args.serial, args.firmware, args.read_from,
-                            photos or None, ledger.actor if ledger else "", utc_now())
+                            photos or None, ledger.actor if ledger else "", utc_now(),
+                            mac=mac_typed, device_id=getattr(args, "device_id", "") or "")
     path = os.path.join(args.out, "device_record.json")
     rec = _load_json(path) or {"rule": model.RULE, "observations": []}
     rec["observations"].append(obs)
@@ -1808,14 +1827,18 @@ def cmd_record_device(args) -> int:
     print("  identified    " + (f"{ident['vendor']} {ident['kind']}; stores video as: "
                                 f"{ident['storage']}" if ident else
                                 "not a model numbering we know - recorded as typed"))
-    for k in ("serial", "firmware", "read_from"):
+    for k in ("serial", "mac", "device_id", "firmware", "read_from"):
         if obs[k]:
             print(f"  {k:<13} {obs[k]}")
     for p in photos:
         print(f"  photo         {p['file']}  sha256 {p['sha256'][:16]}...")
     _print_model_checks(args.out)
+    if model.identifier_forms(obs):
+        print("  next: identify-model searches the disk for this unit's serial / device ID / "
+              "MAC")
     if ledger:
         ledger.append("device_recorded", {"model": obs["model"], "serial": obs["serial"],
+                                          "mac": obs["mac"], "device_id": obs["device_id"],
                                           "firmware": obs["firmware"],
                                           "read_from": obs["read_from"], "photos": photos},
                       data_hash=sha256_bytes(canonical_json(obs)))
@@ -2243,7 +2266,8 @@ def main() -> int:
     p.add_argument("--device", required=True)
     p.add_argument("--out", required=True, help="case directory (uses its block map)")
     p.add_argument("--max-gb", type=float, default=4.0,
-                   help="most bytes to read (default 4 GiB)")
+                   help="most bytes to read (default 4 GiB; raise it to search every "
+                        "non-video block of a whole drive)")
     p.set_defaults(func=cmd_identify_model)
 
     p = sub.add_parser("hik-log",
@@ -2258,6 +2282,8 @@ def main() -> int:
     p.add_argument("--out", required=True, help="case directory")
     p.add_argument("--model", required=True, help="as printed on the label or System Info")
     p.add_argument("--serial", default="")
+    p.add_argument("--mac", default="", help="the unit's MAC address, any common form")
+    p.add_argument("--device-id", default="", help="a device ID printed on the label")
     p.add_argument("--firmware", default="")
     p.add_argument("--read-from", default="", choices=["", "label", "system-info", "other"])
     p.add_argument("--photo", nargs="*", default=[],

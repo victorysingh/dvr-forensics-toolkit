@@ -2235,8 +2235,85 @@ def test_model(tmp: str) -> None:
     page = render(c)
     check("the report shows the model; with no vendor format detected, it says so",
           "Recorder model" in page and "CP-UNR-104F1" in page
-          and [x["verdict"] for x in c["model"]["checks"]] == ["not determined", "agree"],
+          and [x["verdict"] for x in c["model"]["checks"]] == ["not determined", "agree",
+                                                                "not determined"]
+          and "run identify-model again" in c["model"]["checks"][-1]["detail"],
           str(c["model"]["checks"]))
+
+    # -- the unit's own serial, device ID and MAC on the platter --------------
+    check("a MAC is taken in any common form, and refused when it is not one",
+          M.normalize_mac("f8-20-97-10-12-b7") == "F8:20:97:10:12:B7"
+          and M.normalize_mac("F820.9710.12B7") == "F8:20:97:10:12:B7"
+          and M.normalize_mac("F8:20:97:10:12") is None
+          and M.normalize_mac("G8:20:97:10:12:B7") is None)
+    unit = M.observation("CP-UNR-104F1", serial="WJQYRMDNPB06GIVC", mac="F8:20:97:10:12:B7",
+                         device_id="1155004A")
+    forms = M.identifier_forms(unit)
+    check("the unit's serial, device ID and MAC become search forms; too-short ones are not",
+          {(f["identifier"], f["form"]) for f in forms}
+          == {("serial", "text"), ("device_id", "text"), ("mac", "text, colons"),
+              ("mac", "text, hyphens"), ("mac", "text, no separators"), ("mac", "6 raw bytes")}
+          and M.identifier_forms(M.observation("X", serial="AB12")) == [])
+    ms = M.ModelSearch(forms)
+    a = bytearray(4096)
+    a[10:30] = b"sn=wjqyrmdnpb06givc;"                 # lower case: still the serial
+    a[300:306] = bytes.fromhex("F820971012B7")          # the MAC as raw bytes
+    a[600:618] = b"XWJQYRMDNPB06GIVCX"                  # inside a longer token: not it
+    a[4090:4096] = b"=F8:20"                            # the MAC as text, across the edge
+    b = bytearray(4096)
+    b[0:24] = b":97:10:12:B7;id=1155004A;"[:24]
+    ms.feed(0, bytes(a))
+    ms.feed(4096, bytes(b))
+    plat_u = ms.result({"bytes": 8192})
+    got = {(r["identifier"], r["form"]): r for r in plat_u["unit_identifiers"]["found"]}
+    check("found as whole tokens in either case, as raw bytes, and once across a block edge",
+          set(got) == {("serial", "text"), ("mac", "6 raw bytes"), ("mac", "text, colons"),
+                       ("device_id", "text")}
+          and got[("serial", "text")]["offsets"] == [13]
+          and got[("mac", "6 raw bytes")]["offsets"] == [300]
+          and got[("mac", "text, colons")]["offsets"] == [4091]
+          and all(r["count"] == 1 for r in got.values()), str(got))
+    none = M.ModelSearch(forms)
+    none.feed(0, bytes(4096))
+    v_found = M.check([unit], plat_u, dahua)[-1]
+    v_stale = M.check([unit], {"searched": {"bytes": 1}, "candidates": []}, dahua)[-1]
+    v_none = M.check([unit], none.result({"bytes": 4096}), dahua)[-1]
+    check("the check: found - this unit wrote to the disk; searched before the unit was "
+          "recorded - run again; none found - that shows nothing",
+          v_found["verdict"] == "agree" and "this unit wrote to this disk" in v_found["detail"]
+          and v_stale["verdict"] == "not determined" and "again" in v_stale["detail"]
+          and v_none["verdict"] == "not determined" and "does not show" in v_none["detail"],
+          f"{v_found} {v_stale} {v_none}")
+
+    case_u = os.path.join(tmp, "unit_case")
+    img_u = os.path.join(tmp, "unit.img")
+    head_u = bytearray(4096)
+    head_u[700:739] = b"devSN=WJQYRMDNPB06GIVC;devID=1155004A;\x00"
+    head_u[1200:1206] = bytes.fromhex("F820971012B7")
+    with open(img_u, "wb") as fh:
+        fh.write(bytes(head_u) + video + bytes(4096))
+    ScanSession(img_u, case_u, CaseInfo(case_id="UNIT", investigator="test"),
+                block_size=4096, quiet=True).run()
+    rc_bad = cli.cmd_record_device(argparse.Namespace(
+        out=case_u, model="CP-UNR-104F1", serial="", firmware="", read_from="label", photo=[],
+        mac="F8:20:97", device_id=""))
+    rc_rec = cli.cmd_record_device(argparse.Namespace(
+        out=case_u, model="CP-UNR-104F1", serial="WJQYRMDNPB06GIVC", firmware="V1.00.14.00.T",
+        read_from="system-info", photo=[], mac="f8-20-97-10-12-b7", device_id="1155004A"))
+    rc_id = cli.cmd_identify_model(argparse.Namespace(device=img_u, out=case_u, max_gb=1.0))
+    with open(os.path.join(case_u, "model.json"), "r", encoding="utf-8") as fh:
+        res_u = json.load(fh)
+    led_u = CustodyLedger(os.path.join(case_u, "custody_ledger.jsonl"))
+    c_u = load_case(case_u)
+    check("end to end: a malformed MAC is refused; the unit's serial, device ID and raw MAC "
+          "found on the disk; both steps in the ledger, chain valid",
+          rc_bad == 1 and rc_rec == 0 and rc_id == 0
+          and {r["identifier"] for r in res_u["unit_identifiers"]["found"]}
+          == {"serial", "device_id", "mac"}
+          and led_u.entries[-2]["detail"]["mac"] == "F8:20:97:10:12:B7"
+          and led_u.entries[-1]["detail"]["unit_identifiers_found"] == 3
+          and c_u["model"]["checks"][-1]["verdict"] == "agree" and led_u.verify()["valid"],
+          str(res_u.get("unit_identifiers")))
 
 
 class _BitWriter:
