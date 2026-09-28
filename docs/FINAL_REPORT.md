@@ -92,7 +92,7 @@ one case view.
 |---|---|
 | Device Identification | `detect/` signatures for all eight OEMs, confidence-scored; `detect/model.py` model numbers from the disk and the unit, cross-checked |
 | Acquisition | `acquire/`: read-only device, single pass, bad-sector zero-fill in place, verified reconnect after USB drops, write-block rules |
-| File System & Format Parsing | `parsers/dahua.py` (DHFS 4.1), `parsers/hikbtree.py` (Hikvision index), `parsers/hikvision.py` (full FS, fixture only), `plugins/honeywell.py` (from Yoon & Hwang 2026) |
+| File System & Format Parsing | `parsers/dahua.py` (DHFS 4.1), `parsers/hikbtree.py` (Hikvision index), `parsers/hikvision.py` (full FS, observed layout), `plugins/honeywell.py` (from Yoon & Hwang 2026) |
 | Recovery | `recover/carver.py` (DHAV), `recover/pscarve.py` (MPEG-PS, Hikvision), `recover/annexb.py` (raw H.264/H.265 for vendors with no parser), `recover/preserve.py` (metadata) |
 | Timeline Analysis | `analyse/timeline.py` (clock rule, gaps, recurring patterns, coverage), `analyse/combined.py` (several recorders) |
 | Reporting | `report/` (HTML + JSON, hashed into the ledger), `report/s63.py` (certificate draft), `viewer/` |
@@ -147,7 +147,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 441 on generated data with known ground truth, plus
+- **Automated tests:** 420 on generated data with known ground truth, plus
   12 on real media (9 on the CP Plus drive's image, 3 on the HeimVision E01).
   They cover the Merkle tree, the custody chain, bad sectors, device loss,
   every parser and carver, the timeline, the model check, the export
@@ -165,7 +165,8 @@ Full account: `VALIDATION_REPORT.md`.
 - **Vendor formats:** none `validated`.
   - Dahua/CP Plus: `spec_only`.
   - Hikvision container and index: `spec_only`.
-  - Hikvision full-filesystem parser: `synthetic_only`.
+  - Hikvision full-filesystem parser: `spec_only` (the layout observed on drive 2;
+    not yet run on an intact Hikvision disk).
   - Honeywell: `spec_only`.
   - TP-Link, Godrej, Uniview, Matrix: `detected_not_parsed`.
 - **The route to `validated`** is built (`validate-export`, USER_MANUAL
@@ -240,7 +241,7 @@ Three findings go beyond the published work:
 |---|---|---|
 | Dahua | `spec_only` | DHFS 4.1 and DHAV read off real media (the CP Plus drive) |
 | CP Plus | `spec_only` | the same format on our unit; CP Plus listed as a current Dahua OEM (IPVM, May 2024) |
-| Hikvision | container and index `spec_only`; full-FS parser `synthetic_only` | real footage and a surviving index on drive 2 |
+| Hikvision | container, index and full-FS parser `spec_only` (the parser not yet run on an intact Hikvision disk) | real footage and a surviving index on drive 2 |
 | HeimVision (beyond the eight) | `spec_only` | read off a real public NIST image; drop-in plugin |
 | Honeywell | `spec_only` | drop-in plugin from Yoon & Hwang (DFRWS USA 2026); older units were Dahua-built until April 2022, so the Dahua parser may apply |
 | TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand strings and model numbering; video recoverable with no parser by `carve-annexb`; sourced first answers in `OEM_COMPARISON.md` §5.1 |
@@ -268,8 +269,9 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   (62.1% decode). With error concealment 99.8% of one recording displays,
   with visible damage:
   a viewing aid, not intact evidence (`VALIDATION_REPORT.md` §7).
-- **No real disk has been read for** the Honeywell plugin or the Hikvision
-  full-filesystem parser. The raw H.264/H.265 carver has run on one (the
+- **No real disk has been read for** the Honeywell plugin, and the Hikvision
+  full-filesystem parser has not read an intact Hikvision disk (it is written on
+  drive 2's observed layout, whose primary master a reformat had overwritten). The raw H.264/H.265 carver has run on one (the
   HeimVision image): it finds the video, but cannot separate cameras that
   share the same settings.
 - **On fast media the single pass is CPU-bound.**

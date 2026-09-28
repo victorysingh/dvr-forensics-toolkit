@@ -300,75 +300,78 @@ def test_hikvision_parser(tmp: str) -> None:
 
     with BlockDevice(img) as dev:
         check("detects a Hikvision volume", parser.detect(dev))
-        check("master sector found at 0x200",
+        check("master sector found at 0x200, its magic 0x10 in (as on the real drive)",
               parser.find_master(dev) == 0x200,
               hex(parser.find_master(dev)))
         result = parser.parse(dev)
+    v = result.volume
 
     # --- the honesty invariants. These matter more than the parse itself.
     check("parse is NEVER claimed as validated",
           result.validation_status != "validated", result.validation_status)
-    check("fixture-sourced fields force synthetic_only",
-          result.validation_status == "synthetic_only",
-          result.validation_status)
+    check("every field read off real media: spec_only, no field from our own fixture",
+          result.validation_status == "spec_only"
+          and {f["source"] for f in result.field_provenance}
+          == {hik.SOURCE_OBSERVED, hik.SOURCE_PUBLISHED}, result.validation_status)
     check("field provenance is recorded for every decoded field",
-          len(result.field_provenance) >= len(synth_hik_fields()))
-    check("every fixture-sourced field says so",
-          all(f["implies_status"] == "synthetic_only"
-              for f in result.field_provenance if f["source"] == "fixture"))
+          len(result.field_provenance) == len(synth_hik_fields()))
 
-    # --- the parse
-    check("every indexed clip is recovered",
-          len(result.recordings) == meta["active_clips"],
+    # --- the master sector, checked against itself and the disk
+    check("the master's fields agree with each other, with both index copies and with "
+          "the index's data base", len(v["master_checks"]) == 7
+          and all(c["ok"] for c in v["master_checks"]), str(v["master_checks"]))
+    check("block size and data area are taken from the master",
+          v["block_size"] == meta["hik_block_size"]
+          and v["master"]["data_offset"] == synth_dvr.OFF_VIDEO_A
+          and v["master"]["fs_version"] == "HIK.2011.03.08")
+
+    # --- the index
+    got = {(int(r.camera_id[2:]), int(r.timestamps[0].raw_value.split()[0]),
+            int(r.timestamps[1].raw_value.split()[0]), r.offset) for r in result.recordings}
+    check("every index record becomes a recording: camera, start, end, data block",
+          got == set(meta["hik_records"]) and len(result.recordings) == meta["active_clips"],
           f"{len(result.recordings)} vs {meta['active_clips']}")
-    check("volume metadata decoded",
-          result.volume["master"]["model"].startswith("DS-"),
-          result.volume["master"]["model"])
-    check("channel count decoded", result.volume["master"]["channel_count"] == 4)
-
-    by_offset = {r.offset: r for r in result.recordings}
-    for start, length, cam, ts in meta["index_entries"]:
-        rec = by_offset.get(start)
-        if rec is None:
-            check(f"index entry at 0x{start:X} recovered", False)
-            continue
-        check(f"extent matches index at 0x{start:X}", rec.length == length)
-        check(f"camera id decoded at 0x{start:X}",
-              rec.camera_id == f"CH{cam + 1:02d}", rec.camera_id)
+    check("both index copies read where the master points, and found identical",
+          v["btree_headers"] == meta["hik_btree_offsets"]
+          and all(r.confidence == 0.6 for r in result.recordings))
+    check("a block reserved at initialisation (channel 255) is not a recording",
+          v["reserved_records"] == 1)
 
     r0 = result.recordings[0]
-    check("provenance is attached to every recording",
-          all(r.provenance is not None for r in result.recordings))
-    check("provenance sha256 matches the bytes on the platter",
-          r0.provenance.sha256 == hashlib.sha256(
-              open(img, "rb").read()[r0.offset:r0.offset + r0.length]
-          ).hexdigest())
+    check("a recording's extent is its data block, and provenance hashes it",
+          r0.length == meta["hik_block_size"] and r0.offset % meta["hik_block_size"] == 0
+          and r0.provenance.sha256 == hashlib.sha256(
+              open(img, "rb").read()[r0.offset:r0.offset + r0.length]).hexdigest())
     check("sector range brackets the byte extent",
           r0.provenance.sector_start * 512 <= r0.offset
           and r0.provenance.sector_end * 512 >= r0.offset + r0.length)
-    check("frames are counted", r0.frame_count > 0, str(r0.frame_count))
-    check("codec identified per recording", r0.codec == "h264")
 
-    # --- timestamps are claims, never conclusions
-    check("every recording carries a timestamp claim",
-          all(r.timestamps for r in result.recordings))
+    # --- timestamps are claims on the recorder's clock, never converted
     tc = r0.timestamps[0]
-    check("timestamp claim names its source", tc.source == "index")
-    check("timestamp claim carries a decode rule", bool(tc.decode_rule))
-    check("a single-source timestamp is not asserted as certain",
-          tc.confidence < 1.0, str(tc.confidence))
-    check("timestamp decodes to the fixture's value",
-          tc.decoded_utc == "2025-09-22T00:00:00.000Z", str(tc.decoded_utc))
-
-    # --- confidence is never certainty
+    check("index times are the recorder's clock: named, never presented as UTC",
+          tc.source == "index" and tc.decoded_utc is None and r0.start_utc is None
+          and tc.raw_value == "1758499200 = 2025-09-22 00:00:00 recorder-local"
+          and "zone unknown" in tc.decode_rule and tc.confidence < 1.0, str(tc))
     check("no recording claims certainty",
           all(r.confidence < 1.0 for r in result.recordings))
 
-    # --- the deleted clip is NOT in the index: that is the carver's job, and
-    # the parser must not silently invent it.
+    # --- the deleted clip is in no indexed block: that is the carver's job
     deleted_off = meta["deleted_clip"]["offset"]
-    check("the unindexed deleted clip is absent from the parse",
-          deleted_off not in by_offset)
+    check("the unindexed deleted clip lies in no recording's block",
+          not any(r.offset <= deleted_off < r.offset + r.length for r in result.recordings))
+
+    # --- drive 2's situation: the primary master overwritten, a backup left
+    data = bytearray(open(img, "rb").read())
+    data[0x40000:0x40200] = data[0x200:0x400]
+    data[0x200:0x400] = bytes(0x200)
+    backup = os.path.join(tmp, "hik_backup.img")
+    with open(backup, "wb") as fh:
+        fh.write(bytes(data))
+    with BlockDevice(backup) as dev:
+        rb = parser.parse(dev)
+    check("with the primary master overwritten, the backup copy is found and read",
+          rb.volume["master"]["offset"] == 0x40000
+          and len(rb.recordings) == meta["active_clips"], str(rb.volume.get("master_copies")))
 
 
 def test_parser_robustness(tmp: str) -> None:
@@ -389,44 +392,49 @@ def test_parser_robustness(tmp: str) -> None:
     check("a non-Hikvision disk reports an error, not a crash", bool(res.errors))
     check("a non-Hikvision disk yields no recordings", not res.recordings)
 
-    # Master sector present, index absent - the damaged-index case.
+    # Master sector present (magic only, fields blank), index absent.
     noidx = os.path.join(tmp, "noindex.img")
     buf = bytearray(1 << 20)
-    buf[0x200:0x200 + 18] = b"HIKVISION@HANGZHOU"
+    buf[0x210:0x210 + 18] = b"HIKVISION@HANGZHOU"
     with open(noidx, "wb") as fh:
         fh.write(bytes(buf))
     with BlockDevice(noidx) as dev:
         res = parser.parse(dev)
+    check("a blank master is reported as failing its own checks, not trusted",
+          any("fields agree" in n for n in res.notes) and any("implausible" in n
+                                                              for n in res.notes))
     check("a missing index is reported, not fatal",
-          any("HIKBTREE" in n for n in res.notes))
+          any("HIKBTREE" in n for n in res.notes) and not res.recordings)
     check("a missing index still reports the volume", bool(res.volume))
 
-    # Index claiming absurd extents - garbage read off a damaged platter.
+    # Index records read off a damaged platter: outside the disk, times
+    # reversed, one off the block grid - and two sound ones.
     bad = os.path.join(tmp, "badindex.img")
-    buf = bytearray(1 << 20)
-    buf[0x200:0x200 + 18] = b"HIKVISION@HANGZHOU"
-    buf[0x1000:0x1008] = b"HIKBTREE"
-    buf[0x1010:0x1014] = (3).to_bytes(4, "little")
-    buf[0x1020:0x1026] = b"OFFSET"
-    # entry 0: extent past the end of the device.  entry 1: absurd length.
-    # entry 2: valid but empty (length 0).
-    struct_pack = __import__("struct").pack_into
-    struct_pack("<QQII", buf, 0x1040, 1 << 40, 4096, 0, 1758499200)
-    struct_pack("<QQII", buf, 0x1058, 0x2000, 1 << 40, 1, 1758499200)
-    struct_pack("<QQII", buf, 0x1070, 0x3000, 0, 2, 1758499200)
+    size = 4 << 20
+    buf = bytearray(size)
+    buf[0x200:0x400] = synth_dvr._hik_master(size, btrees=(0x1000, 0x1000))
+    t0 = 1_758_499_200
+    blk = synth_dvr.OFF_VIDEO_A
+    buf[0x1000:0x2000] = synth_dvr._hik_btree([
+        synth_dvr.hik_record(1, t0, t0 + 60, 1 << 40),               # outside the disk
+        synth_dvr.hik_record(2, t0 + 60, t0, blk),                   # end before start
+        synth_dvr.hik_record(3, t0, t0 + 60, blk + 0x123),           # off the block grid
+        synth_dvr.hik_record(1, t0, t0 + 60, blk),
+        synth_dvr.hik_record(2, t0, t0 + 60, blk + synth_dvr.HIK_BLOCK)])
     with open(bad, "wb") as fh:
         fh.write(bytes(buf))
     with BlockDevice(bad) as dev:
         res = parser.parse(dev)
-    check("out-of-range extents are skipped and reported",
-          any("past the end" in n for n in res.notes))
-    check("absurd lengths are skipped and reported",
-          any("sanity bound" in n for n in res.notes))
-    check("no garbage recording is emitted", not res.recordings)
+    check("records outside the disk or with reversed times never become recordings; "
+          "the two sound ones do",
+          sorted(r.camera_id for r in res.recordings) == ["CH01", "CH02"]
+          and all(r.offset < size for r in res.recordings), str([r.id for r in res.recordings]))
+    check("a record off the block grid is discarded and reported",
+          any("off the" in n and "grid" in n for n in res.notes), str(res.notes))
 
     # A timestamp of 0 must not become 1970 presented as fact.
-    check("an unusable timestamp decodes to None",
-          hik._decode_utc(0) is None)
+    check("an unusable timestamp is not presented as a time",
+          hik._local_time(0) is None)
 
 
 # ---------------------------------------------------------------------------

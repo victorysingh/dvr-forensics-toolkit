@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 441 tests, all should pass
+python tests/test_pipeline.py     # 420 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -91,7 +91,7 @@ If those pass, the engine below is intact:
 | Partition parsing (MBR/GPT) | `detect/engine.py` | working |
 | Synthetic DVR image generator | `tests/synth_dvr.py` | working |
 | Vendor parser plugin SDK (field provenance) | `parsers/base.py` | working |
-| Hikvision filesystem parser | `parsers/hikvision.py` | working, `synthetic_only` |
+| Hikvision filesystem parser | `parsers/hikvision.py` | working, `spec_only`: the layout observed on drive 2; not yet run on an intact Hikvision disk |
 | HeimVision DVR (drop-in plugin, read off the NIST CFReDS K9604-W image; E01 reader verified on it) | `plugins/heimvision.py` | working on real media, `spec_only` |
 | Honeywell NVR (drop-in plugin, from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) | `plugins/honeywell.py` | working on a disk built to the paper, `spec_only` |
 | **Dahua DHFS 4.1 parser + per-camera extract** | `parsers/dahua.py` | **working on real media, `spec_only`** — see `docs/DAHUA_DHFS.md` |
@@ -125,7 +125,7 @@ recorder (DHFS superblock, empty index) with **Hikvision MPEG-PS footage
 underneath**, recovered by the MPEG-PS carver and dated from its `HK`
 descriptors. Two copies of Hikvision's HIKBTREE index survived near the end
 of the disk; decoded, they name the camera for 2,021 of the 2,516 recovered
-streams. The older full-filesystem parser is still fixture-only.
+streams. The full-filesystem parser now reads the same observed layout.
 
 ---
 
@@ -170,8 +170,9 @@ Read `docs/DATA_CONTRACT.md` before you emit any JSON.
 
 The highest-value unblocked work, in order:
 
-1. **Hikvision ground truth.** The parser exists (`parsers/hikvision.py`) but
-   its struct offsets come only from our synthetic fixture. The team owns a
+1. **Hikvision ground truth.** The parser (`parsers/hikvision.py`) reads the
+   layout observed on drive 2, whose primary master a reformat had overwritten;
+   it has never read a disk the Hikvision unit formatted itself. The team owns a
    Hikvision DVR (board `DS-80xx P REV1.1`, 8-channel analog). Put a spare small
    SATA disk in it, record known footage with the clock written down, delete one
    clip, export another, and image the whole disk
