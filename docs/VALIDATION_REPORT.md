@@ -30,7 +30,7 @@ Two different things are validated here, and they must not be confused:
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
-| Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts |
+| Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
 | Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container and index records `spec_only`, full-filesystem parser `synthetic_only`; HeimVision `spec_only`, observed on a third real image (§8e) |
 
@@ -215,7 +215,7 @@ and no drive hash is certified".
 | `extract-carved`, outside-index footage | real, 20 GiB | 49 streams, 42,638 frames, 209 MB; every frame count equals the carve's |
 | Extracted H.265 structure | real | Annex-B; VPS/SPS/PPS and an IDR repeating, P-frames between |
 | Extracted H.265 decode (ffmpeg 8.1.2) | real, 20 GiB | HEVC Main, 1920×1080. 13,706 of 20,773 video frames decode (66%). 4,980 precede their stream's first surviving keyframe — the keyframe was overwritten, so they cannot decode alone; the other 2,087 most likely follow a reference frame lost mid-stream (not yet verified). 4 streams have no keyframe at all |
-| Raw H.264/H.265 carver (`carve-annexb`), an undocumented container with stray start codes, noise, two codecs, a gap | synthetic | three cameras found at their exact first parameter set; split at a new SPS and at a gap; the container's stray 00 00 01 passed over; a 10-frame run not reported; 4 MiB of noise yields nothing; random bytes pass as an SPS 3 times in 20,000 (H.264), never for H.265; inline and standalone identical. Not yet run on a real disk: status `synthetic_only` |
+| Raw H.264/H.265 carver (`carve-annexb`), an undocumented container with stray start codes, noise, two codecs, a gap | synthetic | three cameras found at their exact first parameter set; split at a new SPS and at a gap; the container's stray 00 00 01 passed over; a 10-frame run not reported; 4 MiB of noise yields nothing; random bytes pass as an SPS 3 times in 20,000 (H.264), never for H.265; inline and standalone identical. On a real disk (HeimVision, §8e), scored by that recorder's parser: every slice in the written files accounted for; 0.07% of the slice-shaped start codes are container bytes; four cameras with one parameter set not separable. Status stays `synthetic_only` |
 | Full-drive carve, inside the acquisition pass | real, 931.5 GiB | 349,519,550 validated frames; 3,523 streams kept; 1,196 ambiguous boundaries split, never guessed. Labels: CH01 478, CH02 578, CH03 221 streams (~115.8 M frames each), **outside every index 2,246 streams, 1.99 M frames, 5.4 GiB**, first-frame dates from March to late August 2026 |
 
 ## 8. Timestamps
@@ -359,6 +359,40 @@ on all four cameras:
   are undecoded.
 - Camera 1 extracted: 403.26 MB of H.265, 1,296,146 frames, SHA-256
   `0afab158218c9bf0...` (full value in its manifest).
+
+**The no-parser carver, scored on this disk.** Before the plugin existed,
+the only way to get video off this recorder was `carve-annexb`, which knows
+H.264/H.265 and nothing of the container. Here the plugin knows every frame,
+so the carver can be scored on real data, which no generated test can do:
+`python -m validate.heimvision_carve <E01>` carves every part of the image
+that holds data (178 regions, 6.47 GiB, read off the E01's chunk table), then
+places every `00 00 01` in the 806 written files by the parser.
+
+| | Carver (no parser) | Parser (HeimVision plugin) |
+|---|---|---|
+| Codec, picture | H.265 1920x1080, one parameter set | H.265 1920x1080 on all four cameras |
+| Video | 5,187,890 slices | 5,184,322 frames: 5,184,225 hold one slice each, 97 none |
+| Keyframes | 35,163 | 34,279 (each with VPS, SPS, PPS: 102,837 NAL units) |
+| Streams | 161, one per data region holding video | 4 cameras, 4 recordings |
+| Camera, time | none | on every frame |
+
+- **Every slice in the files is accounted for.** The carver's count equals every
+  slice-shaped start code in the 806 files less one per stream (a stream
+  leaves out its last NAL unit, whose end is unknown): 5,188,051 - 161 =
+  5,187,890, exactly; keyframes 35,163 = 35,163.
+- **3,826 of those slice-shaped start codes are not in any video frame**
+  (0.07%): chance `00 00 01` in the 128-byte frame headers (3,345), the file
+  headers (449), audio (19), and past the end of a file's frame chain (13).
+  884 of them look like keyframes - 2.5% of the carver's keyframe count. The
+  other 13.37 M chance start codes in the frame headers fail the NAL header
+  check and are passed over, as designed.
+- **The four cameras cannot be told apart.** They share one parameter set,
+  so every carved stream interleaves all four - the limit the carver's own
+  report states, now seen on a real disk. Only the container separates
+  cameras, and only it carries time.
+- `carve-annexb` therefore stays `synthetic_only`: its slice finding is
+  measured on real media, but the streams it made here are not any one
+  camera's footage.
 
 **Status:** `spec_only` - observed on real media, not byte-matched against a
 HeimVision export. `tests/test_pipeline.py` pins these numbers when
