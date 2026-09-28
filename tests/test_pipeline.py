@@ -830,6 +830,23 @@ def test_heimvision(tmp: str) -> None:
           r_tz.recordings[0].start_utc == "2021-08-04T05:59:51Z"
           and r_tz.recordings[0].timestamps[0].tz_offset_min == 480,
           str(r_tz.recordings[0].start_utc))
+    from analyse.timeline import ClockModel, build as build_timeline
+    from core.contract import to_dict
+    from report.case import parse_report_names
+    tl = build_timeline({"recordings": [to_dict(r) for r in res.recordings]}, None, ClockModel())
+    ev = [e for e in tl["events"] if e["kind"] == "indexed"]
+    check("the timeline takes HeimVision recordings from their own file headers: one lane "
+          "per camera, recorder-local, no UTC without a stated zone",
+          sorted(e["camera"] for e in ev) == ["CH01", "CH02", "CH03", "CH04"]
+          and all(e["time_basis"] == "container" and e["start_utc"] is None for e in ev)
+          and sorted(tl["cameras"]) == ["CH01", "CH02", "CH03", "CH04"]
+          and {e["start_local"] for e in ev} == {"2021-08-04 13:59:51"}, str(ev[:1]))
+    case_dir = os.path.join(tmp, "hv_case")
+    os.makedirs(case_dir)
+    for n in ("parse_heimvision.json", "parse_dahua.json", "parse_notes.txt"):
+        open(os.path.join(case_dir, n), "w").close()
+    check("the timeline and report find a plugin's parse report, built-in vendors first",
+          parse_report_names(case_dir) == ["parse_dahua.json", "parse_heimvision.json"])
     with BlockDevice(img) as dev:
         st = p.extract_recording(dev, "hv-ch03-0000", os.path.join(tmp, "hv_c3"))
     out = open(os.path.join(tmp, "hv_c3.h265"), "rb").read()

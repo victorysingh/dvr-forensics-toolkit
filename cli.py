@@ -731,6 +731,7 @@ def cmd_timeline(args) -> int:
     from analyse.timeline import ClockModel, build
     from core.contract import utc_now
     from core.hashing import sha256_file
+    from report.case import parse_report_names
 
     def load(*names):
         for n in names:
@@ -740,7 +741,7 @@ def cmd_timeline(args) -> int:
                     return json.load(fh), n
         return None, None
 
-    parse_rep, pname = load("parse_dahua.json", "parse_hikvision.json")
+    parse_rep, pname = load(*parse_report_names(args.out))
     carve_rep, cname = load("carve/carve_report.json")
     ps_rep, psname = load("carve/ps_report.json")
     ps_lab, plname = load("carve/ps_labels.json")
