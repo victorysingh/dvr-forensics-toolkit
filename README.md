@@ -109,7 +109,7 @@ demo/      tamper_demo.py
 | Single-pass hash + block map + Merkle root | working |
 | Custody ledger + verification | working |
 | Signature detection + confidence scoring | working |
-| Recorder model (platter strings + examiner's reading, cross-checked) | working; not yet run on real media |
+| Recorder model (platter strings + examiner's reading, cross-checked) | working; on real media: Hikvision `DS-7B08HUHI-K1`, platter and unit agree |
 | Partition parsing (MBR/GPT) | working |
 | Hikvision FS parser | working, `synthetic_only` |
 | Honeywell NVR (plugin, from Yoon & Hwang 2026) | working, `spec_only` (no Honeywell media) |
