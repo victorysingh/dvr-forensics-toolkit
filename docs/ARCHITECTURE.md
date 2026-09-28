@@ -52,6 +52,7 @@ flowchart LR
 | Recovery | `recover/carver.py` | Indexless DHAV carve: streams by byte contiguity and stream continuity; splits rather than guesses |
 | | `recover/annexb.py` | Last resort for a vendor with no parser: raw H.264/H.265 anchored on parameter sets held to the standards' ranges; split at a new one or a gap |
 | | `parsers/hikbtree.py` | Hikvision HIKBTREE index records from real media: camera and time per 1 GiB data block; labels carved PS streams |
+| | `parsers/ext3.py` | Read-only ext2/ext3 (block maps; ext4 extents refused): a Linux recorder's own system files - HeimVision's event log and recording index |
 | | `recover/pscarve.py` | Indexless MPEG-PS carve (Hikvision and others): packs accepted only when their packets end exactly on the next pack; dated from Hikvision `HK` descriptors |
 | | `recover/preserve.py` | Filesystem metadata kept as whole scan blocks, provable to the Merkle root |
 | Validation | `validate/exportmatch.py` | Recovered footage against the recorder's own export: picture slices compared in order, located by anchors that cannot repeat by chance |

@@ -13,23 +13,40 @@ not byte-matched against the recorder's own export.
 
 LAYOUT
 ------
-  * GPT, two partitions.  Partition 1: ext3, the recorder's own files
-    (search.db, dvr_log.db).  Partition 2: FAT32 made by mkdosfs, holding
-    `ident.bin` ("ok1ormated"), `index.bin`, and a pre-allocated ring of
-    8 MiB files `dirNNNNN/fileNNNN.dat`.
+  * GPT, two partitions.  Partition 1: ext3 (mounted at /root/rec/a1), the
+    recorder's own files, read by `parsers/ext3.py`:
+      - dvr_log.db (SQLite): dvr_log(id, type, write_time, log_content) -
+        the event log: "reload environment.", "Rec begin N,type:1",
+        "Rec stop N"; write_time in Unix UTC;
+      - search.db (SQLite): SEARCH, one row per camera-hour (session_rnd,
+        channel, frame_count, frame_total_size, start/end time, first and
+        last folder/file); DETAIL, one row per .dat file (folder, file,
+        fs_index, start_time, end_time);
+      - pbversion ("1.0.0.1"), manual_rec_status.bin.
+    Partition 2: FAT32 made by mkdosfs, holding `ident.bin` ("ok1ormated"),
+    `index.bin`, and a pre-allocated ring of 8 MiB files
+    `dirNNNNN/fileNNNN.dat`, 128 to a folder.
+  * index.bin: one byte per file slot, in FAT order - 'x' for a completed
+    file, 'u' otherwise (the file still open when recording stopped is 'u').
   * A .dat file starts with a 0x2080-byte header, magic "luo ": Unix start
     and end (u32 +4, +8), then per channel (4): the first frame's offset
     (+0x0C..), start time (+0x8C..), a size (+0x10C..), end time (+0x18C..).
   * Then a chain of frames.  Each has a 128-byte header, "liu " ... " uil",
     and the next header is exactly header + 128 + length:
 
-        +0x04 stream id (one per camera)   +0x24 type: 1 I, 2/3 P, 0 audio
+        +0x04 the recorder's camera-hour segment (search.db session_rnd)
         +0x08/+0x0C/+0x10 width, height, fps (video; 0xFFFFFFFF on audio)
-        +0x18 codec tag "H265"             +0x2C channel, 0-based
+        +0x18 codec tag "H265"             +0x24 type: 1 I, 2/3 P, 0 audio
+        +0x28 camera number (channel + 1)  +0x2C channel, 0-based
         +0x34 per-channel sequence         +0x3C payload length
-        +0x40 u64 microseconds (Unix)      +0x48 u32 Unix seconds
+        +0x40 u64 microseconds (Unix)      +0x48 u32 Unix seconds (the same)
+        +0x4C 0 on I-frames, 1 on P-frames
+        +0x50 / +0x54 file offset of an earlier frame's video payload - the
+              same camera's / any camera's, 0-2 s back; what they are for
+              is not established
 
-    Undecoded: +0x4C, +0x50 and +0x54 (not the back-pointers they resemble).
+    A few audio frames carry segment 0 and time 0; audio is stamped up to
+    ~1 s behind the video interleaved with it.
 
 Unlike Dahua (camera 0 on every frame), every frame here names its camera
 and carries a microsecond time, so footage can be attributed without any
@@ -40,14 +57,31 @@ TIME
 Frame headers hold Unix times; FAT directory entries hold the recorder's
 local wall clock.  Their difference on the same file is the recorder's zone
 setting as it applied then - measured per case and reported, never assumed.
+A second, independent measurement: the ext3 inode times (the recorder's
+kernel clock) of dvr_log.db and search.db against the last UTC time each
+database records.  Both are the recorder's own clocks; the error of its
+clock against true time is measured by neither.
 
-Read-only: FAT32 is read through `dev.read_at`, and nothing is written.
+THE RECORDER'S OWN RECORDS ARE CHECKED, NOT TRUSTED
+---------------------------------------------------
+search.db's per-file times are compared with every file's own header,
+index.bin's marks with the files actually written, and the log's
+'Rec begin' with each camera's first video frame; every disagreement is
+reported.
+
+Read-only: FAT32 and ext3 are read through `dev.read_at`; the SQLite
+databases are opened from memory (or, before Python 3.11, from a temporary
+copy deleted afterwards), and nothing is written to the evidence.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
+import sqlite3
 import struct
+import tempfile
 from collections import Counter
 from datetime import datetime, timezone
 from statistics import median
@@ -58,6 +92,7 @@ from core.hashing import sha256_file
 from detect.engine import parse_partitions
 from parsers.base import (SOURCE_OBSERVED, FieldSpec, ParseResult, VendorParser,
                           register, weakest_source)
+from parsers.ext3 import Ext, ExtError
 
 IMAGE = ("observed: NIST CFReDS 'Heimvision DVR .E01' (Brunty & Mock 2021), K9604-W, "
          "media MD5 4895ea6d10b08c29fb1bb03591adc7b2")
@@ -82,7 +117,20 @@ FIELDS = [FieldSpec(n, o, f, d, SOURCE_OBSERVED, IMAGE) for n, o, f, d in (
     ("frame.time_us", 0x40, "<Q", "Unix microseconds"),
     ("frame.width", 0x08, "<I", "video width"),
     ("frame.height", 0x0C, "<I", "video height"),
+    ("frame.segment", 0x04, "<I", "the recorder's camera-hour segment: search.db SEARCH.session_rnd"),
+    ("frame.camera_number", 0x28, "<I", "channel + 1"),
+    ("frame.second", 0x48, "<I", "Unix seconds, equal to time_us // 10**6"),
+    ("frame.not_key", 0x4C, "<I", "0 on I-frames, 1 on P-frames"),
+    ("frame.earlier_own", 0x50, "<I", "file offset of an earlier video payload, same camera; "
+                                      "purpose not established"),
+    ("frame.earlier_any", 0x54, "<I", "file offset of an earlier video payload, any camera; "
+                                      "purpose not established"),
+    ("index.bin", 0x00, "bytes", "one byte per file slot, in FAT order: 'x' complete, 'u' not"),
+    ("ext3:dvr_log.db", 0x00, "sqlite", "dvr_log(id, type, write_time UTC, log_content)"),
+    ("ext3:search.db", 0x00, "sqlite", "SEARCH per camera-hour; DETAIL(folder, file, fs_index, "
+                                       "start_time, end_time) per file"),
 )]
+SYSTEM_FILES = ("dvr_log.db", "search.db", "pbversion", "manual_rec_status.bin")
 
 
 def _utc(t: float) -> Optional[str]:
@@ -199,6 +247,80 @@ def walk_file(dev, extents: list[tuple[int, int]]) -> Iterator[tuple[dict, bytes
         pos = end
 
 
+# ---------------------------------------------------------------------------
+# the recorder's own files: partition 1 (ext3) and index.bin
+# ---------------------------------------------------------------------------
+def _sqlite(blob: bytes, sql: str) -> list[tuple]:
+    """Rows of one query on an SQLite database held as bytes.  Opened in
+    memory where Python allows it (3.11+); otherwise from a temporary copy,
+    read-only, deleted afterwards.  Either way the evidence is untouched."""
+    con = sqlite3.connect(":memory:")
+    if hasattr(con, "deserialize"):
+        try:
+            con.deserialize(blob)
+            return con.execute(sql).fetchall()
+        finally:
+            con.close()
+    con.close()
+    fd, path = tempfile.mkstemp(suffix=".db")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(blob)
+        con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+        try:
+            return con.execute(sql).fetchall()
+        finally:
+            con.close()
+    finally:
+        os.remove(path)
+
+
+def recorder_system(dev) -> dict:
+    """The recorder's own files on GPT partition 1 (ext3): its event log and
+    its recording index, with their inode times as the recorder's kernel
+    clock wrote them.  {} when the partition holds no such files."""
+    parts = [p for p in parse_partitions(dev.read_at(0, 64 << 10),
+                                         getattr(dev, "sector_size", 512) or 512)
+             if p.scheme == "gpt"]
+    if not parts:
+        return {}
+    fs = Ext(dev, parts[0].start_offset)
+    present = {e["name"]: e for e in fs.listdir() if e["kind"] == "file"}
+    out: dict = {"mount_point": fs.last_mounted_on, "created_raw": fs.times["created"],
+                 "files": {}}
+    for name in SYSTEM_FILES:
+        e = present.get(name)
+        if e is None:
+            continue
+        body = fs.read(e)
+        out["files"][name] = {"size": e["size"], "sha256": hashlib.sha256(body).hexdigest(),
+                              "mtime_raw": e["mtime"], "ctime_raw": e["ctime"],
+                              "atime_raw": e["atime"]}
+        if name == "dvr_log.db":
+            out["log"] = _sqlite(body, "select id, type, write_time, log_content "
+                                       "from dvr_log order by id")
+        elif name == "search.db":
+            out["detail"] = _sqlite(body, "select folder, file, fs_index, start_time, end_time "
+                                          "from DETAIL order by id")
+            out["segments"] = _sqlite(body, "select session_rnd, channel, frame_count, "
+                                            "frame_total_size, start_time, end_time "
+                                            "from SEARCH order by id")
+        elif name == "pbversion":
+            out["pbversion"] = body.decode("ascii", "replace").strip()
+    return out
+
+
+def _slot(path: str) -> tuple[int, int]:
+    """'DIR00006/FILE0037.DAT' -> (6, 37), as search.db names a file."""
+    d, f = path.split("/")
+    return int(d[3:]), int(f[4:8])
+
+
+def _zone(local_raw: int, utc: int) -> int:
+    """Minutes from UTC of a local clock, to the nearest quarter hour."""
+    return round((local_raw - utc) / 900) * 15
+
+
 @register
 class HeimVisionParser(VendorParser):
     vendor = "HeimVision"
@@ -295,11 +417,72 @@ class HeimVisionParser(VendorParser):
                                           parser_rule=self.parser_rule)))
         result.indexed_extents = [e for f in written for e in f["extents"]]
         span = (_utc(written[0]["start"]), _utc(written[-1]["end"])) if written else (None, None)
+
+        # The recorder's own records - read, then checked against the files.
+        system, system_error = {}, None
+        try:
+            system = recorder_system(dev)
+        except (ExtError, sqlite3.Error) as exc:
+            system_error = f"{type(exc).__name__}: {exc}"
+        log, detail = system.get("log", []), system.get("detail", [])
+        log_unbroken = [r[0] for r in log] == list(range(1, len(log) + 1))
+        begun: dict[int, int] = {}
+        for _, _, when, text in log:
+            m = re.match(r"Rec begin (\d+)", text)
+            if m:
+                begun.setdefault(int(m.group(1)), when)
+        # Each camera's first video frame, from the first file (its header
+        # gives the recorder's own start, not the first frame).  Video only:
+        # audio frames are stamped up to ~1 s behind the video beside them.
+        first_us: dict[int, int] = {}
+        if written and begun:
+            for h, _ in walk_file(dev, written[0]["extents"]):
+                if h["type"] != "audio":
+                    c = h["channel"]
+                    first_us[c] = min(first_us.get(c, h["time_us"]), h["time_us"])
+        before_begin = {c: round(begun[c] - first_us[c] / 1e6, 1) + 0.0     # never -0.0
+                        for c in first_us if c in begun}
+        by_slot = {_slot(f["path"]): f for f in written}
+        listed = {(fo, fi) for fo, fi, *_ in detail}
+        listed_ok = sum(1 for fo, fi, _, s, e in detail if (fo, fi) in by_slot
+                        and (by_slot[fo, fi]["start"], by_slot[fo, fi]["end"]) == (s, e))
+        unlisted = [f["path"] for f in written if _slot(f["path"]) not in listed] if detail else []
+        slots = b""
+        if "INDEX.BIN" in root:
+            for o, n in fat.extents(root["INDEX.BIN"]["cluster"], root["INDEX.BIN"]["size"]):
+                slots += dev.read_at(o, min(n, len(files) - len(slots)))
+                if len(slots) >= len(files):
+                    break
+        complete = {k for k, b in enumerate(slots) if b == ord("x")}
+        written_slots = {k for k, f in enumerate(files) if "start" in f}
+        index_bin = {"complete": len(complete),
+                     "written_not_complete": [files[k]["path"] for k in sorted(written_slots - complete)],
+                     "complete_not_written": [files[k]["path"] for k in sorted(complete - written_slots)]}
+        sysfiles = system.get("files", {})
+        ext_zone = {}
+        if log and "dvr_log.db" in sysfiles:
+            ext_zone["dvr_log.db"] = _zone(sysfiles["dvr_log.db"]["mtime_raw"], max(r[2] for r in log))
+        if detail and "search.db" in sysfiles:
+            ext_zone["search.db"] = _zone(sysfiles["search.db"]["mtime_raw"], max(r[4] for r in detail))
         result.volume = {
             "vendor": self.vendor, "fat32_oem": fat.oem, "ident": ident.decode("ascii", "replace"),
             "files": len(files), "files_written": len(written), "span_utc": span,
             "recorder_zone_minutes": zone[0] if zone else None,
             "recorder_zone_agreement": f"{zone[1]}/{len(offs)} files" if zone else None,
+            "recorder_zone_minutes_ext3": ext_zone,
+            "recorder_log": [{"id": i, "type": t, "time_utc": _utc(w), "text": x}
+                             for i, t, w, x in log],
+            "recorder_log_unbroken": log_unbroken,
+            "recorder_index": {"files_listed": len(detail), "files_matching_headers": listed_ok,
+                               "written_not_listed": unlisted,
+                               "camera_hour_segments": len(system.get("segments", []))},
+            "index_bin": index_bin,
+            "footage_before_logged_start_s": {f"CH{c + 1:02d}": s
+                                              for c, s in sorted(before_begin.items())},
+            "recorder_system_files": sysfiles,
+            "recorder_mount_point": system.get("mount_point"),
+            "pbversion": system.get("pbversion"),
+            "recorder_system_error": system_error,
             "summary": [
                 ("FAT32", f"{fat.oem}, {fat.csize} B clusters, data at 0x{fat.data:X}"),
                 ("ident.bin", repr(ident.decode('ascii', 'replace'))),
@@ -309,15 +492,44 @@ class HeimVisionParser(VendorParser):
                           f"{zone[1]} of {len(offs)} files - the recorder's zone setting")
                          if zone else "not measured"),
                 ("recordings", f"{len(result.recordings)} across {CHANNELS} channels"),
+            ("recorder log",
+             (f"dvr_log.db: {len(log)} entries, ids "
+              f"{'unbroken' if log_unbroken else 'with gaps'}; "
+              f"'Rec begin' {_utc(min(begun.values()))} on {len(begun)} cameras; "
+              f"last {_utc(log[-1][2])} '{log[-1][3]}'")
+             if log and begun else (system_error or "not found")),
+            ("before 'Rec begin'", ", ".join(f"CH{c + 1:02d} {s:.1f} s" for c, s in
+                                             sorted(before_begin.items()) if s > 0) or "none"),
+            ("recorder index",
+             f"search.db lists {len(detail)} files: {listed_ok} with exactly the start and end "
+             f"their own header gives, {len(unlisted)} written but not listed; "
+             f"{len(system.get('segments', []))} camera-hour segments"
+             if detail else (system_error or "not found")),
+            ("index.bin",
+             f"{index_bin['complete']} slots marked complete ('x'); written but not marked: "
+             f"{', '.join(index_bin['written_not_complete']) or 'none'}; marked but not "
+             f"written: {', '.join(index_bin['complete_not_written']) or 'none'}"),
+            ("zone, again", ", ".join(f"{n}: UTC{m / 60:+.2g}h" for n, m in ext_zone.items())
+             + " - ext3 file times (the recorder's kernel clock) against the log's own UTC"
+             if ext_zone else "not measured"),
             ]}
         result.notes = [
             f"Layout read off real media: {IMAGE}. spec_only until byte-matched against a "
             "HeimVision export.",
             "Frame headers name the camera (0-based channel at +0x2C) and carry Unix "
             "microseconds, so footage is attributed without the index.",
-            "Undecoded: frame header +0x4C, +0x50, +0x54; the per-channel offsets in the file "
-            "header; index.bin; ext3's search.db and dvr_log.db.",
+            "The recorder's own records are read and checked, never trusted: its event log "
+            "and index (ext3, partition 1) and index.bin are compared with the files, and "
+            "every disagreement is reported.",
+            "Footage from before a camera's logged 'Rec begin' is consistent with a "
+            "pre-record buffer; that is not established.",
+            "Undecoded: what frame header +0x50/+0x54 are for (file offsets of an earlier "
+            "frame's video); the per-channel offsets and sizes in the file header; how "
+            "search.db counts frame_count and frame_total_size (close to the frames on disk, "
+            "not equal).",
         ]
+        if system_error:
+            result.notes.append(f"Recorder's system partition not read: {system_error}")
         return result
 
     def extract_recording(self, dev, recording_id: str, base_path: str) -> dict:
