@@ -453,8 +453,8 @@ def cmd_extract(args) -> int:
             f"{stats['spill_in']} frames of other cameras' overflow at cluster starts",
             f"{stats['remnant_frames']} frames of older overwritten footage "
             f"(list them with `parse --remnants`)",
-            f"{stats['video_counter_missing']} video frames absent from the disk "
-            f"(counter gaps; not interpolated)",
+            f"{stats['video_counter_missing']} video frames with no intact copy on the "
+            f"disk (counter gaps; not interpolated)",
         ],
     }
     from core.contract import dump_json
@@ -471,7 +471,11 @@ def cmd_extract(args) -> int:
           f"{stats['clusters_beyond_image']} beyond the image")
     miss, span = stats["video_counter_missing"], stats["video_counter_span"]
     print(f"  missing       {miss} video frames by counter "
-          f"({(miss / span if span else 0):.2%}) - not on the disk, not interpolated")
+          f"({(miss / span if span else 0):.2%}) - no intact copy on the disk, "
+          f"not interpolated")
+    if stats.get("boundary_joined"):
+        print(f"  rejoined      {stats['boundary_joined']} frames cut at a cluster end and "
+              f"finished in the next chain cluster (both halves listed in the manifest)")
     print(f"  excluded      {stats['spill_in']} overflow frames from other cameras, "
           f"{stats['remnant_frames']} older remnant frames")
     print(f"  stream breaks {stats['stream_breaks']}")

@@ -42,6 +42,11 @@ THREE THINGS ABOUT THIS FORMAT THAT A NAIVE CARVE GETS WRONG
      that cluster's first bytes.  So the start of a cluster can hold the tail
      of another camera's stream.  Frames are assigned to a recording by stream
      continuity (frame counter, millisecond clock, date), never by position.
+     Less often (57 of the 371 missing frames in one real recording) the
+     frame is cut at the cluster end and finished at the start of the
+     recording's NEXT CHAIN cluster, so its halves are not adjacent on disk.
+     Most of those second halves were later overwritten by other overflow;
+     7 of the 57 rejoin intact.
   3. Clusters are reused without being cleared.  Past the point where the
      current recording stopped writing, a cluster still holds older footage.
      Those frames are dated outside the cluster's index window and are
@@ -462,6 +467,10 @@ class ClusterYield:
     unassigned: int = 0          # validated, in-window, but not continuous
     resynced: bool = False       # own stream picked up again after a gap
     overflow_out: int = 0        # own frames recovered from the next physical cluster
+    # Own frames cut at the cluster end and finished in the next chain
+    # cluster: frame offset -> the rejoined bytes, and where each half lies.
+    joined: dict[int, bytes] = field(default_factory=dict)
+    joined_parts: list[dict] = field(default_factory=list)
     in_image: bool = True
     state: Optional["Stream"] = None   # own stream state after this cluster
 
@@ -573,8 +582,60 @@ def classify_cluster(dev, vol: DhfsVolume, rec: ClusterRecord,
             state.feed(fr)
             expected = fr.offset + fr.length
 
+    # A frame cut at the cluster end and finished in our NEXT CHAIN cluster.
+    # The bytes after the cut belong to whoever owns the physically next
+    # cluster, so the walk above rejected it.  Rejoined with the start of our
+    # next cluster it must pass the same checks as any frame - header
+    # checksum, a trailer repeating the length - and continue our stream.  As
+    # with overflow, it must start exactly where our last frame ended: the
+    # write is sequential.  Nothing is claimed when any of that fails.
+    last = y.own[-1] if y.own else None
+    if (started and not ended and rec.next and rec.next != rec.index + 1
+            and last.offset - off + last.length < cs):
+        fr, data = _join_at_chain_next(dev, vol, rec, buf, off,
+                                       last.offset + last.length)
+        if fr is not None and state.distance(fr) is not None:
+            y.own.append(fr)
+            y.joined[fr.offset] = data
+            head_len = off + cs - fr.offset
+            y.joined_parts.append({
+                "frame_number": fr.frame_number, "type": f"0x{fr.ftype:02X}",
+                "parts": [[fr.offset, head_len],
+                          [vol.cluster_offset(rec.next), fr.length - head_len]]})
+            state.feed(fr)
+
     y.state = state if y.own else None
     return y, buf
+
+
+def _join_at_chain_next(dev, vol: DhfsVolume, rec: ClusterRecord, buf: bytes,
+                        off: int, at: int) -> tuple[Optional[DhavFrame], bytes]:
+    """The frame starting at `at` (absolute), cut at the end of the cluster at
+    `off` and finished at the start of chain cluster `rec.next` - or
+    (None, b"") when the two pieces do not make one valid frame."""
+    cs = vol.cluster_size
+    tail = buf[at - off:cs]
+    nxt = vol.cluster_offset(rec.next)
+    hdr = (tail + _read(dev, nxt, DHAV_HDR))[:DHAV_HDR]
+    if not header_ok(hdr):
+        return None, b""
+    flen = struct.unpack_from("<I", hdr, 12)[0]
+    if flen <= len(tail) or flen > MAX_FRAME:
+        return None, b""
+    data = tail + _read(dev, nxt, flen - len(tail))
+    got = next(walk_frames(data, at, 0, 1), None)
+    if got is None or got.offset != at or got.length != flen:
+        return None, b""
+    # The start of a cluster is where other cameras' overflow lands.  One
+    # shorter than our second half overwrites its middle and leaves the
+    # header and trailer - all the checks above see - intact.  Such a write
+    # always leaves a DHAV marker (the trailer of the frame that crossed
+    # into this cluster, or a header), so any marker inside our second half
+    # means it is no longer ours alone.
+    second = data[len(tail):flen - DHAV_TAIL]
+    if DHAV_MAGIC in second or DHAV_TRAILER in second:
+        return None, b""
+    return got, data
 
 
 def reassemble(dev, vol: DhfsVolume, f: DhfsFile, sink=None,
@@ -598,7 +659,7 @@ def reassemble(dev, vol: DhfsVolume, f: DhfsFile, sink=None,
     stats = {"clusters": 0, "clusters_beyond_image": 0, "frames": 0,
              "video_frames": 0, "i_frames": 0, "bytes": 0, "spill_in": 0,
              "unassigned": 0, "remnant_frames": 0, "stream_breaks": 0,
-             "overflow_recovered": 0,
+             "overflow_recovered": 0, "boundary_joined": 0, "joined_frames": [],
              "first_date": None, "last_date": None, "codec": "",
              "width": 0, "height": 0, "fps": 0, "cluster_sha256": []}
     counters: dict[str, set[int]] = {"video": set(), "audio": set()}
@@ -615,6 +676,8 @@ def reassemble(dev, vol: DhfsVolume, f: DhfsFile, sink=None,
         stats["clusters"] += 1
         stats["spill_in"] += y.spill_in
         stats["overflow_recovered"] += y.overflow_out
+        stats["boundary_joined"] += len(y.joined)
+        stats["joined_frames"].extend(y.joined_parts)
         stats["unassigned"] += y.unassigned
         stats["remnant_frames"] += len(y.remnants)
         stats["cluster_sha256"].append(
@@ -623,9 +686,9 @@ def reassemble(dev, vol: DhfsVolume, f: DhfsFile, sink=None,
             stats["stream_breaks"] += 1
         for fr in y.own:
             rel = fr.offset - y.offset
-            frame = buf[rel:rel + fr.length]
+            frame = y.joined.get(fr.offset) or buf[rel:rel + fr.length]
             if not stats["codec"] and fr.ftype == TYPE_I:
-                ext = frame_ext(buf, rel, fr)
+                ext = frame_ext(frame, 0, fr)
                 stats["codec"] = ext.get("codec", "")
                 stats["width"] = ext.get("width", 0)
                 stats["height"] = ext.get("height", 0)
@@ -650,9 +713,10 @@ def reassemble(dev, vol: DhfsVolume, f: DhfsFile, sink=None,
         if y.own:
             state = y.state
     # Video and audio each carry their own frame counter.  Numbers absent
-    # from a counter's range are frames that are not on the disk any more -
-    # on the real disk ~1 per cluster, the frame at a cluster's start that
-    # another camera's overflow overwrote.  Reported, never interpolated.
+    # from a counter's range are frames with no intact copy on the disk - on
+    # the real disk ~1 per cluster: an overflow frame written into the next
+    # physical cluster whose header survives there but whose body does not.
+    # Reported, never interpolated.
     for kind, seen in counters.items():
         span = (max(seen) - min(seen) + 1) if seen else 0
         stats[f"{kind}_counter_missing"] = span - len(seen)
@@ -1162,7 +1226,9 @@ class DahuaParser(VendorParser):
                 i_frames = [x for x in y.own if x.ftype == TYPE_I]
                 if i_frames:
                     fr = i_frames[0]
-                    codec = frame_ext(buf, fr.offset - off, fr).get("codec", "")
+                    joined = y.joined.get(fr.offset)
+                    codec = (frame_ext(joined, 0, fr) if joined
+                             else frame_ext(buf, fr.offset - off, fr)).get("codec", "")
                 claims.append(self._claim(y.own[0].date, "container",
                                           "first DHAV frame +0x10 of first continuation cluster"))
                 if len(f.clusters) > 1:
