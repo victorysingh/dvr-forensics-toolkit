@@ -137,15 +137,16 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 | E01 | read by our own reader; computed MD5 and SHA-1 **equal FTK Imager's** over all 150 GB |
 | Layout | GPT; ext3 system partition; FAT32 ring of 17,152 files of 8 MiB; frames `liu ` ... ` uil` naming camera and microsecond time - decoded from the disk, now `plugins/heimvision.py` |
 | Recorded | 806 files, 6.30 GB: **24 h continuous on 4 cameras**, 1.296 M frames each at 15 fps, no gap over 2 s after the start |
-| Time | the recorder's FAT clock is 8 h behind its frame times on all 806 files: set to UTC-8 in a UTC-4 location |
+| Time | the recorder's FAT clock is 8 h behind its frame times on all 806 files: set to UTC-8 in a UTC-4 location - and its Linux clock (ext3 times) is 8 h behind its own log's UTC, a second measurement |
+| Recorder's own records | its event log and recording index (SQLite on the ext3 partition) read and **checked, not trusted**: 194 log entries, none deleted; the index gives all 806 files exactly the times their headers do; recording began at 13:59:50-51 UTC on all four cameras, and CH02-CH04 hold ~7 s of video from before it |
 | No-parser carver | `carve-annexb`, scored frame by frame by the plugin: 5,187,890 slices, every one in the files accounted for, 0.07% of them container bytes; the four cameras share one parameter set, so its streams mix them - only the container separates cameras and gives time |
 
 ## 5. Validation
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 405 on generated data with known ground truth, plus
-  10 on real media (9 on the CP Plus drive's image, 1 on the HeimVision E01).
+- **Automated tests:** 412 on generated data with known ground truth, plus
+  12 on real media (9 on the CP Plus drive's image, 3 on the HeimVision E01).
   They cover the Merkle tree, the custody chain, bad sectors, device loss,
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the

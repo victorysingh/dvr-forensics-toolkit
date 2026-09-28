@@ -751,6 +751,47 @@ def test_heimvision(tmp: str) -> None:
     with BlockDevice(os.path.join(tmp, "honeywell.img")) as dev:
         check("another vendor's GPT disk is not taken for HeimVision", not p.detect(dev))
 
+    # The recorder's own records (ext3 partition 1, index.bin), with three
+    # faults planted in the fixture for the checks to find.
+    from detect.engine import parse_partitions
+    from parsers.ext3 import EXTENTS, Ext, ExtError
+    check("the recorder's own log read off its ext3 partition: every entry, ids unbroken",
+          [e["text"] for e in v["recorder_log"]] == [x[2] for x in truth["log"]]
+          and v["recorder_log_unbroken"], str(v["recorder_log"][:3]))
+    check("its index checked, not trusted: the file whose listed end disagrees with its "
+          "header is caught",
+          v["recorder_index"] == {"files_listed": 3, "files_matching_headers": 2,
+                                  "written_not_listed": [], "camera_hour_segments": 4},
+          str(v["recorder_index"]))
+    check("index.bin: a written file it does not mark complete is reported",
+          v["index_bin"] == {"complete": 2, "written_not_complete": ["DIR00000/FILE0002.DAT"],
+                             "complete_not_written": []}, str(v["index_bin"]))
+    check("footage before a camera's logged 'Rec begin', measured from its first video frame",
+          v["footage_before_logged_start_s"] == {"CH01": 0.0, "CH02": 2.0, "CH03": 0.0, "CH04": 0.0},
+          str(v["footage_before_logged_start_s"]))
+    check("the zone measured a second way: ext3 inode times against the log's own UTC",
+          v["recorder_zone_minutes_ext3"] == {"dvr_log.db": -480, "search.db": -480})
+    with BlockDevice(img) as dev:
+        fs = Ext(dev, parse_partitions(dev.read_at(0, 64 << 10), 512)[0].start_offset)
+        pad = next(e for e in fs.listdir() if e["name"] == "pad.bin")
+        whole = fs.read(pad)
+        pad["flags"] |= EXTENTS
+        try:
+            fs.read(pad)
+            refused = False
+        except ExtError:
+            refused = True
+    check("ext3: a file past 12 blocks read through its indirect block; an ext4 extent "
+          "inode refused, not guessed", whole == truth["pad"] and refused)
+    bare = os.path.join(tmp, "heimvision_bare.img")
+    SV.build(bare, system=False)
+    with BlockDevice(bare) as dev:
+        br = p.parse(dev)
+    check("a blank system partition: the footage still parses, and the gap is reported",
+          len(br.recordings) == 4 and bool(br.volume["recorder_system_error"])
+          and not br.volume["recorder_log"] and br.volume["recorder_index"]["written_not_listed"] == []
+          and any("not read" in n for n in br.notes), str(br.notes[-1:]))
+
     path = os.environ.get("HEIMVISION_E01")
     if not path:
         print("  [real image] skipped - set HEIMVISION_E01 to the CFReDS K9604-W .E01")
@@ -763,6 +804,20 @@ def test_heimvision(tmp: str) -> None:
           and rv["span_utc"] == ("2021-08-04T13:59:51Z", "2021-08-05T14:00:01Z")
           and rv["recorder_zone_minutes"] == -480 and rv["recorder_zone_agreement"] == "806/806 files",
           str(rv.get("summary")))
+    check("real image: the recorder's own log (194 entries, unbroken) and index (806/806 files "
+          "as their headers say) agree with the disk; index.bin leaves only the last file open",
+          len(rv["recorder_log"]) == 194 and rv["recorder_log_unbroken"]
+          and rv["recorder_index"] == {"files_listed": 806, "files_matching_headers": 806,
+                                       "written_not_listed": [], "camera_hour_segments": 96}
+          and rv["index_bin"] == {"complete": 805, "written_not_complete": ["DIR00006/FILE0037.DAT"],
+                                  "complete_not_written": []},
+          str(rv["recorder_index"]) + str(rv["index_bin"]))
+    check("real image: UTC-8 again from the ext3 clock; CH02-CH04 video 6.9-7.5 s before "
+          "their logged 'Rec begin'",
+          rv["recorder_zone_minutes_ext3"] == {"dvr_log.db": -480, "search.db": -480}
+          and rv["footage_before_logged_start_s"] == {"CH01": -0.4, "CH02": 7.5, "CH03": 7.4,
+                                                     "CH04": 6.9},
+          str(rv["footage_before_logged_start_s"]))
 
 
 def test_dahua_real_media() -> None:
