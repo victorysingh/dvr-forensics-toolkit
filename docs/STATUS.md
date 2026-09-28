@@ -19,7 +19,7 @@ they are evidence).
 | Identify the DVR / vendor | **done** — signatures for all eight OEMs, confidence scores; on-platter evidence found for CP Plus (`CPPlusIPCam`) and Hikvision (`HK` descriptors, surviving master/index). **Model:** `identify-model` searches the non-video parts of the disk for model numbers; `record-device` records the model off the unit with hashed photos; the two are checked against the format on the disk. Not yet run on either drive | `detect/`, `detect/model.py` |
 | Create forensic images | **done** — whole-drive MD5 + SHA-256 in one read-only pass, per-block Merkle map, preserved metadata, 20 GiB head image; see `FORENSIC_IMAGE.md` | `acquire/`, `recover/preserve.py` |
 | MD5 and SHA-256 | **done** — both drives | `scan` |
-| Parse proprietary file systems | **done on real media** — Dahua/CP Plus DHFS 4.1 (2 drives); Hikvision HIKBTREE index records (surviving copies) | `parsers/dahua.py`, `parsers/hikbtree.py` |
+| Parse proprietary file systems | **done on real media** — Dahua/CP Plus DHFS 4.1 (2 drives); Hikvision HIKBTREE index records (surviving copies); **HeimVision** FAT32 ring + `luo`/`liu` frames (a third real image, NIST CFReDS) | `parsers/dahua.py`, `parsers/hikbtree.py` |
 | Decode proprietary formats | **done on real media** — Dahua DHAV → H.265; Hikvision MPEG-PS + `HK` descriptors → H.264/H.265; ffmpeg decodes both | `recover/carver.py`, `recover/pscarve.py` |
 | Extract video and metadata | **done** — `.dav`/`.h265` and `.ps`, per-file SHA-256 | `extract-carved`, `extract` |
 | Recover deleted footage | **done on real media** — Dahua: 2,246 streams outside every index; Hikvision: a whole reformatted drive, 2,516 streams | carvers |
@@ -30,7 +30,7 @@ they are evidence).
 | Reduce analysis time (a PS success criterion) | **measured** - one read of the drive instead of five: a 1 TB drive over the team's USB 2 bridge takes ~11.3 h in one pass, ~56.6 h one read per task, ~21.9 h imaging first (and ~931 GiB free). taps now run in a process each - 2.24x the serial pass in the same run, fast enough that a slow laptop is again limited by the USB 2 drive, not the CPU (PERFORMANCE.md §5) | `docs/PERFORMANCE.md`, `demo/bench_single_pass.py` |
 | Reports | **done** — HTML + JSON, hashed into the ledger; BSA 2023 s.63 certificate drafted from the case (Part A/B, hash report enclosed), wording to be checked against the Gazette | `report/`, `report/s63.py` |
 | AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence" | `analyse/activity.py`, `analytics/` |
-| Support 5–6 OEMs | **honest answer**: 3 decoded from real media (Dahua, CP Plus, Hikvision); **Honeywell parsed from published research** (Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) as a drop-in plugin, `spec_only`, no media; 4 detected (TP-Link, Godrej, Uniview, Matrix) with a plugin route and a survey tool for onboarding. For those 4, their video can still be recovered with no parser: `carve-annexb` finds raw H.264/H.265 by its parameter sets (no dates or cameras; `synthetic_only`) | `plugins/`, `detect/survey.py`, `recover/annexb.py` |
+| Support 5–6 OEMs | **honest answer**: 3 of the eight decoded from real media (Dahua, CP Plus, Hikvision), plus **HeimVision** - an "other commonly used platform" - decoded from a real NIST image; **Honeywell parsed from published research** (Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) as a drop-in plugin, `spec_only`, no media; 4 detected (TP-Link, Godrej, Uniview, Matrix) with a plugin route and a survey tool for onboarding. For those 4, their video can still be recovered with no parser: `carve-annexb` finds raw H.264/H.265 by its parameter sets (no dates or cameras; `synthetic_only`) | `plugins/`, `detect/survey.py`, `recover/annexb.py` |
 
 Named deliverables:
 
@@ -105,7 +105,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 351 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 357 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 
@@ -155,9 +155,11 @@ real media; the rest is open, and there is new work that fits it.
    filesystem: parse, recordings per camera, extract, and recovery after a
    format. `spec_only` — the next step is any real Honeywell disk or image,
    to move it on.
-2. **Datasets.** The CFReDS Heimvision `.E01` (link and licence still
-   unconfirmed) or any other labelled DVR image. Each new image is a chance
-   to validate a parser on a second recorder.
+2. ~~**Datasets.**~~ **Done for CFReDS Heimvision:** the E01 reader
+   reproduced its stored MD5 and SHA-1 over 150 GB, and its layout became
+   `plugins/heimvision.py` - 24 h on 4 cameras recovered, attributed and
+   dated, the recorder's zone (UTC-8) measured from its own disk
+   (`VALIDATION_REPORT.md` §8e). Any other labelled DVR image is the next one.
 3. ~~**Camera attribution from the burned-in text (OCR).**~~ **Built, and it
    needs the one thing this machine could not do.** `cli.py read-osd`
    (`analytics/osd.py`, rules in `analytics/osd_rules.py`, 22 tests) reads the

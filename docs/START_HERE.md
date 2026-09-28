@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 351 tests, all should pass
+python tests/test_pipeline.py     # 357 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -92,11 +92,12 @@ If those pass, the engine below is intact:
 | Synthetic DVR image generator | `tests/synth_dvr.py` | working |
 | Vendor parser plugin SDK (field provenance) | `parsers/base.py` | working |
 | Hikvision filesystem parser | `parsers/hikvision.py` | working, `synthetic_only` |
+| HeimVision DVR (drop-in plugin, read off the NIST CFReDS K9604-W image; E01 reader verified on it) | `plugins/heimvision.py` | working on real media, `spec_only` |
 | Honeywell NVR (drop-in plugin, from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) | `plugins/honeywell.py` | working on a disk built to the paper, `spec_only` |
 | **Dahua DHFS 4.1 parser + per-camera extract** | `parsers/dahua.py` | **working on real media, `spec_only`** — see `docs/DAHUA_DHFS.md` |
 | Remnants of overwritten footage (Dahua) | `parsers/dahua.py` | working, `spec_only` |
 | Indexless DHAV carver, index cross-reference | `recover/carver.py` | working on real media, `spec_only` |
-| Raw H.264/H.265 carver for a vendor with no parser (anchored on parameter sets; no dates, no cameras) | `recover/annexb.py`, `cli.py carve-annexb`, `scan --carve-annexb` | working, `synthetic_only` |
+| Raw H.264/H.265 carver for a vendor with no parser (anchored on parameter sets; no dates, no cameras) | `recover/annexb.py`, `cli.py carve-annexb`, `scan --carve-annexb` | working, `synthetic_only`; scored on the real HeimVision image (`validate/heimvision_carve.py`): every slice accounted for, cameras with identical settings not separable |
 | MPEG-PS carver (Hikvision footage, dated from the `HK` descriptor; works on a reformatted drive) | `recover/pscarve.py` | working on real media, `spec_only` |
 | Hikvision HIKBTREE index records → camera labels for carved footage | `parsers/hikbtree.py`, `cli.py label-ps` | working on real media, `spec_only` |
 | Carve inside the acquisition pass (`scan --carve`) | `recover/carver.py`, `acquire/scanner.py` | working; identical to a standalone carve on real media |
