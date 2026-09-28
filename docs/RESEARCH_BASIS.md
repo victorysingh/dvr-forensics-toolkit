@@ -214,7 +214,7 @@ goes beyond.
 | Camera separation (`recover/carver.py`) | Information 2026 (DHAV demultiplexing by channel identifier) | the problem statement: interleaved cameras | separation by stream continuity where the identifier is 0; split, never guess |
 | Carving without a filesystem | Ariffin, Slay & Choo 2013; Tobin, Shosha & Gladyshev 2014; Gomm et al. 2016 | recover footage by structure, not by index | runs inside the acquisition pass; recovered the whole of a reformatted drive |
 | Candidate validation in carving | Garfinkel 2007 (fast object validation) | accept a candidate only if its structure validates | a PS pack only if its packets end exactly at the next pack; a DHAV frame only if checksum and trailer hold |
-| Corrupted / partial frames (open item) | Na et al. 2014 (frame-based recovery by codec specification) | — | the next step for the 2,087 drive-1 frames that do not decode |
+| Corrupted / partial frames | Na et al. 2014 (frame-based recovery by codec specification) | — | the cause on drive 1 is measured: a reference frame missing from the disk (`VALIDATION_REPORT.md` §7). Decoding what such a frame still holds would serve a marked viewing copy, never the evidence |
 | Integrity | Merkle 1987 | hash tree, inclusion proofs | per-8 MiB-block leaves; proofs per clip and per preserved structure |
 | Custody | Schneier & Kelsey 1999 | hash-chained log | every derived artefact in the chain |
 | Time | Boyd & Forster 2004 | record the device clock against true time | two clocks per stream cross-checked; no UTC without stated inputs |
@@ -238,8 +238,10 @@ goes beyond.
    `identify-model` should read them directly rather than rely on loose strings.
 3. **Honeywell plugin** from Yoon & Hwang (2026). The paper also covers
    recovery after format, expiry and overwrite.
-4. **The 2,087 undecodable frames** on drive 1, following Na et al. (2014):
-   rebuild the decoding context from the codec specification.
+4. **Frames after a missing reference** on drive 1 (cause measured,
+   `VALIDATION_REPORT.md` §7), following Na et al. (2014): decode what each
+   still holds, for a viewing copy marked as such - never as intact
+   evidence.
 
 ---
 
