@@ -82,7 +82,7 @@ underneath, **Hikvision footage** that the format did not overwrite. Layout:
 | Master sector | read off the surviving copy (magic at +0x10): version +0x30, capacity +0x48, **log area offset/size/end +0x50/+0x58/+0x60**, data offset +0x78, data size +0x80, block size +0x88, block count +0x90, HIKBTREE copies +0x98/+0xA8 (size +0xA0/+0xB0), initialised +0xF0. Six cross-checks agree (`parsers/hiklog.py`) | O |
 | System log | `RATS`, u32 0x14, u32 time, u16 major, u16 minor, payload to the next record; operation records open with the user name. Major/minor are Hikvision's SDK event codes. 43,108 records, 28 Jan – 25 Aug 2024: 188 power-on / abnormal-shutdown pairs, one local `admin` session with configuration and playback. The log keeps the footage's clock (`hik-log`) | O (marker: Han / Jeong / Lee 2015; records: Dragonas / Lambrinoudakis / Kotsis 2023) |
 | 212-byte records in reserved blocks | ~355,000, 27 Apr 2021 – 30 Aug 2024: time, a 1–8 field, 72 bytes of bit patterns, `MX`; a big-endian copy of time and the 1–8 field. Plausibly per-channel motion records (8 channels); meaning **not established** | O — undecoded |
-| Field offsets in `parsers/hikvision.py` | written from the papers before we held media; its master-sector offsets differ from the real layout above | **S** — our fixture only |
+| Field offsets in `parsers/hikvision.py` | the layout above (rewritten 28 Sep; the first version used offsets invented for our fixture) | O |
 | Container | MPEG-2 Program Stream: one pack per frame, a stream map before each keyframe, H.264 video | O (ISO/IEC 13818-1 container) |
 | `HK` descriptors | private descriptors in the stream map starting "HK": tag 0x40 carries the recorder's clock; 0x41 and the per-stream 0x42/0x44 are partly decoded (0x42 holds 960×576) | O |
 | Time | 0x40: year byte + month 4 bits / day 5 / hour 5 / minute 6 / second 6. Matches the burned-in clock to the second, +1 s per stream map, spans the pack clock's interval | O |
@@ -92,8 +92,9 @@ underneath, **Hikvision footage** that the format did not overwrite. Layout:
 
 Status: Hikvision's **video container and index records are decoded from
 real media** (`spec_only`: observed and cross-checked, not byte-matched to a
-Hikvision export). The full-filesystem parser in `parsers/hikvision.py`,
-written before we held media, stays `synthetic_only`.
+Hikvision export). The full-filesystem parser in `parsers/hikvision.py` now
+reads that same observed layout (`spec_only`), but has not yet been run on an
+intact disk a Hikvision recorder formatted itself.
 
 ## 4. Honeywell
 
