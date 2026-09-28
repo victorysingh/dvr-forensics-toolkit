@@ -58,7 +58,7 @@ python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, p
 python cli.py prove  --out out/CASE-001 --offset 8388608
 python cli.py validate-export --export clip.dav --against out/REF-001/clips --out out/REF-001
 
-python tests/test_pipeline.py               # 351 regression tests, no hardware
+python tests/test_pipeline.py               # 357 regression tests, no hardware
 python cli.py ewf-info --image case.E01 --verify   # any command also takes an .E01
 python -m validate.realmedia --case1 out/CASE-001 --image1 head.dd   # every real-media check
 python demo/tamper_demo.py                  # tamper detection, end to end
@@ -112,6 +112,7 @@ demo/      tamper_demo.py
 | Partition parsing (MBR/GPT) | working |
 | Hikvision FS parser | working, `synthetic_only` |
 | Honeywell NVR (plugin, from Yoon & Hwang 2026) | working, `spec_only` (no Honeywell media) |
+| HeimVision DVR (plugin, read off the NIST CFReDS image) | working on that real image, `spec_only` |
 | Dahua DHFS 4.1 parser + extract | working on real media, `spec_only` |
 | Indexless carver, inline in the scan | working on real media, `spec_only` |
 | MPEG-PS carver (Hikvision video, dated) | working on real media, `spec_only` |

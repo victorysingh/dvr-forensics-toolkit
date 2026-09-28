@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 351 tests, all should pass
+python tests/test_pipeline.py     # 357 tests, all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -92,6 +92,7 @@ If those pass, the engine below is intact:
 | Synthetic DVR image generator | `tests/synth_dvr.py` | working |
 | Vendor parser plugin SDK (field provenance) | `parsers/base.py` | working |
 | Hikvision filesystem parser | `parsers/hikvision.py` | working, `synthetic_only` |
+| HeimVision DVR (drop-in plugin, read off the NIST CFReDS K9604-W image; E01 reader verified on it) | `plugins/heimvision.py` | working on real media, `spec_only` |
 | Honeywell NVR (drop-in plugin, from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) | `plugins/honeywell.py` | working on a disk built to the paper, `spec_only` |
 | **Dahua DHFS 4.1 parser + per-camera extract** | `parsers/dahua.py` | **working on real media, `spec_only`** — see `docs/DAHUA_DHFS.md` |
 | Remnants of overwritten footage (Dahua) | `parsers/dahua.py` | working, `spec_only` |

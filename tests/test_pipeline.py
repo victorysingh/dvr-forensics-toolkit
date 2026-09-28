@@ -652,6 +652,61 @@ def test_carver(tmp: str) -> None:
                   and carver.to_recording(biggest).state == "fragment")
 
 
+def test_heimvision(tmp: str) -> None:
+    """The HeimVision plugin (layout observed on the NIST CFReDS K9604-W
+    image) against a disk built to it: FAT32 read by its cluster chains,
+    cameras named by the frames, the recorder's zone measured, extraction
+    exact across a fragmented file.  Also pinned to the real image when
+    HEIMVISION_E01 points at it."""
+    print("\n[HeimVision plugin (observed on the NIST CFReDS image)]")
+    from tests import synth_heimvision as SV
+    import importlib
+    hv = importlib.import_module("ps26150_plugin_heimvision")
+
+    img = os.path.join(tmp, "heimvision.img")
+    truth = SV.build(img)
+    p = get_parser("HeimVision")
+    with BlockDevice(img) as dev:
+        found = p.detect(dev)
+        res = p.parse(dev)
+    v = res.volume
+    check("detected; written files told from pre-allocated ones; status spec_only, observed",
+          found and v["files"] == 4 and v["files_written"] == 3 and v["ident"] == "ok1ormated"
+          and res.validation_status == "spec_only"
+          and all(f["source"] == "observed_real_media" for f in res.field_provenance), str(v))
+    check("the recorder's zone measured from its own FAT clock: UTC-8, on every file",
+          v["recorder_zone_minutes"] == -480 and v["recorder_zone_agreement"] == "3/3 files")
+    check("one recording per camera, spanning the files, from the frame times",
+          [r.camera_id for r in res.recordings] == ["CH01", "CH02", "CH03", "CH04"]
+          and res.recordings[0].start_utc == "2021-08-04T13:59:51Z", str([r.id for r in res.recordings]))
+    with BlockDevice(img) as dev:
+        st = p.extract_recording(dev, "hv-ch03-0000", os.path.join(tmp, "hv_c3"))
+    out = open(os.path.join(tmp, "hv_c3.h265"), "rb").read()
+    check("a camera's video extracted exactly, across a fragmented file, audio left out",
+          out == b"".join(truth["video"][2]) and st["frames"] == 36 and st["keyframes"] == 6
+          and st["audio_frames_skipped"] == 12, str(st))
+    bad = bytearray(SV.frame(2, 1, 0, 0, b"x"))
+    bad[124:128] = b"XXXX"
+    check("a frame header is believed only with both magics and sane fields",
+          hv.frame_header(bytes(bad)) is None and hv.frame_header(SV.frame(2, 1, 0, 0, b"x"))
+          and hv.frame_header(SV.frame(9, 1, 0, 0, b"x")) is None)
+    with BlockDevice(os.path.join(tmp, "honeywell.img")) as dev:
+        check("another vendor's GPT disk is not taken for HeimVision", not p.detect(dev))
+
+    path = os.environ.get("HEIMVISION_E01")
+    if not path:
+        print("  [real image] skipped - set HEIMVISION_E01 to the CFReDS K9604-W .E01")
+        return
+    with BlockDevice(path) as dev:
+        real = get_parser("HeimVision").parse(dev)
+    rv = real.volume
+    check("real image: 806 of 17,152 files written, 4 cameras, 24 h, recorder at UTC-8",
+          rv["files"] == 17152 and rv["files_written"] == 806 and len(real.recordings) == 4
+          and rv["span_utc"] == ("2021-08-04T13:59:51Z", "2021-08-05T14:00:01Z")
+          and rv["recorder_zone_minutes"] == -480 and rv["recorder_zone_agreement"] == "806/806 files",
+          str(rv.get("summary")))
+
+
 def test_dahua_real_media() -> None:
     """Pins the parser to what was observed on the real SkyHawk disk.  Runs
     only when DHFS_REAL_IMAGE points at the partial image (never committed)."""
@@ -2652,6 +2707,7 @@ def main() -> int:
         test_ewf(tmp)
         test_parallel_taps(tmp)
         test_case_export(tmp)
+        test_heimvision(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

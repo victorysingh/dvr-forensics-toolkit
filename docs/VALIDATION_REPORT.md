@@ -18,9 +18,9 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 359 pass, 0 fail: 351 on generated data with known ground truth, 8 on real media |
+| Automated tests | 366 pass, 0 fail: 357 on generated data with known ground truth, 9 on real media (8 on the CP Plus drive's image, 1 on the HeimVision E01) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
-| E01 reader | a generated E01 set (19 segments, compressed and stored chunks) reads back byte-identical; scan and carve of it equal the raw image's (MD5, SHA-256, Merkle root, streams); a damaged chunk is reported unreadable. On a real E01, `ewf-info --verify` against the image's own stored MD5 is the test - not yet run |
+| E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
@@ -32,7 +32,7 @@ Two different things are validated here, and they must not be confused:
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
-| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container and index records `spec_only`, full-filesystem parser `synthetic_only` |
+| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container and index records `spec_only`, full-filesystem parser `synthetic_only`; HeimVision `spec_only`, observed on a third real image (§8e) |
 
 ## 2. Environment
 
@@ -313,6 +313,57 @@ Stream with Hikvision `HK` stream-map descriptors.
 | Labels vs the picture | two decoded frames: burned-in "Camera 01" / "28-07-2024 08:19:42" where the index gave CH01 and the `HK` time 08:19:41; "Camera 03" / "22-07-2023 11:28:55" where it gave CH03 and 11:28:53 |
 | Analytics (subset of 50 streams, 22 GB) | 68,639 frames: person 517, face 73, bus 1. The two strongest "faces" (0.997, 0.978) were a floor and buckets; the "person" beside the first looks like a dog. 64 face boxes spanning most of the frame are now flagged implausible and not counted |
 
+## 8e. Third real image: a recorder we had never seen (HeimVision K9604-W)
+
+The NIST CFReDS *Heimvision DVR .E01 Forensic Image* (Brunty & Mock, Marshall University, 2021): a HeimVision K9604-W 4-channel DVR's 150 GB disk, FTK Imager 4.3.1.1, media MD5 `4895ea6d10b08c29fb1bb03591adc7b2`. Not one of the eight PS vendors - which is the point: the
+add-a-vendor route (detect -> survey -> plugin) tried on a real disk.
+
+**The image checks the reader.** `ewf-info --verify` read all 150,039,945,216
+bytes (3 segments, 4,578,856 chunks, 4,546,985 compressed) through
+`acquire/ewf.py`: computed MD5 `4895ea6d10b08c29fb1bb03591adc7b2` and SHA-1
+`06f48890961187979ed4142ceab8a7144bd4dfea`, **both equal to what FTK Imager
+recorded**. The E01 reader is therefore validated on a real third-party image.
+
+**What the disk holds** (read off it, then implemented as
+`plugins/heimvision.py`): GPT; partition 1 ext3 (`search.db`, `dvr_log.db`);
+partition 2 FAT32 by `mkdosfs` with `ident.bin` ("ok1ormated"), `index.bin`,
+and a pre-allocated ring of **17,152 files of 8 MiB** (`dirNNNNN/fileNNNN.dat`).
+Each file opens with a 0x2080-byte header (magic `luo `, Unix start and end,
+per-channel times); then a chain of frames, each with a 128-byte header
+`liu ` ... ` uil` whose length field reaches the next header exactly on all
+9,679 frames of the first file. The header names the **camera** (+0x2C), the
+frame type (1 I, 2/3 P, 0 audio - G.711 A-law), a per-camera sequence, and a
+**microsecond** Unix time. Unlike Dahua, footage is attributable per camera
+with no index.
+
+**What was recorded:** 806 of the 17,152 files - 6.30 GB, one continuous day
+on all four cameras:
+
+| Camera | Video frames | Keyframes | First -> last frame (UTC, frame clock) | Rate | Gaps > 2 s |
+|---|---|---|---|---|---|
+| CH01 | 1,296,146 | 8,609 | 2021-08-04 13:59:51.443 -> 2021-08-05 14:00:01.172 | 15.000 fps | 0 |
+| CH02 | 1,296,105 | 8,619 | 2021-08-04 13:59:43.517 -> 2021-08-05 14:00:01.292 | 14.998 fps | 1 (8.0 s, at the start) |
+| CH03 | 1,296,121 | 8,602 | 2021-08-04 13:59:43.604 -> 2021-08-05 14:00:01.208 | 14.998 fps | 1 (8.0 s, at the start) |
+| CH04 | 1,295,950 | 8,449 | 2021-08-04 13:59:43.126 -> 2021-08-05 14:00:01.268 | 14.996 fps | 1 (7.6 s, at the start) |
+
+- Frame counts check themselves: 86,410 s at 15 fps is 1,296,150 frames;
+  CH01 has 1,296,146.
+- **The recorder's clock zone, measured on the disk:** on all 806 files the
+  FAT write time (the recorder's local clock) is exactly 8 h behind the file's
+  Unix end time - the recorder was set to UTC-8, although Marshall University
+  is at UTC-4 in August. An examiner would have to report exactly this.
+- **Not explained:** CH02-CH04 each have frames ~8 s before recording began
+  (consistent with a pre-record buffer - not established); ~300 frames per
+  camera (0.02%) carry a time earlier than the frame before them; header
+  fields +0x4C/+0x50/+0x54, `index.bin`, and ext3's `search.db` / `dvr_log.db`
+  are undecoded.
+- Camera 1 extracted: 403.26 MB of H.265, 1,296,146 frames, SHA-256
+  `0afab158218c9bf0...` (full value in its manifest).
+
+**Status:** `spec_only` - observed on real media, not byte-matched against a
+HeimVision export. `tests/test_pipeline.py` pins these numbers when
+`HEIMVISION_E01` points at the image.
+
 ## 8c. OSD reader (optional layer — never yet run on a rendered frame)
 
 `cli.py read-osd` reads the burned-in channel title and clock, which is the
@@ -359,6 +410,7 @@ timezone has been read off the unit (§10).
 | Hikvision — video container | `spec_only` | MPEG-PS + `HK` descriptors decoded from real footage and cross-checked; not byte-matched to a Hikvision export |
 | Hikvision — index records | `spec_only` | decoded from the surviving HIKBTREE copies on real media and cross-checked (resolution per camera, hours per camera, 99.6% recovered vs recorded); not byte-matched to an export |
 | Hikvision — full-filesystem parser (`parsers/hikvision.py`) | `synthetic_only` | written before we held media; its master-sector layout is still fixture-only |
+| HeimVision (K9604-W) | `spec_only` | `plugins/heimvision.py`, read off the NIST CFReDS image (§8e); every field observed on real media; not byte-matched to a HeimVision export |
 | Honeywell | `spec_only` | `plugins/honeywell.py`, written from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430); tested on a disk built to the paper's description (10 tests, including recovery after a format); no Honeywell disk read |
 | TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand-string detection only; their video is recoverable by `carve-annexb` without a parser |
 

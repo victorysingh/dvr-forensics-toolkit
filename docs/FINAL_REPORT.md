@@ -20,8 +20,8 @@ format. We built a vendor-agnostic tool that:
   per-block Merkle map;
 - identifies the vendor by scored evidence and the recorder model from the
   disk and the unit;
-- parses Dahua/CP Plus and Hikvision structures, and Honeywell's from
-  published research;
+- parses Dahua/CP Plus and Hikvision structures, HeimVision's (read off a
+  public NIST image), and Honeywell's from published research;
 - recovers deleted footage without an index, including from a drive that
   another recorder had reformatted;
 - builds a timeline that refuses to invent a time zone;
@@ -36,6 +36,12 @@ It was run on two real 1 TB surveillance drives:
   about 6,300 hours of Hikvision footage**, attributed to cameras from a
   surviving index. The carve recovered **99.6–99.7%** of what that index says
   each camera recorded.
+
+- **A third, public image (NIST CFReDS HeimVision K9604-W, 150 GB E01):** our
+  E01 reader reproduced FTK Imager's MD5 and SHA-1; a new plugin, built from
+  the disk itself, recovered **24 hours on 4 cameras**, each frame naming its
+  camera and microsecond time, and measured the recorder's zone (UTC-8) from
+  its own FAT clock.
 
 No vendor format is yet `validated`. That status needs a byte-match against
 the recorder's own export; the tool to make it is built, and the export is
@@ -121,6 +127,17 @@ Sources: `STATUS.md` §2, `VALIDATION_REPORT.md` §8b.
 | Measured against that index | the carve recovered **99.6–99.7%** of the hours each camera recorded |
 | Checked against the picture | burned-in "Camera 01" / "Camera 03" where the index gave CH01 / CH03; on-screen clocks within 2 s of the decoded times |
 | Analytics (leads) | 68,639 frames of a 22 GB subset: person 517, face 73, bus 1; 64 implausible face boxes (a floor, buckets) flagged and not counted |
+
+### 4.3 A public image of a recorder we had never seen (HeimVision K9604-W)
+
+Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forensic Image* (Brunty & Mock, Marshall University, 2021): a HeimVision K9604-W 4-channel DVR's 150 GB disk, FTK Imager 4.3.1.1, media MD5 `4895ea6d10b08c29fb1bb03591adc7b2`.
+
+| | |
+|---|---|
+| E01 | read by our own reader; computed MD5 and SHA-1 **equal FTK Imager's** over all 150 GB |
+| Layout | GPT; ext3 system partition; FAT32 ring of 17,152 files of 8 MiB; frames `liu ` ... ` uil` naming camera and microsecond time - decoded from the disk, now `plugins/heimvision.py` |
+| Recorded | 806 files, 6.30 GB: **24 h continuous on 4 cameras**, 1.296 M frames each at 15 fps, no gap over 2 s after the start |
+| Time | the recorder's FAT clock is 8 h behind its frame times on all 806 files: set to UTC-8 in a UTC-4 location |
 
 ## 5. Validation
 
@@ -215,10 +232,12 @@ Three findings go beyond the published work:
 | Dahua | `spec_only` | DHFS 4.1 and DHAV read off real media (the CP Plus drive) |
 | CP Plus | `spec_only` | the same format on our unit; CP Plus listed as a current Dahua OEM (IPVM, May 2024) |
 | Hikvision | container and index `spec_only`; full-FS parser `synthetic_only` | real footage and a surviving index on drive 2 |
+| HeimVision (beyond the eight) | `spec_only` | read off a real public NIST image; drop-in plugin |
 | Honeywell | `spec_only` | drop-in plugin from Yoon & Hwang (DFRWS USA 2026); older units were Dahua-built until April 2022, so the Dahua parser may apply |
 | TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand strings and model numbering; video recoverable with no parser by `carve-annexb`; sourced first answers in `OEM_COMPARISON.md` §5.1 |
 
-**Three vendors are read from real media and one from published research;
+**Four platforms are read from real media (three of the eight, plus
+HeimVision from a public NIST image) and one more from published research;
 all eight are detected; and footage can be recovered from any vendor that
 stores standard H.264/H.265.** That is our honest answer to "five to six".
 
