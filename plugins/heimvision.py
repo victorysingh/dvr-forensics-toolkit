@@ -17,7 +17,8 @@ LAYOUT
     recorder's own files, read by `parsers/ext3.py`:
       - dvr_log.db (SQLite): dvr_log(id, type, write_time, log_content) -
         the event log: "reload environment.", "Rec begin N,type:1",
-        "Rec stop N"; write_time in Unix UTC;
+        "Rec stop N"; write_time in seconds on the recorder's display
+        clock (see TIME);
       - search.db (SQLite): SEARCH, one row per camera-hour (session_rnd,
         channel, frame_count, frame_total_size, start/end time, first and
         last folder/file); DETAIL, one row per .dat file (folder, file,
@@ -28,8 +29,8 @@ LAYOUT
     `dirNNNNN/fileNNNN.dat`, 128 to a folder.
   * index.bin: one byte per file slot, in FAT order - 'x' for a completed
     file, 'u' otherwise (the file still open when recording stopped is 'u').
-  * A .dat file starts with a 0x2080-byte header, magic "luo ": Unix start
-    and end (u32 +4, +8), then per channel (4): the first frame's offset
+  * A .dat file starts with a 0x2080-byte header, magic "luo ": start and
+    end (u32 +4, +8), then per channel (4): the first frame's offset
     (+0x0C..), start time (+0x8C..), a size (+0x10C..), end time (+0x18C..).
   * Then a chain of frames.  Each has a 128-byte header, "liu " ... " uil",
     and the next header is exactly header + 128 + length:
@@ -39,7 +40,7 @@ LAYOUT
         +0x18 codec tag "H265"             +0x24 type: 1 I, 2/3 P, 0 audio
         +0x28 camera number (channel + 1)  +0x2C channel, 0-based
         +0x34 per-channel sequence         +0x3C payload length
-        +0x40 u64 microseconds (Unix)      +0x48 u32 Unix seconds (the same)
+        +0x40 u64 microseconds             +0x48 u32 seconds (the same)
         +0x4C 0 on I-frames, 1 on P-frames
         +0x50 / +0x54 file offset of an earlier frame's video payload - the
               same camera's / any camera's, 0-2 s back; what they are for
@@ -54,13 +55,18 @@ index.
 
 TIME
 ----
-Frame headers hold Unix times; FAT directory entries hold the recorder's
-local wall clock.  Their difference on the same file is the recorder's zone
-setting as it applied then - measured per case and reported, never assumed.
-A second, independent measurement: the ext3 inode times (the recorder's
-kernel clock) of dvr_log.db and search.db against the last UTC time each
-database records.  Both are the recorder's own clocks; the error of its
-clock against true time is measured by neither.
+Every time field above (file and frame headers, dvr_log.db, search.db) is
+seconds since 1970 on the recorder's DISPLAY clock - the time it paints on
+the picture: the first keyframe of CH01 shows "2021/08/04 13:59:53" where
+its frame header gives 13:59:53.  They are recorder-local wall-clock time
+written as if it were UTC, not UTC.  The recorder's system clock is a second
+clock: it stamps the FAT directory entries and the ext3 inode times, and on
+the real image it runs exactly 8 h behind the display clock (806/806 files;
+dvr_log.db and search.db alike).  The display clock is the system clock plus
+the recorder's zone setting, so that setting is UTC+8 - measured twice,
+reported, never applied.  Whether either clock was right is not on the disk:
+the image was made at Marshall University (US Eastern time), so UTC needs
+the examiner's zone and clock error (`--tz-offset`), as for every vendor.
 
 THE RECORDER'S OWN RECORDS ARE CHECKED, NOT TRUSTED
 ---------------------------------------------------
@@ -105,8 +111,8 @@ MAX_PAYLOAD = 8 << 20
 
 FIELDS = [FieldSpec(n, o, f, d, SOURCE_OBSERVED, IMAGE) for n, o, f, d in (
     ("file.magic", 0x00, "magic", "'luo '"),
-    ("file.start", 0x04, "<I", "Unix start"),
-    ("file.end", 0x08, "<I", "Unix end"),
+    ("file.start", 0x04, "<I", "start, seconds on the recorder's display clock (local)"),
+    ("file.end", 0x08, "<I", "end, seconds on the recorder's display clock (local)"),
     ("file.ch_start", 0x8C, "<4I", "per-channel start"),
     ("file.ch_end", 0x18C, "<4I", "per-channel end"),
     ("frame.magic", 0x00, "magic", "'liu ' ... ' uil' at +124"),
@@ -114,28 +120,44 @@ FIELDS = [FieldSpec(n, o, f, d, SOURCE_OBSERVED, IMAGE) for n, o, f, d in (
     ("frame.channel", 0x2C, "<I", "0-based channel"),
     ("frame.sequence", 0x34, "<I", "per-channel sequence"),
     ("frame.length", 0x3C, "<I", "payload length; next header follows it"),
-    ("frame.time_us", 0x40, "<Q", "Unix microseconds"),
+    ("frame.time_us", 0x40, "<Q", "microseconds on the recorder's display clock (local); "
+                                  "equals the clock painted on the picture"),
     ("frame.width", 0x08, "<I", "video width"),
     ("frame.height", 0x0C, "<I", "video height"),
     ("frame.segment", 0x04, "<I", "the recorder's camera-hour segment: search.db SEARCH.session_rnd"),
     ("frame.camera_number", 0x28, "<I", "channel + 1"),
-    ("frame.second", 0x48, "<I", "Unix seconds, equal to time_us // 10**6"),
+    ("frame.second", 0x48, "<I", "seconds, equal to time_us // 10**6"),
     ("frame.not_key", 0x4C, "<I", "0 on I-frames, 1 on P-frames"),
     ("frame.earlier_own", 0x50, "<I", "file offset of an earlier video payload, same camera; "
                                       "purpose not established"),
     ("frame.earlier_any", 0x54, "<I", "file offset of an earlier video payload, any camera; "
                                       "purpose not established"),
     ("index.bin", 0x00, "bytes", "one byte per file slot, in FAT order: 'x' complete, 'u' not"),
-    ("ext3:dvr_log.db", 0x00, "sqlite", "dvr_log(id, type, write_time UTC, log_content)"),
+    ("ext3:dvr_log.db", 0x00, "sqlite", "dvr_log(id, type, write_time recorder-local, "
+                                        "log_content)"),
     ("ext3:search.db", 0x00, "sqlite", "SEARCH per camera-hour; DETAIL(folder, file, fs_index, "
                                        "start_time, end_time) per file"),
 )]
 SYSTEM_FILES = ("dvr_log.db", "search.db", "pbversion", "manual_rec_status.bin")
 
 
-def _utc(t: float) -> Optional[str]:
+def _local(t: float) -> Optional[str]:
+    """A display-clock value as 'YYYY-MM-DD HH:MM:SS' recorder-local.  The
+    recorder writes local time as if it were UTC, so decoding it as UTC gives
+    the local wall-clock reading, not UTC."""
     try:
-        return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _utc(t: float, tz_offset_min: Optional[int]) -> Optional[str]:
+    """UTC for a display-clock value, only with the zone the examiner states."""
+    if tz_offset_min is None:
+        return None
+    try:
+        return datetime.fromtimestamp(t - tz_offset_min * 60, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
     except (OverflowError, OSError, ValueError):
         return None
 
@@ -316,9 +338,10 @@ def _slot(path: str) -> tuple[int, int]:
     return int(d[3:]), int(f[4:8])
 
 
-def _zone(local_raw: int, utc: int) -> int:
-    """Minutes from UTC of a local clock, to the nearest quarter hour."""
-    return round((local_raw - utc) / 900) * 15
+def _zone(display: int, system: int) -> int:
+    """The recorder's zone setting: minutes its display clock runs ahead of its
+    system clock, to the nearest quarter hour."""
+    return round((display - system) / 900) * 15
 
 
 @register
@@ -326,8 +349,11 @@ class HeimVisionParser(VendorParser):
     vendor = "HeimVision"
     parser_rule = "heimvision.k9604.observed.v1"
 
-    def __init__(self):
+    def __init__(self, tz_offset_min: Optional[int] = None):
         self.recording_files: dict[str, list[dict]] = {}
+        # The zone stated by the examiner (`--tz-offset`); without it, times
+        # stay recorder-local and start_utc is left empty.
+        self.tz_offset_min = tz_offset_min
 
     def _fat(self, dev) -> Optional[Fat32]:
         parts = [p for p in parse_partitions(dev.read_at(0, 64 << 10),
@@ -379,11 +405,12 @@ class HeimVisionParser(VendorParser):
         ident = dev.read_at(fat.cluster(root["IDENT.BIN"]["cluster"]), 16).rstrip(b"\x00")
         files = self._files(dev, fat)
         written = sorted((f for f in files if "start" in f), key=lambda f: f["start"])
-        # The recorder's zone setting: FAT write time (local) minus the file's
-        # Unix end time, over every written file.
-        offs = [round(((f["written"] - datetime.fromtimestamp(f["end"], tz=timezone.utc)
-                        .replace(tzinfo=None)).total_seconds()) / 900) * 15
+        # The recorder's zone setting: the file's end on the display clock
+        # minus its FAT write time (the system clock), over every written file.
+        offs = [round(((datetime.fromtimestamp(f["end"], tz=timezone.utc).replace(tzinfo=None)
+                        - f["written"]).total_seconds()) / 900) * 15
                 for f in written if f.get("written") and f.get("end")]
+        tz = self.tz_offset_min
         zone = Counter(offs).most_common(1)[0] if offs else None
         runs: dict[int, list[list[dict]]] = {c: [] for c in range(CHANNELS)}
         for f in written:
@@ -405,18 +432,24 @@ class HeimVisionParser(VendorParser):
                 size = sum(n for f in group for _, n in f["extents"])
                 result.recordings.append(Recording(
                     id=rid, camera_id=f"CH{c + 1:02d}", state=STATE_ACTIVE, codec="h265",
-                    offset=ext0[0], length=size, start_utc=_utc(s), end_utc=_utc(e),
+                    offset=ext0[0], length=size, start_utc=_utc(s, tz), end_utc=_utc(e, tz),
                     duration_s=float(e - s), confidence=0.6,
                     timestamps=[TimestampClaim(
-                        source="container", raw_value=f"{s}", decoded_utc=_utc(s),
-                        confidence=0.6, decode_rule="Unix seconds from the .dat header; the "
-                        "recorder's clock, error not measured")],
+                        source="container", raw_value=f"{v} = {_local(v)} recorder-local",
+                        decoded_utc=_utc(v, tz), tz_offset_min=tz, confidence=0.6,
+                        decode_rule=f".dat header per-channel {k} +0x{o:X}: seconds on the "
+                        "recorder's display clock (as painted on the picture); clock error "
+                        "not measured" + ("" if tz is not None else "; zone not stated, "
+                                          "not converted"))
+                        for v, k, o in ((s, "start", 0x8C + 4 * c), (e, "end", 0x18C + 4 * c))],
                     provenance=Provenance(disk_offset=ext0[0], length=size,
                                           sector_start=ext0[0] // 512,
                                           sector_end=(ext0[0] + size) // 512,
                                           parser_rule=self.parser_rule)))
         result.indexed_extents = [e for f in written for e in f["extents"]]
-        span = (_utc(written[0]["start"]), _utc(written[-1]["end"])) if written else (None, None)
+        ends = (written[0]["start"], written[-1]["end"]) if written else None
+        span = tuple(_local(t) for t in ends) if ends else (None, None)
+        span_utc = tuple(_utc(t, tz) for t in ends) if ends else (None, None)
 
         # The recorder's own records - read, then checked against the files.
         system, system_error = {}, None
@@ -461,16 +494,18 @@ class HeimVisionParser(VendorParser):
         sysfiles = system.get("files", {})
         ext_zone = {}
         if log and "dvr_log.db" in sysfiles:
-            ext_zone["dvr_log.db"] = _zone(sysfiles["dvr_log.db"]["mtime_raw"], max(r[2] for r in log))
+            ext_zone["dvr_log.db"] = _zone(max(r[2] for r in log), sysfiles["dvr_log.db"]["mtime_raw"])
         if detail and "search.db" in sysfiles:
-            ext_zone["search.db"] = _zone(sysfiles["search.db"]["mtime_raw"], max(r[4] for r in detail))
+            ext_zone["search.db"] = _zone(max(r[4] for r in detail), sysfiles["search.db"]["mtime_raw"])
         result.volume = {
             "vendor": self.vendor, "fat32_oem": fat.oem, "ident": ident.decode("ascii", "replace"),
-            "files": len(files), "files_written": len(written), "span_utc": span,
+            "files": len(files), "files_written": len(written),
+            "span_local": span, "span_utc": span_utc, "tz_offset_min": tz,
+            # measured, not applied: display clock minus system clock
             "recorder_zone_minutes": zone[0] if zone else None,
             "recorder_zone_agreement": f"{zone[1]}/{len(offs)} files" if zone else None,
             "recorder_zone_minutes_ext3": ext_zone,
-            "recorder_log": [{"id": i, "type": t, "time_utc": _utc(w), "text": x}
+            "recorder_log": [{"id": i, "type": t, "time_local": _local(w), "text": x}
                              for i, t, w, x in log],
             "recorder_log_unbroken": log_unbroken,
             "recorder_index": {"files_listed": len(detail), "files_matching_headers": listed_ok,
@@ -487,16 +522,22 @@ class HeimVisionParser(VendorParser):
                 ("FAT32", f"{fat.oem}, {fat.csize} B clusters, data at 0x{fat.data:X}"),
                 ("ident.bin", repr(ident.decode('ascii', 'replace'))),
                 ("files", f"{len(written)} written of {len(files)} pre-allocated .dat files"),
-                ("recorded", f"{span[0]} -> {span[1]} (frame Unix times)"),
-                ("zone", (f"FAT times are UTC{zone[0] / 60:+.2g}h from the frame times on "
-                          f"{zone[1]} of {len(offs)} files - the recorder's zone setting")
-                         if zone else "not measured"),
+                ("recorded", f"{span[0]} -> {span[1]} recorder-local (the clock painted on "
+                             f"the picture)"),
+                ("UTC", f"{span_utc[0]} -> {span_utc[1]} (zone {tz:+d} min as stated; clock "
+                        f"error not measured)" if tz is not None else
+                        "not stated - pass --tz-offset once the zone and clock error are "
+                        "established"),
+                ("zone setting", (f"UTC{zone[0] / 60:+.2g}h: the display clock runs "
+                                  f"{zone[0] / 60:+.2g}h from the system clock (FAT times) on "
+                                  f"{zone[1]} of {len(offs)} files - measured, not applied")
+                                 if zone else "not measured"),
                 ("recordings", f"{len(result.recordings)} across {CHANNELS} channels"),
             ("recorder log",
              (f"dvr_log.db: {len(log)} entries, ids "
               f"{'unbroken' if log_unbroken else 'with gaps'}; "
-              f"'Rec begin' {_utc(min(begun.values()))} on {len(begun)} cameras; "
-              f"last {_utc(log[-1][2])} '{log[-1][3]}'")
+              f"'Rec begin' {_local(min(begun.values()))} on {len(begun)} cameras; "
+              f"last {_local(log[-1][2])} '{log[-1][3]}' (recorder-local)")
              if log and begun else (system_error or "not found")),
             ("before 'Rec begin'", ", ".join(f"CH{c + 1:02d} {s:.1f} s" for c, s in
                                              sorted(before_begin.items()) if s > 0) or "none"),
@@ -510,14 +551,21 @@ class HeimVisionParser(VendorParser):
              f"{', '.join(index_bin['written_not_complete']) or 'none'}; marked but not "
              f"written: {', '.join(index_bin['complete_not_written']) or 'none'}"),
             ("zone, again", ", ".join(f"{n}: UTC{m / 60:+.2g}h" for n, m in ext_zone.items())
-             + " - ext3 file times (the recorder's kernel clock) against the log's own UTC"
+             + " - the databases' own last times against their ext3 file times (the "
+               "system clock)"
              if ext_zone else "not measured"),
             ]}
         result.notes = [
             f"Layout read off real media: {IMAGE}. spec_only until byte-matched against a "
             "HeimVision export.",
-            "Frame headers name the camera (0-based channel at +0x2C) and carry Unix "
-            "microseconds, so footage is attributed without the index.",
+            "Frame headers name the camera (0-based channel at +0x2C) and carry microsecond "
+            "times, so footage is attributed without the index.",
+            "Times are the recorder's display clock - local wall-clock time, equal to the "
+            "clock painted on the picture - written as if UTC; they are not UTC.  Its system "
+            "clock (FAT and ext3 times) runs behind it by the zone setting, reported above and "
+            "never applied." + ("" if tz is not None else
+                                " start_utc is left empty: pass --tz-offset (minutes) once "
+                                "the zone and the clock's error are established."),
             "The recorder's own records are read and checked, never trusted: its event log "
             "and index (ext3, partition 1) and index.bin are compared with the files, and "
             "every disagreement is reported.",
@@ -559,5 +607,7 @@ class HeimVisionParser(VendorParser):
         return {"file": os.path.basename(path), "sha256": sha256_file(path),
                 "bytes": os.path.getsize(path), "frames": frames, "keyframes": keys,
                 "audio_frames_skipped": audio, "files_read": len(group),
-                "first_time_utc": _utc(first / 1e6) if first else None,
-                "last_time_utc": _utc(last / 1e6) if last else None}
+                "first_time_local": _local(first / 1e6) if first else None,
+                "last_time_local": _local(last / 1e6) if last else None,
+                "first_time_utc": _utc(first / 1e6, self.tz_offset_min) if first else None,
+                "last_time_utc": _utc(last / 1e6, self.tz_offset_min) if last else None}

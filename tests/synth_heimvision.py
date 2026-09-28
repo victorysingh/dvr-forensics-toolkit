@@ -9,13 +9,14 @@ What it builds: a GPT disk; partition 2 FAT32 with ident.bin, index.bin
 and dir00000 holding FILE0000..FILE0003.DAT.  Files 0-2 hold interleaved
 frames of 4 cameras (video and audio), file 3 is pre-allocated and never
 written, and file 1's clusters are FRAGMENTED so the cluster chain has to be
-followed.  FAT write times are the files' Unix end times minus 8 hours, as
-on the real disk.
+followed.  Header and frame times are the recorder's display clock (local
+time written as if UTC); FAT write times are its system clock, 8 hours
+behind (the zone setting, UTC+8), as on the real disk.
 
 Partition 1 (unless system=False) is a small ext2 holding the recorder's own
 files as on the real disk - dvr_log.db and search.db (real SQLite, the real
 schemas), pbversion - plus pad.bin, long enough to need an indirect block.
-Their inode times are the recorder's local clock (UTC-8).  Three faults are
+Their inode times are the system clock too (display - 8 h).  Three faults are
 planted for the checks to find: search.db gives FILE0002 an end 5 s later
 than its header does; the log's 'Rec begin' for CH02 is 2 s after its first
 frame; index.bin marks FILE0002 (written) as not complete.
@@ -36,8 +37,8 @@ CLUSTER = SECTOR * SPC
 FILE_SIZE = 64 << 10                 # clusters per file: 16
 P1_LBA, P2_LBA = 2048, 4096
 RSV, FATSZ = 32, 16                  # reserved sectors, sectors per FAT (2048 entries)
-T0 = 1628085591                      # 2021-08-04 13:59:51 UTC, as on the real disk
-ZONE_H = -8
+T0 = 1628085591                      # 2021-08-04 13:59:51 on the display clock, as on the real disk
+ZONE_H = 8                           # display clock = system clock + zone setting
 
 
 def _gpt(total_sectors: int, parts: list[tuple[int, int]]) -> bytes:
@@ -229,15 +230,15 @@ def build(path: str, seed: int = 9, system: bool = True) -> dict:
             o = data_at + (c - 2) * CLUSTER
             part[o:o + len(piece)] = piece
 
-    local = lambda u: datetime.fromtimestamp(u, tz=timezone.utc).replace(tzinfo=None) + timedelta(hours=ZONE_H)
+    sysclock = lambda u: datetime.fromtimestamp(u, tz=timezone.utc).replace(tzinfo=None) - timedelta(hours=ZONE_H)
     epoch = datetime(1980, 1, 1)
-    root = (_dirent(b"IDENT   BIN", 0x20, 4, 16, epoch) + _dirent(b"INDEX   BIN", 0x20, 5, 64, local(t))
-            + _dirent(b"DIR00000   ", 0x10, 3, 0, local(T0)))
+    root = (_dirent(b"IDENT   BIN", 0x20, 4, 16, epoch) + _dirent(b"INDEX   BIN", 0x20, 5, 64, sysclock(t))
+            + _dirent(b"DIR00000   ", 0x10, 3, 0, sysclock(T0)))
     put(chains["root"], root)
     put(chains["ident"], b"ok1ormated")
     put(chains["index"], b"xx" + b"u" * 62)     # FILE0002 written but not marked complete
     ents = b"".join(_dirent(f"FILE{k:04d}DAT".encode(), 0x20, chains[k][0], FILE_SIZE,
-                            local(truth["files"][k][1]) if k < 3 else epoch)
+                            sysclock(truth["files"][k][1]) if k < 3 else epoch)
                     for k in range(4))
     put(chains["dir"], ents)
     for k in range(4):
@@ -256,7 +257,7 @@ def build(path: str, seed: int = 9, system: bool = True) -> dict:
 
 def _system_partition(size: int, truth: dict, t_end: int) -> bytes:
     """The recorder's own files, as on the real disk's ext3 partition."""
-    local = lambda u: u + ZONE_H * 3600          # inode times: the recorder's local clock
+    sysclock = lambda u: u - ZONE_H * 3600       # inode times: the recorder's system clock
     log = [(2, T0 - 3565, "reload environment."), (2, T0 - 3558, "reload environment.")]
     log += [(3, T0 + (2 if c == 1 else 0), f"Rec begin {c},type:1") for c in range(4)]
     log += [(3, t_end, f"Rec stop {c}") for c in range(4)]
@@ -278,8 +279,8 @@ def _system_partition(size: int, truth: dict, t_end: int) -> bytes:
            for c in range(4)]
         + [("INSERT INTO DETAIL(folder, file, fs_index, start_time, end_time) VALUES (?, ?, ?, ?, ?)",
             (0, k, k, s, e + (5 if k == 2 else 0))) for k, (s, e) in enumerate(truth["files"])])
-    created = local(T0 - 3600)
+    created = sysclock(T0 - 3600)
     truth["log"] = log
-    return _ext2(size, [("search.db", search, local(t_end)), ("dvr_log.db", dvr_log, local(t_end)),
+    return _ext2(size, [("search.db", search, sysclock(t_end)), ("dvr_log.db", dvr_log, sysclock(t_end)),
                         ("pbversion", b"1.0.0.1", created), ("pad.bin", truth["pad"], created)],
                  created)
