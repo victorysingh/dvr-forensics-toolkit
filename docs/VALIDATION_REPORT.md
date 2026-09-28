@@ -352,18 +352,18 @@ recorded**. The E01 reader is therefore validated on a real third-party image.
 `plugins/heimvision.py`): GPT; partition 1 ext3 (`search.db`, `dvr_log.db`);
 partition 2 FAT32 by `mkdosfs` with `ident.bin` ("ok1ormated"), `index.bin`,
 and a pre-allocated ring of **17,152 files of 8 MiB** (`dirNNNNN/fileNNNN.dat`).
-Each file opens with a 0x2080-byte header (magic `luo `, Unix start and end,
+Each file opens with a 0x2080-byte header (magic `luo `, start and end on the display clock,
 per-channel times); then a chain of frames, each with a 128-byte header
 `liu ` ... ` uil` whose length field reaches the next header exactly on all
 9,679 frames of the first file. The header names the **camera** (+0x2C), the
 frame type (1 I, 2/3 P, 0 audio - G.711 A-law), a per-camera sequence, and a
-**microsecond** Unix time. Unlike Dahua, footage is attributable per camera
+**microsecond** time on the recorder's display clock (below). Unlike Dahua, footage is attributable per camera
 with no index.
 
 **What was recorded:** 806 of the 17,152 files - 6.30 GB, one continuous day
 on all four cameras:
 
-| Camera | Video frames | Keyframes | First -> last frame (UTC, frame clock) | Rate | Gaps > 2 s |
+| Camera | Video frames | Keyframes | First -> last frame (recorder-local, frame clock) | Rate | Gaps > 2 s |
 |---|---|---|---|---|---|
 | CH01 | 1,296,146 | 8,609 | 2021-08-04 13:59:51.443 -> 2021-08-05 14:00:01.172 | 15.000 fps | 0 |
 | CH02 | 1,296,105 | 8,619 | 2021-08-04 13:59:43.517 -> 2021-08-05 14:00:01.292 | 14.998 fps | 1 (8.0 s, at the start) |
@@ -372,15 +372,23 @@ on all four cameras:
 
 - Frame counts check themselves: 86,410 s at 15 fps is 1,296,150 frames;
   CH01 has 1,296,146.
-- **The recorder's clock zone, measured on the disk:** on all 806 files the
-  FAT write time (the recorder's local clock) is exactly 8 h behind the file's
-  Unix end time - the recorder was set to UTC-8, although Marshall University
-  is at UTC-4 in August. An examiner would have to report exactly this.
+- **The recorder's clocks, measured on the disk (corrected 29 Sep 2026):** the
+  frame times are the recorder's *display* clock, the one it paints on the
+  picture. CH01's keyframes 0, 43 and 86 show 13:59:53, 14:07:03 and 14:14:13
+  on screen, and their frame headers give the same seconds. So every time the
+  recorder writes (frames, file headers, its log and index) is local
+  wall-clock time written as if it were UTC. Its *system* clock, which stamps
+  the FAT entries, is exactly 8 h behind on all 806 files: the display clock
+  is the system clock plus a zone setting of **UTC+8**. This section first
+  said "set to UTC-8", reading the frame times as true UTC; the painted clock
+  shows that reading was wrong. Marshall University is at UTC-4 in August, so
+  whether the display clock was right is not on the disk: the parse reports
+  recorder-local times and states UTC only with the examiner's `--tz-offset`.
 - **The recorder's own records, read and checked against the disk**
   (partition 1 is ext3, read by `parsers/ext3.py`; `index.bin` is on the FAT):
   - `dvr_log.db`, its event log (SQLite): 194 entries, ids 1-194 unbroken, so
     none deleted. "reload environment." twice, 48 s after the partition was
-    made; "Rec begin" on all four cameras at 13:59:50-51 UTC; a stop and begin
+    made; "Rec begin" on all four cameras at 13:59:50-51 (recorder-local); a stop and begin
     per camera every hour; the last "Rec stop" at 14:00:01 the next day. No
     clock or zone change is logged.
   - `search.db`, its recording index (SQLite): all 806 files listed, **806 with
@@ -391,8 +399,8 @@ on all four cameras:
   - `index.bin`: one byte per file slot - `x` on 805; the one written file
     not marked is the last, still open when recording stopped.
 - **The zone, measured a second way:** the ext3 times of `dvr_log.db` and
-  `search.db` (the recorder's Linux clock) are 8 h behind the last UTC time
-  each database holds - UTC-8 again, from a different file system. Both
+  `search.db` (the recorder's system clock) are 8 h behind the last time
+  each database holds - UTC+8 again, from a different file system. Both
   measurements come from the recorder's own clocks; its error against true
   time is still unmeasured.
 - **Pre-record, now bounded:** the first video of CH02, CH03 and CH04 is 7.5,
