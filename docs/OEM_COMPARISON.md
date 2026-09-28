@@ -114,6 +114,22 @@ whether a NAL length counts the start code) instead of assuming it, and
 recovers timestamped footage from a formatted disk by walking the frame
 headers.
 
+## 4b. Beyond the eight: HeimVision (K9604-W), from a real public image
+
+The PS asks for "other commonly used platforms" as well. From the NIST CFReDS *Heimvision DVR .E01 Forensic Image* (Brunty & Mock, Marshall University, 2021): a HeimVision K9604-W 4-channel DVR's 150 GB disk, FTK Imager 4.3.1.1, media MD5 `4895ea6d10b08c29fb1bb03591adc7b2` -
+first-hand (**O**), in `plugins/heimvision.py`:
+
+| Aspect | Finding | Tag |
+|---|---|---|
+| Disk | GPT; ext3 system partition (`search.db`, `dvr_log.db`); FAT32 video partition made by `mkdosfs` (the recorder runs Linux) | O |
+| Storage | a pre-allocated ring of 8 MiB `.dat` files in `dirNNNNN/` (17,152 on 150 GB); `ident.bin` "ok1ormated"; `index.bin` | O |
+| File header | 0x2080 bytes, `luo `, Unix start/end, per-channel start/end | O |
+| Frames | 128-byte header `liu ` ... ` uil`, then the payload; the length field chains frames exactly | O |
+| Camera id in frames | **yes** - channel at +0x2C, with a per-camera sequence; no index needed to attribute | O |
+| Time | Unix microseconds per frame; FAT times in the recorder's local zone (UTC-8 on this unit) | O |
+| Codec | H.265 1920x1080 15 fps, GOP ~10 s; audio G.711 A-law | O |
+| Status | `spec_only` | |
+
 ## 4a. TP-Link, Godrej, Uniview, Matrix
 
 What the tool does today for each: recognise a brand string (`HONEYWELL`,
