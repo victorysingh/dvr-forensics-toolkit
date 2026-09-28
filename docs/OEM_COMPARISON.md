@@ -19,7 +19,8 @@ more certain than its tag.
 | **?** | unknown to us |
 
 The machine-readable companion for each format is a Kaitai `.ksy` file in
-`formats/` (`dahua_dhfs41.ksy` so far), per `docs/TECH_STACK.md`.
+`formats/` (`dahua_dhfs41.ksy`, `hikvision_ps.ksy`), per `docs/TECH_STACK.md` - both
+compiled and checked against the tool's own parsers (`VALIDATION_REPORT.md` §9a).
 
 ---
 

@@ -337,6 +337,19 @@ python -m validate.realmedia --case1 out/cpplus_WWD4A3NX --image1 skyhawk_WWD4A3
 
 Anything its inputs do not allow is skipped, with the reason in the summary.
 
+The published format definitions (`formats/*.ksy`) are checked the same way,
+against the parsers the tool runs - field by field on drive 1's volumes,
+cluster records and DHAV frames, and on every MPEG-PS stream carved in a
+region of drive 2 (one 1 GiB data block is enough):
+
+```bash
+pip install kaitaistruct
+python -m validate.ksy_check --dahua skyhawk_WWD4A3NX_first20GiB.dd \
+    --ps /dev/sdX --ps-region 0x4C5E000 0x40000000 --out out/realchecks/ksy_check.json
+```
+
+It exits 0 only if every compared field agrees; each disagreement is listed.
+
 ### 3.4i E01 (EnCase) images
 
 Every command that takes `--device` also takes an `.E01` image: pass the
