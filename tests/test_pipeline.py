@@ -2659,6 +2659,30 @@ def test_real_media_tools(tmp: str) -> None:
     check("carver coverage: bytes of the known carve also found, and bytes found beyond it",
           cov["known_bytes"] == 200 and cov["known_bytes_also_found"] == 100
           and cov["share_of_known_found"] == 0.5 and cov["found_bytes_not_known"] == 100, str(cov))
+    check("carver range reaches the first known footage when the default holds none",
+          RM.annexb_range_mb([[4500 << 20, 1 << 20]], 2048) == 4500 + 2048
+          and RM.annexb_range_mb([[100 << 20, 1 << 20]], 2048) == 2048
+          and RM.annexb_range_mb([], 2048) == 2048)
+
+    # The drive-2 reference frames: eight cameras record at once, so the time
+    # matches several streams and only the camera the title names picks one.
+    case2 = os.path.join(tmp, "refcase")
+    os.makedirs(os.path.join(case2, "carve"), exist_ok=True)
+    t1, t2 = RM.DRIVE2_REFERENCE[0][0], RM.DRIVE2_REFERENCE[1][0]
+    span = lambda sid, a, b: {"id": sid, "time_first_local": a, "time_last_local": b}
+    rows = [span("ps-a", "2024-07-28 02:00:00", "2024-07-28 23:00:00"),   # CH07, listed first
+            span("ps-b", "2024-07-28 05:00:00", "2024-07-28 18:00:00"),   # CH01
+            span("ps-c", "2024-07-28 06:00:00", "2024-07-28 09:00:00"),   # outside_index
+            span("ps-d", "2023-07-22 10:00:00", "2023-07-22 12:00:00")]   # CH05, alone
+    labels = {"ps-a": "CH07", "ps-b": "CH01", "ps-c": "outside_index", "ps-d": "CH05"}
+    json.dump({"streams": rows}, open(os.path.join(case2, "carve", "ps_report.json"), "w"))
+    json.dump({"streams": [{"id": k, "label": v} for k, v in labels.items()]},
+              open(os.path.join(case2, "carve", "ps_labels.json"), "w"))
+    refs, unresolved = RM.ps_reference_ids(case2)
+    check("reference stream chosen by the camera the title names, not the first in time",
+          refs == [("ps-b", t1, RM.DRIVE2_REFERENCE[0][1])], str(refs))
+    check("a lone stream labelled another camera is not taken for the reference",
+          len(unresolved) == 1 and t2 in unresolved[0], str(unresolved))
 
 
 def test_ewf(tmp: str) -> None:

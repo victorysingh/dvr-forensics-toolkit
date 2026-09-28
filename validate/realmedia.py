@@ -102,16 +102,28 @@ def step_model(name, case, image, work, out):
                   or "none") + ".")
 
 
+def annexb_range_mb(known_extents: list[list[int]], mb: int) -> int:
+    """How much of the image to carve: the first `mb` MiB - or, where the
+    known carver found no footage there, `mb` MiB past the first footage it
+    did find.  On drive 1 that is at 4.2 GiB, so the first 2 GiB compared
+    nothing with nothing."""
+    starts = [o for o, _ in known_extents]
+    if not starts or min(starts) < mb << 20:
+        return mb
+    return (min(starts) >> 20) + mb
+
+
 def step_annexb(name, case, image, work, mb, known_report, out):
     slug = name.replace(" ", "")
     if not image:
         out.append(f"- **{name} carve-annexb:** skipped - no device or image given")
         return
+    known = load(os.path.join(case, "carve", known_report))
+    mb = annexb_range_mb([e for r in (known or {}).get("streams", []) for e in r["extents"]], mb)
     d = os.path.join(work, f"{slug}_annexb")
     rc = run(["carve-annexb", "--device", image, "--out", d, "--max-mb", str(mb)],
              os.path.join(work, f"{slug}_carve_annexb.log"))
     rep = load(os.path.join(d, "carve", "annexb_report.json"))
-    known = load(os.path.join(case, "carve", known_report))
     if not rep or not known:
         out.append(f"- **{name} carve-annexb** (exit {rc}): no result to compare")
         return
@@ -150,15 +162,31 @@ def step_decode(case, work, out):
                   is not None else "n/a") + " of the failures after a keyframe.")
 
 
-def ps_reference_ids(case: str) -> list[tuple[str, str, str]]:
+def ps_reference_ids(case: str) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """The stream each reference frame was read from, and why any could not
+    be pinned down.  Eight cameras record at once on this recorder, so a time
+    alone matches several streams - six at 2024-07-28 08:19:42, the first of
+    them CH07.  The camera the title names chooses among them, by the label
+    `label-ps` gave each stream.  A reference that still does not come down
+    to one stream is left out, never guessed."""
     rows = (load(os.path.join(case, "carve", "ps_report.json")) or {}).get("streams", [])
-    out = []
+    labels = {s["id"]: s.get("label") for s in
+              (load(os.path.join(case, "carve", "ps_labels.json")) or {}).get("streams", [])}
+    out, unresolved = [], []
     for t, title in DRIVE2_REFERENCE:
-        hit = next((r for r in rows if r.get("time_first_local") and r.get("time_last_local")
-                    and r["time_first_local"] <= t <= r["time_last_local"]), None)
-        if hit:
-            out.append((hit["id"], t, title))
-    return out
+        hits = [r["id"] for r in rows if r.get("time_first_local") and r.get("time_last_local")
+                and r["time_first_local"] <= t <= r["time_last_local"]]
+        num = title.split()[-1]
+        cam = f"CH{int(num):02d}" if num.isdigit() else None
+        pinned = [h for h in hits if cam and labels.get(h) == cam]
+        if len(pinned) == 1:
+            out.append((pinned[0], t, title))
+        elif len(hits) == 1 and labels.get(hits[0]) in (None, "outside_index"):
+            out.append((hits[0], t, title))          # the only footage at that time
+        else:
+            unresolved.append(f"\"{title}\" at {t}: {len(hits)} streams cover that time, "
+                              f"{len(pinned)} labelled {cam or 'with its camera'}")
+    return out, unresolved
 
 
 def step_ocr(case1, case2, image2, work, limit, out):
@@ -176,7 +204,9 @@ def step_ocr(case1, case2, image2, work, limit, out):
                    f"({', '.join(sorted(DRIVE1_TITLES))}), {len(named) - right} another title "
                    f"(each to be checked against its frame).")
     if case2:
-        refs = ps_reference_ids(case2)
+        refs, unresolved = ps_reference_ids(case2)
+        for why in unresolved:
+            out.append(f"- **drive 2 read-osd:** reference not compared - {why}")
         have = [r for r in refs if os.path.exists(
             os.path.join(case2, "carve", "ps_streams", r[0] + ".ps"))]
         missing = [r for r in refs if r not in have]

@@ -16,7 +16,7 @@ they are evidence).
 
 | PS asks for | Status | Where |
 |---|---|---|
-| Identify the DVR / vendor | **done** — signatures for all eight OEMs, confidence scores; on-platter evidence found for CP Plus (`CPPlusIPCam`) and Hikvision (`HK` descriptors, surviving master/index). **Model:** `identify-model` searches the non-video parts of the disk for model numbers; `record-device` records the model off the unit with hashed photos; the two are checked against the format on the disk. Not yet run on either drive | `detect/`, `detect/model.py` |
+| Identify the DVR / vendor | **done** — signatures for all eight OEMs, confidence scores; on-platter evidence found for CP Plus (`CPPlusIPCam`) and Hikvision (`HK` descriptors, surviving master/index). **Model:** `identify-model` searches the non-video parts of the disk for model numbers; `record-device` records the model off the unit with hashed photos; the two are checked against the format on the disk. **Run 28 Sep:** drive 2 `DS-7B08HUHI-K1`, agreeing with the team's unit (label, serial `F29196515`, whose full device serial is on the platter 202 times); drive 1: no model string in its head image, and no CP Plus unit to read | `detect/`, `detect/model.py` |
 | Create forensic images | **done** — whole-drive MD5 + SHA-256 in one read-only pass, per-block Merkle map, preserved metadata, 20 GiB head image; see `FORENSIC_IMAGE.md` | `acquire/`, `recover/preserve.py` |
 | MD5 and SHA-256 | **done** — both drives | `scan` |
 | Parse proprietary file systems | **done on real media** — Dahua/CP Plus DHFS 4.1 (2 drives); Hikvision HIKBTREE index records (surviving copies); **HeimVision** FAT32 ring + `luo`/`liu` frames (a third real image, NIST CFReDS) | `parsers/dahua.py`, `parsers/hikbtree.py` |
