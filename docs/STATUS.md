@@ -39,7 +39,7 @@ Named deliverables:
 | Comparative analysis of OEMs | `OEM_COMPARISON.md` — first-hand for Dahua/CP Plus/Hikvision, published research for Honeywell, sourced first answers for TP-Link, Godrej, Uniview, Matrix (§5.1); `formats/*.ksy` |
 | DVR/NVR forensic image | `FORENSIC_IMAGE.md` |
 | System architecture | `ARCHITECTURE.md` |
-| Functional prototype | the tool; `python cli.py serve` for the viewer |
+| Functional prototype | the tool; `python cli.py serve` for the viewer; packaged as one `ps26150-dvr.exe` needing no Python (`packaging/README.md`) |
 | SOPs | `SOP_EXAMINATION.md`, `LINUX_ACQUISITION.md` |
 | Validation reports | `VALIDATION_REPORT.md` |
 | User manual | `USER_MANUAL.md` |

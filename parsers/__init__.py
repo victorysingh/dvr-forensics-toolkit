@@ -34,17 +34,40 @@ from detect import signatures as _sig
 # PLUGIN_ERRORS and skipped; it never takes the tool down with it.
 PLUGIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "plugins")
+# A packaged build (packaging/) unpacks the shipped plugins with the program;
+# a plugins/ folder next to the executable is loaded as well, so onboarding a
+# vendor is still one dropped-in file, with no rebuild.
+DROP_IN_DIR = (os.path.join(os.path.dirname(sys.executable), "plugins")
+               if getattr(sys, "frozen", False) else None)
 LOADED_PLUGINS: dict[str, dict] = {}
 PLUGIN_ERRORS: dict[str, str] = {}
 
 
-def _load_plugins() -> None:
-    if not os.path.isdir(PLUGIN_DIR):
-        return
-    for name in sorted(os.listdir(PLUGIN_DIR)):
-        if not name.endswith(".py") or name.startswith("_"):
+def plugin_dirs() -> list[str]:
+    """Where plugins load from, the shipped folder first.  Read at load time,
+    so pointing PLUGIN_DIR or DROP_IN_DIR elsewhere (the tests do) takes effect."""
+    return [PLUGIN_DIR] + ([DROP_IN_DIR] if DROP_IN_DIR else [])
+
+
+def _plugin_files() -> list[tuple[str, str]]:
+    """(file name, path) of every plugin, the shipped ones first; a dropped-in
+    file never replaces a shipped plugin of the same name."""
+    out: dict[str, str] = {}
+    for d in plugin_dirs():
+        if not os.path.isdir(d):
             continue
-        path = os.path.join(PLUGIN_DIR, name)
+        for name in sorted(os.listdir(d)):
+            if not name.endswith(".py") or name.startswith("_"):
+                continue
+            if name in out:
+                PLUGIN_ERRORS[f"{d}{os.sep}{name}"] = "a shipped plugin has this name - not loaded"
+                continue
+            out[name] = os.path.join(d, name)
+    return list(out.items())
+
+
+def _load_plugins() -> None:
+    for name, path in _plugin_files():
         before = set(REGISTRY)
         try:
             spec = importlib.util.spec_from_file_location(f"ps26150_plugin_{name[:-3]}", path)
