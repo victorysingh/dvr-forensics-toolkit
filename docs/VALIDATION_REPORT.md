@@ -310,6 +310,8 @@ Stream with Hikvision `HK` stream-map descriptors.
 | MPEG-PS carve, full drive | 2,516 streams, 923 GiB, ~6,300 h, every one dated from its `HK` descriptors: April 2021 (H.264) to 30 Aug 2024 (H.265 + G.711) |
 | Decode, the 50 extracted streams, first 10 min of each (ffprobe, 28 Sep) | 291,452 video frames: **291,035 decode (99.9%)**; 353 precede the first keyframe, 64 lost after it. H.264 and H.265, 960×576 to 2560×1440 |
 | Surviving Hikvision index | master sector copy + two identical HIKBTREE copies; 922 records on a 1 GiB block grid; 8 channels |
+| Recorder model and unit (28 Sep) | `identify-model` over the whole drive: **`DS-7B08HUHI-K1`**, 208 times from 0x11ECDD0. The team's Hikvision DVR is labelled `DS-7B08HUHI-K1`, serial `F29196515` (`record-device`, label photo hashed): model **agrees**. The platter also carries that unit's full device serial `DS-7B08HUHI-K1 0820201218CCWR F29196515 WCVU` 202 times, so this unit wrote this drive. The model check's "differ" (a Hikvision unit, Dahua-family structures on its disk) is the known reformat; which recorder did it is not established |
+| Head image (28 Sep) | first 4 GiB with `ddrescue -d`, 0 read errors, drive write-blocked throughout; all 512 blocks equal the full-drive pass. MD5 `8500709651324ce36b25b548f068144f`, SHA-256 `401d5153c94b037e8e931474bdc157ac830d9460bf51d3048d748b5990acf460` |
 | Camera attribution | 2,021 of 2,516 streams inside their block's record window; 495 older streams outside the index |
 | Independent checks of the attribution | every camera keeps one resolution (CH03/CH04 2560×1440, CH01/02/06 960×576, CH05/07/08 1280×720, apart from 3 streams each on CH03/CH04); all eight hold 761–788 h |
 | Recorded vs recovered | per the index each camera recorded continuously (~27 Jul – 30 Aug 2024); the carve recovered **99.6–99.7%** of those hours on every camera |
@@ -428,7 +430,7 @@ places every `00 00 01` in the 806 written files by the parser.
 HeimVision export. `tests/test_pipeline.py` pins these numbers when
 `HEIMVISION_E01` points at the image.
 
-## 8c. OSD reader (optional layer — never yet run on a rendered frame)
+## 8c. OSD reader (optional layer — first real run 28 Sep: 1 of 5 reference titles, no clock)
 
 `cli.py read-osd` reads the burned-in channel title and clock, which is the
 only camera attribution available for the 2,246 (drive 1) and 495 (drive 2)
@@ -438,8 +440,9 @@ streams no index accounts for.
 |---|---|
 | Rules under test | 22 checks in `tests/test_pipeline.py`: title normalisation, the agreement vote and its thresholds, band choice scored per stream, ambiguous-date handling, container-resolved dates, the clock comparison and its tolerance |
 | Reader end to end | passes with `sample` and `ocr` replaced by a stubbed recorder painting a known title in one corner and a known clock in another: calibration finds both corners, each stream is named from its own picture, a 400 s offset is reported as a disagreement, a stream with no container date is `read, not compared` |
-| OCR accuracy | **not measured.** Neither `ffmpeg` nor `tesseract` was installed on the machine this was written on, so the filter chain and the Tesseract call are unrun code paths |
-| Status | `synthetic_only` |
+| OCR accuracy, first real run (28 Sep, Tesseract 5.5.0, `validate.realmedia`) | Drive 2 `ps-00321` (CH01): **"Camera 01" — matches the eye.** Drive 2 `ps-03023` (CH03): no title read (white text on a light wall). Drive 1, 40 unlabelled streams: calibration found no title or clock band, though the frames carry *Parking* bottom-left and the clock top-right, inside the bands — thin white text on a bright wall and sky. **No clock read on either drive:** both recorders' clocks carry letters — Hikvision `28-07-2024 Sun 02:07:20` (weekday), CP Plus `01/05/2026 01:20:26 PM` (12-hour) — and `CLOCK_CHARS` holds digits and separators only |
+| Found by the first run | the runbook picked drive 2's reference stream by time alone; eight cameras record at once, so it took CH07 (`ps-00257`, picture says "Camera 07") for "Camera 01" and called a near-correct reading ("Camera OF") a mismatch. Now chosen by time and the camera the title names |
+| Status | `synthetic_only` — run on real frames, but 1 of 5 reference titles and no clock is short of `spec_only` |
 
 **To reach `spec_only`:** run it over the same streams whose frames were
 already read by eye in §8a and §8b and compare — *Parking*, *Road View 1*,
@@ -538,8 +541,8 @@ tool's own parser reads, field by field.
 ## 10. Open items
 
 - ~~Why 2,087 frames after a keyframe still do not decode.~~ **Answered on 28 Sep (§7):** a reference frame missing from the disk. Streams with a complete frame counter lose 0.13% of their frames after the keyframe, streams with a gap 22.2%; 90% of the missing frames sit on a 2 MiB cluster boundary, and most have no intact copy anywhere on the disk. Still to run: `decode-check`, which makes the same test frame by frame (it is in `validate.realmedia`).
-- All of the checks that need only the case folders: `python -m validate.realmedia --case1 out/cpplus_WWD4A3NX --image1 skyhawk_WWD4A3NX_first20GiB.dd --case2 out/drive2_Z9C2632A` (USER_MANUAL §3.4h); its SUMMARY.md belongs here.
-- OSD reader against the frames already read by eye (§8c), on a machine with ffmpeg and Tesseract.
+- ~~All of the checks that need only the case folders (`validate.realmedia`).~~ **Run on 28 Sep.** Drive 1 `identify-model` (head image, 4 GiB of non-video blocks): no model string. Drive 2: `DS-7B08HUHI-K1`, agreeing with the unit's label and serial (§8b). `decode-check`: 365,654 of 964,635 video frames do not decode — 245,538 before the first keyframe, 119,822 after a counter gap, 294 unexplained; **a missing frame explains 99.8% of the failures after a keyframe**, the same count as the independent measurement in §7. `carve-annexb`: the default first 2 GiB of drive 1 holds no footage, so the range now extends to the first known footage; over the first 8 GiB it covers **100%** of the DHAV carve's bytes plus 48.7 MiB it did not, as **one** stream — the three cameras share identical parameter sets and the carver cannot tell them apart. OCR: §8c.
+- OSD reader: read clocks that carry a weekday or AM/PM (both of our recorders), and white text on bright backgrounds (§8c).
 - A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
 - Recorder timezones, which are what keep the two drives on separate axes in §8d.
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
