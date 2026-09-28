@@ -209,7 +209,10 @@ out/<case>/
   analytics/osd.json      camera titles and the clock read off the picture (optional layer)
   preserved/              filesystem metadata as whole scan blocks + manifest
   parse_<vendor>.json     volumes, recordings, field provenance
-  timeline.json           events, gaps, correlations, anomalies, clock rule
+  timeline.json           events, gaps, correlations, anomalies, clock rule; the
+                          recorder log's power and user events, and the power cuts
+                          that explain silences on every camera
+  hik_log.json            a Hikvision disk's own system log (hik-log)
   report.html, report.json
 ```
 A combined view over several case directories (`cli.py combine`) writes
