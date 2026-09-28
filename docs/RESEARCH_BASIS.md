@@ -21,7 +21,8 @@ provide: **a per-block Merkle map and a hash-chained custody ledger**, so any
 recovered clip can be proven to the acquisition later; **a status for every
 vendor claim that only a byte-match against the recorder's own export can
 raise to `validated`**; and **measurements on two real 1 TB drives**,
-including the failures they exposed.
+including the failures they exposed, **and on a public NIST image that
+anyone can re-check** (D12).
 
 ---
 
@@ -136,7 +137,9 @@ goes beyond.
   - Two independent routes to the recorder's clock: the date in the container
     (DHAV packed date, Hikvision `HK` descriptor) and the clock burned into
     the picture. They are cross-checked; three frames were checked by eye, all
-    within 2 s.
+    within 2 s. The OCR route, run on real frames for the first time (28 Sep),
+    read 1 of 5 reference titles and no clock yet (`VALIDATION_REPORT.md`
+    §8c), so the by-eye checks are the evidence today.
   - No UTC is asserted without a stated time zone and a measured clock error.
   - The combined view (PR #8) refuses to put two recorders on one axis unless
     both state a time zone.
@@ -157,6 +160,10 @@ goes beyond.
   - The two are cross-checked. A Hikvision unit whose disk carries Dahua
     structures is flagged as a disk another recorder formatted, which is drive
     2's actual history.
+- **Evidence** (first real-media run, 28 Sep, PR #28). On drive 2,
+  `identify-model` finds `DS-7B08HUHI-K1` 208 times on the platter. That
+  agrees with the team's unit label. The unit's full device serial appears on
+  the platter 202 times, so this unit wrote this drive.
 - **Beyond what.** Rzayeva et al. (2025) list automatic manufacturer
   identification as one of their three innovations. We go on to check the
   manufacturer against the unit it was seized from, and we treat a mismatch
@@ -180,8 +187,12 @@ goes beyond.
 - The forensic core (`core/`, `acquire/`, `detect/`, `parsers/`, `recover/`,
   and `validate/` from PR #9) is Python standard library only. It runs on a bare install
   with no network.
-- Every observed layout is published as a Kaitai Struct `.ksy`, so others can
-  check our reading of each format.
+- The Dahua DHFS and Hikvision PS layouts are published as Kaitai Struct
+  `.ksy` files, so others can check our reading of each format. Both are
+  compiled with the official compiler and checked field by field against our
+  own parsers (`validate/ksy_check.py`); the first check found, and we fixed,
+  a Hikvision `.ksy` that compiled but could not read a stream. HeimVision's
+  layout (D12) is documented in its plugin, not yet as a `.ksy`.
 - Magnet Witness (formerly DVR Examiner, from DME Forensics), the leading
   commercial tool, is closed. We do not claim to match its vendor coverage.
   We claim a method that shows its evidence.
@@ -197,9 +208,80 @@ goes beyond.
   record's **hash value and the algorithm** (SHA-1, SHA-256, MD5 or another
   accepted standard).
 - The tool already produces exactly those values for every artefact, bound to
-  the custody ledger. Generating the certificate from the case is planned
-  (B6). Its wording must be checked against the Schedule by Hriday before
-  use.
+  the custody ledger, and drafts the certificate from the case
+  (`cli.py certificate`, PR #14), recording the draft in the ledger. Its
+  wording must be checked against the Schedule by Hriday before use.
+
+### D12. Tested on a public image that anyone can re-check
+
+- **What.** Besides our own two drives, the tool was run on a **public,
+  independently published** disk image: the NIST CFReDS *Heimvision DVR .E01
+  Forensic Image* (Brunty & Mock, Marshall University, 2021), the 150 GB disk
+  of a HeimVision K9604-W 4-channel DVR, imaged with FTK Imager. HeimVision is
+  not one of the eight vendors in the problem statement, so this was the
+  add-a-vendor route (detect, survey, plugin) tried on a recorder we had never
+  seen. The problem statement also asks for "other commonly used platforms".
+- **Evidence** (`VALIDATION_REPORT.md` §8e):
+  - **The image checks our reader.** Our own E01 reader (`acquire/ewf.py`)
+    read all 150,039,945,216 bytes and computed an MD5 and SHA-1 **equal to
+    the ones FTK Imager stored in the image**.
+  - **An unknown format decoded from the disk alone** (`plugins/heimvision.py`):
+    - an ext3 system partition, and a FAT32 ring of 17,152 files of 8 MiB;
+    - every frame names its camera and carries a microsecond time;
+    - 806 files were written: 24 h continuous on 4 cameras. CH01 has
+      1,296,146 frames against the 1,296,150 that 24 h at 15 fps predicts.
+  - **The recorder's time zone measured two independent ways**, both UTC-8:
+    - the FAT clock against the frame times, on all 806 files;
+    - the Linux clock (ext3 file times) against the UTC times in the
+      recorder's own log.
+  - **The recorder's own records checked, not trusted:**
+    - its event log: 194 entries with no gaps, so none were deleted;
+    - its recording index: 806 of 806 files listed with exactly the times
+      their own headers give;
+    - `index.bin`: marks every written file complete except the last one,
+      still open when recording stopped.
+  - Pinned by 3 real-image tests that run when the image is present.
+  - Status stays `spec_only`: observed on real media, not byte-matched
+    against a HeimVision export (D1).
+- **Beyond what.** DVR studies typically test on drives the authors hold
+  (Han, Jeong & Lee 2015; Rzayeva et al. 2025, 27 drives). A reader can
+  follow the method but cannot re-run it on the same disk unless the images
+  are published.
+  Case-study reverse engineering (Tobin, Shosha & Gladyshev 2014; Gomm et al.
+  2016) shows how a proprietary format was read. We add two things:
+  - a result anyone can reproduce from a public image with a published hash;
+  - the recorder's own log and index used to **check** the reading.
+
+### D13. The fallback carver measured against ground truth, limits stated
+
+- **What.** For a recorder with no parser, `carve-annexb` recovers raw
+  H.264/H.265 by its parameter sets alone. On the HeimVision image the plugin
+  knows every frame, so the carver's output could be scored start code by
+  start code against a real recorder's own layout
+  (`python -m validate.heimvision_carve <E01>`).
+- **Evidence** (`VALIDATION_REPORT.md` §8e):
+  - It ran over every part of the image that holds data: 178 regions,
+    6.47 GiB.
+  - It found **5,187,890 slices**. That is exactly the slice-shaped start codes
+    in the 806 written files, less one per stream (a carved stream leaves out
+    its last unit, whose end is unknown).
+  - 3,826 of them (**0.07%**) are chance start codes in the recorder's own
+    container bytes, not video. 884 of those look like keyframes: 2.5% of the
+    keyframe count.
+  - **The limit, stated:** the four cameras share one set of encoder settings,
+    so every carved stream mixes all four. Only the container separates the
+    cameras and gives the time. The carver therefore stays `synthetic_only`:
+    it finds the video, but its streams here are not any one camera's footage.
+  - **The same result on our own drive 1** (first real-media run, 28 Sep,
+    PR #28). Over the first 8 GiB it covers 100% of the bytes the DHAV
+    carver recovered, plus 48.7 MiB more, but as **one** stream: the three
+    cameras share identical encoder settings.
+- **Beyond what.** Garfinkel (2007) makes structural validation the test for
+  accepting a carved candidate. We apply it, then **measure** the result
+  against ground truth on real media and publish what the carver cannot do.
+  Rzayeva et al. (2025) report 2.4% false positives on their own drives, but
+  that is a different measure on different data, so the two numbers are not
+  directly comparable.
 
 ---
 
@@ -222,7 +304,11 @@ goes beyond.
 | OSD titles and clock | Tesseract (Smith 2007) | OCR engine | a label only when frames agree; ambiguous dates left ambiguous |
 | Faces and objects | SSD (Liu et al. 2016), MobileNet (Howard et al. 2017), Ultra-Light face detector | detectors | static and implausible-box rules; "lead, not evidence" |
 | Procedure | SWGDE *Best Practices for Data Acquisition from DVRs*; ISO/IEC 27037:2012; NIST SP 800-86 | seizure and acquisition practice | `SOP_EXAMINATION.md`, `LINUX_ACQUISITION.md` |
-| Honeywell (planned, B5) | Yoon & Hwang 2026 (DFRWS USA) | the first published analysis of Honeywell's surveillance filesystem | a plugin at `spec_only` from their description |
+| Hikvision system log (`parsers/hiklog.py`) | Dragonas et al. 2023 (Hikvision log records); Hikvision's published SDK codes | where the log lives and how records are typed | 43,108 records from drive 2, read from the surviving master-sector copy with six cross-checks; power cuts and an admin session found; the log's clock checked against the footage |
+| Honeywell (`plugins/honeywell.py`) | Yoon & Hwang 2026 (DFRWS USA) | the first published analysis of Honeywell's surveillance filesystem | a plugin at `spec_only` from their description; no real Honeywell disk yet |
+| E01 images (`acquire/ewf.py`) | the libyal description of the Expert Witness (EWF) format | segments, section chain, chunk table, compressed and stored chunks | reproduces FTK Imager's stored MD5 and SHA-1 over a real 150 GB image (D12) |
+| HeimVision K9604-W (`plugins/heimvision.py`, `parsers/ext3.py`) | NIST CFReDS public image (Brunty & Mock 2021); the ext2/ext3 on-disk layout | a public, published test image | the layout decoded from the disk; the zone measured two ways; the recorder's own log and index checked against the disk (D12) |
+| Fallback carver scored (`validate/heimvision_carve.py`) | Garfinkel 2007 | structural validation of carved candidates | every carved slice accounted for against the recorder's own frames; 0.07% container bytes; cameras with identical settings not separable (D13) |
 
 ---
 
@@ -233,15 +319,20 @@ goes beyond.
    *formatting the hard drive*. If the log area of the Dahua-family format on
    drive 2 holds such a record, it dates the reformat and may name the
    recorder that did it.
-2. **Model and serial from Hikvision logs.** The same authors (2023) analyse
-   Hikvision's on-disk log records. If they carry the device's model,
-   `identify-model` should read them directly rather than rely on loose strings.
-3. **Honeywell plugin** from Yoon & Hwang (2026). The paper also covers
-   recovery after format, expiry and overwrite.
-4. **Frames after a missing reference** on drive 1 (cause measured,
-   `VALIDATION_REPORT.md` §7), following Na et al. (2014): decode what each
-   still holds, for a viewing copy marked as such - never as intact
-   evidence.
+2. ~~**Model and serial from Hikvision logs.**~~ **Done, 28 Sep (PRs #28,
+   #29).** The model and the unit's serial were found on the platter outside
+   the log (D8). The Hikvision system log itself is now read, following the
+   record analysis of Dragonas et al. (2023) (`parsers/hiklog.py`, 43,108
+   records). It shows 188 power cuts and one local admin session. It keeps
+   the recorder's own clock, so it cannot give the time zone either.
+3. **Honeywell on a real disk.** The plugin is built from Yoon & Hwang (2026)
+   (PR #13) and is `spec_only`; any real Honeywell disk or image is what
+   moves it on.
+4. **Frames after a missing reference** on drive 1. The cause is measured
+   (`VALIDATION_REPORT.md` §7) and confirmed frame by frame: `decode-check`
+   explains 99.8% of the failures after a keyframe with a missing frame.
+   Following Na et al. (2014), decode what each such frame still holds, for
+   a viewing copy marked as such - never as intact evidence.
 
 ---
 
@@ -282,6 +373,8 @@ goes beyond.
 18. SWGDE. *Best Practices for Data Acquisition from Digital Video Recorders* (17-V-002, v1.3, 2025) — [PDF](https://www.swgde.org/wp-content/uploads/2025/03/2025-02-28-Best-Practices-for-Data-Acquisition-from-Digital-Video-Recorders-17-V-002-1.3.pdf). ISO/IEC 27037:2012. NIST SP 800-86 (2006).
 19. *Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal*, Supreme Court of India, 14 Jul 2020 — [judgment (APHC copy)](https://aphc.gov.in/docs/imp_judgements/Arjun%20Panditrao%20Khotkar%20_%20Kailash%20Kushanrao%20Gorantyal%20And%20Ors._1701334263.pdf). Bharatiya Sakshya Adhiniyam, 2023, s.63 and the Schedule — [bare act, certificate](https://www.advocatekhoj.com/library/bareacts/bharatiyaaakshya2023/b.php)
 20. FFmpeg, `libavformat/dhav.c` (DHAV demuxer). Kaitai Struct.
+21. J. Brunty, R. Mock (Marshall University). *Heimvision DVR .E01 Forensic Image*, 2021. NIST Computer Forensic Reference Data Sets (CFReDS) — [cfreds.nist.gov](https://cfreds.nist.gov/). Media MD5 `4895ea6d10b08c29fb1bb03591adc7b2`.
+22. J. Metz (libyal). *Expert Witness Compression Format (EWF)* — [libewf documentation](https://github.com/libyal/libewf/tree/main/documentation).
 
 Items 15–17 and 20 are standard references not re-fetched on 28 Sep; the rest
 were checked on that date.
