@@ -263,6 +263,15 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
                       {"note": "MPEG-PS footage carved without the index, attributed to "
                                "its camera by the surviving HIKBTREE record for its block"})
                 continue
+            if label == "stale_tail":
+                # older than every record for its block: a previous recording
+                # cycle past the new write pointer - Dahua's "remnant"
+                rec = {"id": row["id"], "camera_id": "UNKNOWN", "confidence": 0.5,
+                       "offset": row["offset"], "length": row["bytes"]}
+                event(rec, "remnant", s0, s1, "hk_descriptor",
+                      {"note": "older footage surviving past the write pointer of a block "
+                               "the index says is in use; its camera is not the record's"})
+                continue
             res = resolution(row)
             labelled = label is not None           # labelling ran: this one is outside it
             group = f"{res} group" if res and not labelled else "UNKNOWN"
