@@ -11,6 +11,9 @@ at least once:
     handed out in rotation as clusters fill up;
   * a frame that overflows its cluster being finished in the PHYSICALLY next
     cluster, overwriting the start of whatever camera owns it;
+  * with `chain_splits=True`, the other boundary case seen on the real disk:
+    a frame cut at the cluster end and finished at the start of the camera's
+    NEXT CLUSTER IN THE CHAIN, so its two halves are not adjacent on disk;
   * an older recording (a month earlier) filling the data area underneath, so
     reused clusters keep stale footage past where the new recording stopped;
   * video, audio and aux frame counters that start apart and never meet, and
@@ -104,10 +107,15 @@ def _record(kind: int, ch: int, a: int, start: int, end: int, nxt: int,
 
 
 def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150,
-          twins: bool = False) -> dict:
+          twins: bool = False, chain_splits: bool = False) -> dict:
     """`twins=True` gives cameras 1 and 2 identical counters and clocks - the
-    worst case, where nothing in the frames themselves tells them apart."""
+    worst case, where nothing in the frames themselves tells them apart.
+
+    `chain_splits=True` finishes about half of the frames that cross a cluster
+    end in the camera's next chain cluster instead of the physically next one.
+    Off by default, so every other fixture is byte-for-byte unchanged."""
     rng = random.Random(seed)
+    split_rng = random.Random(seed ^ 0x5B11)
     img = bytearray(IMAGE_SIZE)
 
     # -- the older recording underneath: one continuous stream across the
@@ -145,6 +153,7 @@ def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150,
     heads, chains, cur, fill = {}, {}, {}, {}
     written: dict[int, list[tuple[int, int]]] = {n: [] for n in range(cameras)}
     frame_at: dict[int, tuple[int, int, int]] = {}      # abs offset -> (cam, type, fn)
+    split_at: list[tuple] = []           # (cam, type, fn, (off, len), (off, len), bytes)
     windows: dict[int, list] = {}
     for n in range(cameras):
         heads[n] = next_free
@@ -172,6 +181,27 @@ def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150,
                 end = off + len(blob)
                 if end > IMAGE_SIZE:
                     break
+                cut = DATA_BASE + (c + 1) * CLUSTER - off
+                if (chain_splits and 0 < cut < len(blob) and next_free < CAPACITY
+                        and next_free != c + 1 and split_rng.random() < 0.5):
+                    # Cut at the cluster end; the rest opens the camera's
+                    # next chain cluster, and the write carries on there.
+                    nc = next_free
+                    next_free += 1
+                    chains[n].append(nc)
+                    head = (off, cut)
+                    rest = (DATA_BASE + nc * CLUSTER, len(blob) - cut)
+                    for s, ln in (head, rest):
+                        for k in [k for k in frame_at if s <= k < s + ln]:
+                            del frame_at[k]
+                    img[head[0]:head[0] + cut] = blob[:cut]
+                    img[rest[0]:rest[0] + rest[1]] = blob[cut:]
+                    split_at.append((n, ftype, fn, head, rest, blob))
+                    written[n].append((ftype, fn))
+                    windows.setdefault(c, []).append(pack_date(dt))
+                    cur[n], fill[n] = nc, rest[1]
+                    windows.setdefault(nc, []).append(pack_date(dt))
+                    continue
                 # Overflow runs on into the physically next cluster,
                 # overwriting its first bytes - whoever owns it.
                 for k in [k for k in frame_at if off <= k < end]:
@@ -191,6 +221,12 @@ def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150,
                 and sum(img[off:off + 23]) & 0xFF == img[off + 23]):
             survived[n].add((ftype, fn))
             owner[off] = n
+    # A split frame survives only if neither half was written over later.
+    joined: dict[int, set[tuple[int, int]]] = {n: set() for n in range(cameras)}
+    for n, ftype, fn, (o1, l1), (o2, l2), blob in split_at:
+        if bytes(img[o1:o1 + l1]) + bytes(img[o2:o2 + l2]) == blob:
+            survived[n].add((ftype, fn))
+            joined[n].add((ftype, fn))
 
     # -- the cluster table
     table = bytearray(CAPACITY * 32)
@@ -229,6 +265,8 @@ def build(path: str, seconds: int = 12, cameras: int = 3, seed: int = 26150,
         "path": path, "cameras": cameras, "data_base": DATA_BASE,
         "heads": heads, "chains": chains, "written": written, "survived": survived,
         "owner": owner,   # every other valid frame on the image is the older recording
+        "split": [(n, t, fn, a, b) for n, t, fn, a, b, _ in split_at],
+        "joined": joined,  # split frames whose two halves both survived
         "old_date": T_OLD, "t0": T0,
     }
 

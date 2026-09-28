@@ -162,8 +162,17 @@ These are why a naive carve produces wrong evidence.
    **physically next** cluster, usually another camera's, overwriting its first
    bytes. Confirmed 6 of 6 cases tested. So:
    - the start of a cluster can hold the tail of another camera's stream;
-   - the frame at a cluster's start is sometimes destroyed by that overwrite.
-     This is the ~0.37% of frames that are genuinely **not on the disk**.
+   - frames are destroyed where writes collide at a cluster start. This is the
+     ~0.37% of frames with **no intact copy on the disk**, about one per
+     cluster. In CH01's first hour, 314 of the 371 are overflow frames whose
+     header survives in the next physical cluster while their body does not.
+
+   **Less often, the cut goes to the chain instead.** A frame can be cut at the
+   cluster end and finished at the start of the recording's **next chain
+   cluster**, so its two halves are not adjacent on disk (57 of the 371). That
+   next cluster's start is also where the physically previous cluster's
+   overflow lands, and in 50 of the 57 such an overflow later overwrote part
+   of the second half: its trailer lies inside it. Only 7 rejoin intact.
 
 3. **Cameras are near-twins.** Cameras started together keep near-identical
    frame counters and millisecond clocks: at one instant they are 20–60 frames
@@ -217,6 +226,15 @@ chain in order, each frame is classified:
   next physical cluster are taken only while they are **byte-contiguous** —
   each starting exactly where the last ended — *and* continuous. Continuity
   alone once walked straight on into the next camera's data (trap 3);
+- **rejoined**: when the own run ends in a frame that crosses the cluster end
+  but does not continue in the next physical cluster, its first half is joined
+  to the start of the **next chain cluster**. The frame is taken only if it
+  starts exactly where the last own frame ended, passes the header checksum
+  and the trailer-length check as one piece, and continues the stream. It is
+  refused if its second half holds any `DHAV` or `dhav` marker: another
+  camera's overflow that overwrote part of it always leaves one, while the
+  header and trailer, the only bytes the other checks see, stay intact. Both
+  halves' offsets go into the extraction manifest (`joined_frames`);
 - **remnant**: anything else, dated outside the cluster's window.
 
 Continuity compares the millisecond clock and date with the previous frame of
@@ -242,7 +260,12 @@ and the index now points to the cluster's new owner.
 | Remnants of older footage | 70 runs, 38,407 frames, ~13 min, 99 MB — 68 from Aug 2026, 1 May, 1 June |
 | Not explained | 7 runs, 613 frames dated inside the current recording period |
 
-The synthetic fixture (`tests/synth_dahua.py`) reproduces traps 1–5. Against
+With chain-boundary rejoin, the same hour gives 98,808 video frames and 364
+missing (7 rejoined, 50 refused as overwritten).
+
+The synthetic fixture (`tests/synth_dahua.py`) reproduces traps 1–5, and the
+chain-boundary cut with `chain_splits=True`, including second halves that a
+later overflow overwrote. Against
 its known ground truth, reassembly gets every camera exactly right — no foreign,
 missed or duplicate frames — across the seeds tested.
 
