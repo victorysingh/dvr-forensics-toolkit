@@ -48,8 +48,13 @@ BANDS = {
 
 # Tesseract character whitelists.  The clock one is the reason Tesseract was
 # chosen over a heavier OCR (docs/TECH_STACK.md): fixed font, fixed position,
-# high contrast, and only twelve characters possible.
-CLOCK_CHARS = "0123456789-/:. "
+# high contrast, and few characters possible.  Real recorders put letters in
+# their clocks too - Hikvision `28-07-2024 Sun 02:07:20`, CP Plus
+# `01/05/2026 01:20:26 PM` - and a whitelist of digits alone read neither
+# (VALIDATION_REPORT 8c), so the weekday and AM/PM letters are allowed.
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_CLOCK_LETTERS = "".join(sorted(set("".join(WEEKDAYS) + "apm")))
+CLOCK_CHARS = "0123456789-/:. " + _CLOCK_LETTERS + _CLOCK_LETTERS.upper()
 TITLE_CHARS = ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
                "0123456789 -_")
 
@@ -178,6 +183,11 @@ _CLOCK_FORMATS = [
 # rejects a two-digit year being taken for a year in the first century.
 YEAR_MIN, YEAR_MAX = 2000, 2100
 _CLOCK_RE = re.compile(r"(\d{1,4})\D(\d{1,2})\D(\d{1,4})\D+(\d{1,2})\D(\d{2})\D(\d{2})")
+_AMPM_RE = re.compile(r"(?<![a-z])([ap])\.?\s?m\b", re.IGNORECASE)
+_WEEKDAY_RE = re.compile(r"(?<![a-z])(mon|tue|wed|thu|fri|sat|sun)[a-z]*", re.IGNORECASE)
+# a run of digits and digit-shaped letters: "2O24" -> "2024", but a letter
+# standing alone ("S" of "Sun") is left for the weekday
+_DIGITISH = re.compile("[0-9" + re.escape("".join(_DIGIT_CONFUSION)) + "]+")
 
 
 def parse_osd_clock(raw: str) -> Optional[dict]:
@@ -185,25 +195,40 @@ def parse_osd_clock(raw: str) -> Optional[dict]:
 
     Returns every reading the digits allow, never a single guessed one:
 
-        {"readings": [datetime, ...], "ambiguous": bool, "formats": [...]}
+        {"readings": [datetime, ...], "ambiguous": bool, "formats": [...],
+         "twelve_hour": "AM" | "PM" | None, "weekday": "Sun" | None,
+         "weekday_checked": bool, "weekday_disagrees": bool}
 
     `01/02/2024` yields two readings and `ambiguous: True`.  Choosing between
-    them needs a second source; `resolve_against` does that and nothing else
-    here may."""
+    them needs a second source.  The container's date is one (`resolve_against`);
+    the weekday the recorder painted beside the date is the other, and it is
+    applied here: of the readings the digits allow, only those falling on that
+    weekday are kept.  A weekday that fits none of them is reported, not
+    trusted over the digits.  AM/PM turns the hour to 24-hour time; an hour
+    over 12 next to AM/PM is not a clock."""
     if not raw:
         return None
-    m = _CLOCK_RE.search(_WS.sub(" ", "".join(
-        c if c in CLOCK_CHARS else " " for c in raw)))
+    text = _WS.sub(" ", "".join(c if c in CLOCK_CHARS else " " for c in raw))
+    text = _DIGITISH.sub(lambda m: _fix_digits(m.group()), text)
+    m = _CLOCK_RE.search(text)
     if not m:
         return None
     a, b, c, hh, mm, ss = m.groups()
+    # the weekday usually sits between the date and the time, inside the
+    # match; AM/PM after it - so both are looked for in the whole line
+    ampm = _AMPM_RE.search(text)
+    hour = int(hh)
+    if ampm:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if ampm.group(1).lower() == "p" else 0)
     out: list[datetime] = []
     formats: list[str] = []
     for fmt, name in _CLOCK_FORMATS:
         # The three groups go in as they were read; the format decides which
         # is the year.  An impossible combination raises and is skipped.
         try:
-            dt = datetime.strptime(f"{a}-{b}-{c} {hh}:{mm}:{ss}", fmt)
+            dt = datetime.strptime(f"{a}-{b}-{c} {hour}:{mm}:{ss}", fmt)
         except ValueError:
             continue
         if not YEAR_MIN <= dt.year <= YEAR_MAX or dt in out:
@@ -212,7 +237,20 @@ def parse_osd_clock(raw: str) -> Optional[dict]:
         formats.append(name)
     if not out:
         return None
+    wd = _WEEKDAY_RE.search(text)
+    checked = disagrees = False
+    if wd:
+        day = [d[:3] for d in WEEKDAYS].index(wd.group(1).lower())
+        fit = [(r, f) for r, f in zip(out, formats) if r.weekday() == day]
+        if fit:
+            out, formats = [r for r, _ in fit], [f for _, f in fit]
+            checked = True
+        else:
+            disagrees = True
     return {"readings": out, "ambiguous": len(out) > 1, "formats": formats,
+            "twelve_hour": ampm.group(1).upper() + "M" if ampm else None,
+            "weekday": wd.group(1).title() if wd else None,
+            "weekday_checked": checked, "weekday_disagrees": disagrees,
             "raw": raw.strip()}
 
 
