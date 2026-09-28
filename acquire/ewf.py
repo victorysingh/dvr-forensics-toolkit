@@ -39,6 +39,7 @@ import os
 import re
 import struct
 import zlib
+from array import array
 from collections import OrderedDict
 from typing import Optional
 
@@ -85,13 +86,42 @@ def segment_paths(first: str) -> list[str]:
     return out or [first]
 
 
+class ChunkTable:
+    """Where every chunk lives, in typed arrays: 15 bytes a chunk.  A list
+    of tuples held the 4.58 M chunks of a real 150 GB image in ~580 MB
+    (this holds them in 69 MB), and would need gigabytes for a 2 TB disk.
+    Reads back as (segment, offset, size, compressed) tuples, like the list
+    it replaced."""
+
+    def __init__(self):
+        self.seg, self.off = array("H"), array("Q")
+        self.size, self.comp = array("I"), array("B")
+
+    def extend(self, seg: int, offsets, sizes, compressed) -> None:
+        """One table's chunks, all in segment `seg`."""
+        self.seg.extend([seg] * len(offsets))
+        self.off.extend(offsets)
+        self.size.extend(sizes)
+        self.comp.extend(compressed)
+
+    def __len__(self) -> int:
+        return len(self.off)
+
+    def __getitem__(self, k: int) -> tuple[int, int, int, bool]:
+        return self.seg[k], self.off[k], self.size[k], bool(self.comp[k])
+
+    def __iter__(self):
+        for k in range(len(self.off)):
+            yield self[k]
+
+
 class EwfImage:
     """The media inside an E01 set, as bytes at offsets."""
 
     def __init__(self, path: str):
         self.paths = segment_paths(path)
         self.files = [open(p, "rb") for p in self.paths]
-        self.chunks: list[tuple[int, int, int, bool]] = []    # (segment, offset, size, compressed)
+        self.chunks = ChunkTable()                  # (segment, offset, size, compressed)
         self.bytes_per_sector = 512
         self.sectors_per_chunk = 64
         self.sectors = 0
@@ -170,15 +200,14 @@ class EwfImage:
         hdr = fh.read(24)
         count, = struct.unpack_from("<I", hdr, 0)
         base, = struct.unpack_from("<Q", hdr, 8)
-        raw = fh.read(4 * count)
-        offsets = [(e & 0x7FFFFFFF) + base for e in struct.unpack(f"<{count}I", raw)]
-        flags = [bool(e & 0x80000000) for e in struct.unpack(f"<{count}I", raw)]
-        # The last chunk runs to the end of the sectors data (or, in older
-        # layouts with no sectors section, to this table).
+        entries = struct.unpack(f"<{count}I", fh.read(4 * count))
+        offsets = [(e & 0x7FFFFFFF) + base for e in entries]
+        flags = [e >> 31 for e in entries]
+        # Each chunk runs to the next; the last to the end of the sectors
+        # data (or, in older layouts with no sectors section, to this table).
         end = sectors_range[1] if sectors_range else table_pos
-        for k, off in enumerate(offsets):
-            stop = offsets[k + 1] if k + 1 < count else end
-            self.chunks.append((seg, off, stop - off, flags[k]))
+        sizes = [b - a for a, b in zip(offsets, offsets[1:] + [end])]
+        self.chunks.extend(seg, offsets, sizes, flags)
 
     # -- data -------------------------------------------------------------
     def _chunk(self, k: int) -> bytes:
