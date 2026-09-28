@@ -240,6 +240,17 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                                                   "index_coverage")}
         case["timeline"]["sha256"] = _hashed(j("timeline.json"))
         case["timeline"]["events"] = t.get("events", [])[:2000]
+        case["timeline"]["recorder_events"] = t.get("recorder_events", [])[:2000]
+
+    rl = _load(j("hik_log.json"))
+    if rl and "summary" in rl:
+        case["recorder_log"] = {
+            "sha256": _hashed(j("hik_log.json")), "rule": rl.get("rule"),
+            "status": rl.get("validation_status"), "master": rl.get("master"),
+            "master_copies": rl.get("master_copies"), "checks": rl.get("checks", []),
+            "log_area": rl.get("log_area"), "init_time_local": rl.get("init_time_local"),
+            "summary": rl["summary"], "clock_vs_footage": rl.get("clock_vs_footage"),
+            "time_basis": rl.get("time_basis"), "notes": rl.get("notes", [])}
 
     act = _load(j("activity.json"))
     if act:

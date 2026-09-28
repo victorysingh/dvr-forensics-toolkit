@@ -432,6 +432,51 @@ def render(case: dict, examiner_notes: str = "") -> str:
                       [[n["clip"], n["title"], f"{n['confidence']:.2f}", n["frames"],
                         n.get("clock") or "-"] for n in osd["named"][:30]]))
 
+    rl = case.get("recorder_log")
+    if rl:
+        s, m = rl["summary"], rl.get("master") or {}
+        add("<h2>6d. The recorder's own log</h2>")
+        add(f"<p>The recorder's system log, read from the log area its master sector names "
+            f"(0x{rl['log_area'][0]:X}-0x{rl['log_area'][1]:X}; master copy at "
+            f"0x{m.get('offset', 0):X}, <code>{e(m.get('fs_version', ''))}</code>, initialised "
+            f"{e(rl.get('init_time_local') or '?')}). {s['records']:,} records, "
+            f"{e(s['first_local'])} to {e(s['last_local'])}; {s['defined_by_the_sdk']:,} carry a "
+            f"code Hikvision's SDK names, the rest are reported as undefined. Status "
+            f"<b>{e(rl.get('status') or '')}</b>. {e(rl.get('time_basis') or '')}.</p>")
+        add(table(["Master-sector check", "Result"],
+                  [[c["check"] + (f" ({c['detail']})" if c.get("detail") else ""),
+                    {True: "agrees", False: "DIFFERS", None: "not checked"}[c["ok"]]]
+                   for c in rl.get("checks", [])]))
+        cv = rl.get("clock_vs_footage")
+        if cv:
+            add(f"<div class='box'><b>Which clock the log keeps:</b> {e(cv['verdict'])} - "
+                f"{cv['followed_by_a_stream']} of {cv['power_on_records']} power-on records are "
+                f"followed by a new stream within {cv['window_s']} s at no shift, "
+                f"{cv['next_best']} at the best other half-hour shift.</div>")
+        p = s.get("power", {})
+        add(f"<p><b>Power:</b> {p.get('power on', 0)} power-on, {p.get('abnormal shutdown', 0)} "
+            f"abnormal shutdown, {p.get('power off', 0)} orderly power-off.</p>")
+        tl = case.get("timeline") or {}
+        cuts = [x for x in tl.get("correlations", []) if x["kind"] == "power_cut"]
+        quiet = [x for x in tl.get("correlations", []) if x["kind"] == "silence_not_in_log"]
+        if cuts or quiet:
+            add(f"<p>{len(cuts)} of {len(cuts) + len(quiet)} periods in which every camera was "
+                f"silent for over a minute, inside the log's period, are explained by a logged "
+                f"power cut (section 6).</p>")
+            add(table(["Every camera silent from", "to", "Length", "Power-on logged",
+                       "Abnormal shutdown logged"],
+                      [[x["start_local"], x["end_local"], hms(x["duration_s"]),
+                        x.get("power_on_local") or "not in the log",
+                        x.get("abnormal_shutdown_local") or "-"] for x in (cuts + quiet)[:100]]))
+        if s.get("user_actions"):
+            add("<h3>Actions by a named user</h3>")
+            add(table(["Time (recorder clock)", "User", "Action"],
+                      [[a["time_local"], a["user"], a["type"]] for a in s["user_actions"][:200]]))
+        add(table(["Event", "Records"], [[k, f"{v:,}"] for k, v in
+                                          list(s.get("by_type", {}).items())[:15]]))
+        for n in rl.get("notes", []):
+            add(f"<p class='muted'>&bull; {e(n)}</p>")
+
     # -- custody ---------------------------------------------------------
     add("<h2>7. Chain of custody</h2>")
     add(f"<p>Append-only ledger; each entry carries the SHA-256 of the previous one. "
