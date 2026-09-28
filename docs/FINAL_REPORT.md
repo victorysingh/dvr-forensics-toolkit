@@ -147,7 +147,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 412 on generated data with known ground truth, plus
+- **Automated tests:** 441 on generated data with known ground truth, plus
   12 on real media (9 on the CP Plus drive's image, 3 on the HeimVision E01).
   They cover the Merkle tree, the custody chain, bad sectors, device loss,
   every parser and carver, the timeline, the model check, the export
@@ -274,7 +274,8 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   share the same settings.
 - **On fast media the single pass is CPU-bound.**
 - **The s.63 certificate wording has not been checked against the Gazette.**
-- **The 23 Sep gaps on drive 1** may be the team's own handling of the unit.
+- **The 23 Sep gaps on drive 1** may be the team's own handling of the unit
+  (the 21 Sep gap is a restart the unit's own log records).
   This is to be confirmed and recorded.
 
 ## 11. Future work
@@ -282,7 +283,8 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
 1. **The field visit** (USER_MANUAL §3.4d–e, SOP 1.2–1.4):
    - photograph each recorder's clock against true time, and its time-zone
      setting;
-   - record its model, serial and firmware;
+   - record its model, serial and firmware (done for the CP Plus unit on 28 Sep:
+     `CP-UNR-104F1`, firmware `V1.00.14.00.T`);
    - take a native export from a reference disk.
 
    These make the first vendor `validated`, give UTC, and put both drives on
