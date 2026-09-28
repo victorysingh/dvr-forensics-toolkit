@@ -199,6 +199,7 @@ out/<case>/
   custody_ledger.jsonl    hash-chained record of every action
   codec_profile.json      where the H.264/H.265 payload lives
   oem_coverage.json       all eight PS vendors, detected or not
+  regions.json            high entropy with no video structure (encrypted?), not parsed
   carve/carve_report.json streams, extents, index labels (scan --carve)
   carve/streams/          extracted footage (.dav + bare .h264/.h265)
   carve/extracted.json    per-file SHA-256 and frame checks

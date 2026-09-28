@@ -165,6 +165,16 @@ def render(case: dict, examiner_notes: str = "") -> str:
         add(table(["Offset", "Length", "Error", "Substituted"],
                   [[f"0x{b['offset']:X}", b["length"], b["error"], b["substituted_with"]]
                    for b in s["bad_regions"]]))
+    reg = case.get("regions")
+    if reg and reg.get("flagged_blocks"):
+        add("<h3>High entropy without video structure</h3>")
+        add(f"<p>{e(reg['verdict'].rstrip('.'))}. A block is flagged when its sample is incompressible "
+            f"and it holds no more H.264/H.265 start codes than random data would "
+            f"(at most {reg['start_code_limit_per_8mib']} per 8 MiB; video has hundreds). "
+            "Entropy cannot prove encryption, so none of this is claimed as encrypted.</p>")
+        add(table(["Offset", "Length", "Blocks", "What it is consistent with"],
+                  [[f"0x{r['offset']:X}", size(r["length"]), r["blocks"], r["meaning"]]
+                   for r in reg["regions"][:50]]))
 
     pr = case.get("preserved")
     if pr:

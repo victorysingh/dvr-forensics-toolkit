@@ -115,6 +115,13 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                                                  "stats", "bad_regions", "detections",
                                                  "generated_utc", "tool", "tool_version")}
         case["scan"]["signature_hit_count"] = len(scan.get("signature_hits", []))
+        # high entropy without video structure; a scan older than regions.json
+        # is classified from its block map, which already holds every input
+        case["regions"] = _load(j("regions.json"))
+        if case["regions"] is None and os.path.isfile(j("blockmap.jsonl")):
+            from detect.regions import summarise
+            with open(j("blockmap.jsonl"), "r", encoding="utf-8") as fh:
+                case["regions"] = summarise(json.loads(x) for x in fh if x.strip())
     elif state:
         size = state.get("identity", {}).get("size_bytes", 0)
         done = state.get("blocks_done", 0) * state.get("identity", {}).get("block_size", 0)
