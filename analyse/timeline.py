@@ -131,9 +131,75 @@ def index_coverage(hik_index: dict, events: list[dict]) -> dict:
     return dict(sorted(per.items()))
 
 
+# The recorder's own log (hik-log): which records become timeline events, and
+# how a logged power-on explains a silence on every camera.  On the real
+# drive the power-on record lands within 5 s of the footage resuming, the
+# footage having stopped 60-100 s earlier (outage plus boot).
+RECORDER_EVENTS = {(3, 0x41): "power_on", (3, 0x42): "power_off",
+                   (3, 0x43): "abnormal_shutdown", (3, 0x5C): "hdd_format_local",
+                   (3, 0x82): "hdd_format_remote"}
+POWER_ON_AFTER_S = 30
+SHUTDOWN_BEFORE_S = 900
+
+
+def recorder_log_events(recorder_log: dict) -> list[dict]:
+    """Power, disk-format and user records from the recorder's own log."""
+    out = []
+    for r in recorder_log.get("recorder_log", []):
+        kind = RECORDER_EVENTS.get((r["major"], r["minor"]))
+        if kind is None and r.get("user"):
+            kind = "user_action"
+        if kind:
+            out.append({"kind": kind, "time_local": r["time_local"], "type": r["type"],
+                        "user": r.get("user", ""), "offset": r["offset"],
+                        "source": "recorder_log"})
+    return sorted(out, key=lambda x: x["time_local"])
+
+
+def explain_silences(lanes: dict[str, list[dict]], rec_events: list[dict],
+                     log_first: str, log_last: str) -> list[dict]:
+    """Periods of over a minute in which every camera lane is silent, inside
+    the log's period, each with what the log says: a power cut (a power-on
+    inside the silence or within 30 s of its end, and the abnormal shutdown
+    logged before it), or nothing."""
+    spans = sorted((parse_local(e["start_local"]), parse_local(e["end_local"]))
+                   for evs in lanes.values() for e in evs)
+    merged: list[list[datetime]] = []
+    for s, en in spans:
+        if merged and s <= merged[-1][1] + timedelta(seconds=GAP_MIN_S):
+            merged[-1][1] = max(merged[-1][1], en)
+        else:
+            merged.append([s, en])
+    lo, hi = parse_local(log_first), parse_local(log_last)
+    ons = [(parse_local(x["time_local"]), x) for x in rec_events if x["kind"] == "power_on"]
+    offs = [parse_local(x["time_local"]) for x in rec_events if x["kind"] == "abnormal_shutdown"]
+    out = []
+    for (_, a), (b, _) in zip(merged, merged[1:]):
+        if (b - a).total_seconds() <= GAP_MIN_S or not (lo <= a <= hi):
+            continue
+        on = next((t for t, _ in ons if a <= t <= b + timedelta(seconds=POWER_ON_AFTER_S)), None)
+        row = {"start_local": fmt(a), "end_local": fmt(b), "duration_s": (b - a).total_seconds()}
+        if on:
+            sd = max((t for t in offs if on - timedelta(seconds=SHUTDOWN_BEFORE_S) <= t <= on),
+                     default=None)
+            row.update({"kind": "power_cut", "power_on_local": fmt(on),
+                        "abnormal_shutdown_local": fmt(sd),
+                        "detail": f"every camera silent for {(b - a).total_seconds() / 60:.1f} "
+                                  f"min; the recorder's own log records a power-on at "
+                                  f"{fmt(on)}" + (f", after an abnormal shutdown logged at "
+                                                  f"{fmt(sd)}" if sd else "")
+                                  + " - a power cut"})
+        else:
+            row.update({"kind": "silence_not_in_log",
+                        "detail": "every camera silent; the recorder's log records no "
+                                  "power-on for it - cause not established"})
+        out.append(row)
+    return out
+
+
 def build(parse_report: Optional[dict], carve_report: Optional[dict],
           clock: ClockModel, ps_report: Optional[dict] = None,
-          hik_index: Optional[dict] = None) -> dict:
+          hik_index: Optional[dict] = None, recorder_log: Optional[dict] = None) -> dict:
     events: list[dict] = []
     anomalies: list[dict] = []
 
@@ -344,6 +410,36 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
                                             f"recording ({fmt(hi)}) - clock set forward "
                                             f"at some point, or a frame date is wrong"})
 
+    # The recorder's own account (hik-log): set against the footage only when
+    # the log is shown to keep the footage's clock.
+    rec_events: list[dict] = []
+    silences: list[dict] = []
+    rec_notes: list[str] = []
+    if recorder_log:
+        rec_events = recorder_log_events(recorder_log)
+        cv = recorder_log.get("clock_vs_footage") or {}
+        summ = recorder_log.get("summary") or {}
+        if cv.get("best_shift_s") == 0 and summ.get("first_local"):
+            silences = explain_silences(cams, rec_events, summ["first_local"],
+                                        summ["last_local"])
+            correlated.extend(silences)
+            rec_notes.append(
+                "The recorder's own log keeps the footage's clock (checked by hik-log against "
+                "the streams that restart after each power-on), so a silence on every camera "
+                "is set against it: a logged power-on inside the silence or within "
+                f"{POWER_ON_AFTER_S} s of its end marks a power cut. Only the log's own period "
+                f"({summ['first_local']} to {summ['last_local']}) is judged.")
+        else:
+            rec_notes.append("The recorder's own log is listed but not set against the "
+                             "footage: its clock was not shown to be the footage's.")
+    counts = {k: sum(1 for e in events if e["kind"] == k)
+              for k in ("indexed", "unindexed", "remnant")}
+    if recorder_log:
+        counts["power_cuts"] = sum(1 for x in silences if x["kind"] == "power_cut")
+        counts["silences_not_in_log"] = sum(1 for x in silences
+                                            if x["kind"] == "silence_not_in_log")
+        counts["recorder_events"] = len(rec_events)
+
     return {
         "rule": TIMELINE_RULE,
         "clock": clock.to_dict(),
@@ -353,9 +449,9 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
         "gaps": gaps,
         "correlations": correlated,
         "anomalies": anomalies,
-        "counts": {k: sum(1 for e in events if e["kind"] == k)
-                   for k in ("indexed", "unindexed", "remnant")},
-        "notes": [
+        "recorder_events": rec_events,
+        "counts": counts,
+        "notes": rec_notes + [
             "Every camera on one recorder shares one clock, so ordering across cameras "
             "holds even where no UTC is asserted.",
             "Lanes named '<width>x<height> group' are carved footage grouped by "

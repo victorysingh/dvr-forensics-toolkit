@@ -1484,6 +1484,69 @@ def test_timeline_recurring() -> None:
           len(r) == 1 and r[0]["start_local"] == "02:00" and len(r[0]["days"]) == 3, str(r))
 
 
+def test_timeline_recorder_log() -> None:
+    """The recorder's own log set against the footage: a silence on every
+    camera with a logged power-on is a power cut; one without is reported as
+    not in the log; and nothing is set against footage whose clock the log
+    was not shown to keep."""
+    print("\n[timeline: the recorder's own log]")
+    from analyse.timeline import ClockModel, build
+
+    def stream(sid, cam, s, e):
+        return {"id": sid, "index_label": cam, "offset": 0, "bytes": 0,
+                "time_first_local": s, "time_last_local": e}
+    ps = {"streams": [
+        # both cameras stop at 10:00:00 and resume at 10:01:30 (a power cut) ...
+        stream("a1", "CH01", "2024-08-01 09:00:00", "2024-08-01 10:00:00"),
+        stream("b1", "CH02", "2024-08-01 09:00:05", "2024-08-01 10:00:02"),
+        stream("a2", "CH01", "2024-08-01 10:01:30", "2024-08-01 14:00:00"),
+        stream("b2", "CH02", "2024-08-01 10:01:31", "2024-08-01 14:00:00"),
+        # ... and again at 14:00 for 5 minutes, with nothing in the log
+        stream("a3", "CH01", "2024-08-01 14:05:00", "2024-08-01 16:00:00"),
+        stream("b3", "CH02", "2024-08-01 14:05:00", "2024-08-01 21:00:00"),
+        # CH01 alone stops at 16:00-16:10 while CH02 records: not recorder-wide
+        stream("a4", "CH01", "2024-08-01 16:10:00", "2024-08-01 21:00:00")]}
+
+    def rec(t, major, minor, typ, user=""):
+        return {"offset": 0, "time_local": t, "major": major, "minor": minor, "type": typ,
+                "user": user, "text": []}
+    log = {"summary": {"first_local": "2024-08-01 00:00:00", "last_local": "2024-08-02 00:00:00"},
+           "clock_vs_footage": {"best_shift_s": 0},
+           "recorder_log": [rec("2024-08-01 09:59:58", 3, 0x43, "Operation: Illegal shut down"),
+                            rec("2024-08-01 10:01:29", 3, 0x41, "Operation: Power On"),
+                            rec("2024-08-01 12:00:00", 3, 0x50, "Operation: Login (local)", "admin"),
+                            rec("2024-08-01 12:00:05", 4, 0xA3, "Information: Start record")]}
+    t = build(None, None, ClockModel(), ps_report=ps, recorder_log=log)
+    cuts = [c for c in t["correlations"] if c["kind"] == "power_cut"]
+    quiet = [c for c in t["correlations"] if c["kind"] == "silence_not_in_log"]
+    check("a silence on every camera with a logged power-on is a power cut, with both records",
+          len(cuts) == 1 and cuts[0]["power_on_local"] == "2024-08-01 10:01:29"
+          and cuts[0]["abnormal_shutdown_local"] == "2024-08-01 09:59:58", str(cuts))
+    check("a silence the log says nothing about is reported, cause not established",
+          len(quiet) == 1 and quiet[0]["start_local"] == "2024-08-01 14:00:00", str(quiet))
+    check("recorder events: power records and the user's action, not routine information",
+          [x["kind"] for x in t["recorder_events"]] == ["abnormal_shutdown", "power_on",
+                                                         "user_action"], str(t["recorder_events"]))
+    check("counts carry the power cuts", t["counts"]["power_cuts"] == 1
+          and t["counts"]["silences_not_in_log"] == 1)
+
+    other = dict(log, clock_vs_footage={"best_shift_s": None})
+    t2 = build(None, None, ClockModel(), ps_report=ps, recorder_log=other)
+    check("a log not shown to keep the footage's clock is listed, not set against the footage",
+          not any(c["kind"] in ("power_cut", "silence_not_in_log") for c in t2["correlations"])
+          and len(t2["recorder_events"]) == 3
+          and any("not set against" in n for n in t2["notes"]))
+    late = dict(log, summary={"first_local": "2024-08-01 12:00:00",
+                              "last_local": "2024-08-02 00:00:00"})
+    t3 = build(None, None, ClockModel(), ps_report=ps, recorder_log=late)
+    check("a silence before the log begins is not judged",
+          [c["start_local"] for c in t3["correlations"] if c["kind"] in
+           ("power_cut", "silence_not_in_log")] == ["2024-08-01 14:00:00"])
+    t4 = build(None, None, ClockModel(), ps_report=ps)
+    check("without a recorder log nothing changes", "power_cuts" not in t4["counts"]
+          and t4["recorder_events"] == [])
+
+
 def _ps_recording(rng, t0, seconds: int, scr0: int) -> bytes:
     """A synthetic Hikvision-style Program Stream: one pack + stream map per
     second (keyframe), 24 more packs of video per second."""
@@ -2986,6 +3049,7 @@ def main() -> int:
         test_activity(tmp)
         test_timeline_clock_default()
         test_timeline_recurring()
+        test_timeline_recorder_log()
         test_ps_carver(tmp)
         test_static_detections()
         test_combined(tmp)
