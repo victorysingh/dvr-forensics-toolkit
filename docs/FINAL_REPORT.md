@@ -138,15 +138,18 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 | Layout | GPT; ext3 system partition; FAT32 ring of 17,152 files of 8 MiB; frames `liu ` ... ` uil` naming camera and microsecond time - decoded from the disk, now `plugins/heimvision.py` |
 | Recorded | 806 files, 6.30 GB: **24 h continuous on 4 cameras**, 1.296 M frames each at 15 fps, no gap over 2 s after the start |
 | Time | the recorder's FAT clock is 8 h behind its frame times on all 806 files: set to UTC-8 in a UTC-4 location |
+| No-parser carver | `carve-annexb`, scored frame by frame by the plugin: 5,187,890 slices, every one in the files accounted for, 0.07% of them container bytes; the four cameras share one parameter set, so its streams mix them - only the container separates cameras and gives time |
 
 ## 5. Validation
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 336 on generated data with known ground truth, plus
-  8 on real media. They cover the Merkle tree, the custody chain, bad
-  sectors, device loss, every parser and carver, the timeline, the model
-  check, the export comparison, the Honeywell plugin and the certificate.
+- **Automated tests:** 357 on generated data with known ground truth, plus
+  9 on real media (8 on the CP Plus drive's image, 1 on the HeimVision E01).
+  They cover the Merkle tree, the custody chain, bad sectors, device loss,
+  every parser and carver, the timeline, the model check, the export
+  comparison, the Honeywell and HeimVision plugins, the E01 reader, the
+  CASE/UCO export and the certificate.
 - **Write blocking:** root writes refused on a sacrificial loop device, and
   the block re-applied automatically after 2 of 2 real reconnects.
 - **Reproducibility:** five independent reads over three days agree bit for
