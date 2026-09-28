@@ -413,6 +413,17 @@ a new stream once the recorder has booted. It reports which clock the log
 keeps, or "not determined" - it never converts to UTC. Given a head image,
 the image's first block must hash to the scan's, or it refuses.
 
+Then rebuild the timeline and the report. When the log keeps the footage's
+clock, `timeline` sets it against the footage: a period in which every camera
+is silent for over a minute, with a logged power-on inside it or within 30 s
+of its end, is reported as a power cut, with the abnormal shutdown logged
+before it; a silence the log says nothing about is reported as such. The
+report's section 6d lists them, with the log's power, disk and user records.
+
+```bash
+python cli.py timeline --out out/CASE-001 && python cli.py report --out out/CASE-001
+```
+
 ### 3.5 Look at the results
 
 ```bash

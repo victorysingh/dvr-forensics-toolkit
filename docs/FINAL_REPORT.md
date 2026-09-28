@@ -128,7 +128,7 @@ Sources: `STATUS.md` §2, `VALIDATION_REPORT.md` §8b.
 | Measured against that index | the carve recovered **99.6–99.7%** of the hours each camera recorded |
 | Checked against the picture | burned-in "Camera 01" / "Camera 03" where the index gave CH01 / CH03; on-screen clocks within 2 s of the decoded times |
 | Analytics (leads) | 68,639 frames of a 22 GB subset: person 517, face 73, bus 1; 64 implausible face boxes (a floor, buckets) flagged and not counted |
-| The recorder's own log | 43,108 system-log records, 28 Jan – 25 Aug 2024, read from the surviving master sector's log area: **188 power cuts** (power-on after an "illegal shut down"), and **one local session by `admin` on 23 Mar 2024, 03:28–03:52**, with a configuration change and two playbacks. Its clock is the footage's clock, checked against the streams that restart after each power-on |
+| The recorder's own log | 43,108 system-log records, 28 Jan – 25 Aug 2024, read from the surviving master sector's log area: **188 power cuts** (power-on after an "illegal shut down"), which explain **16 of the 17 times every camera went silent** for over a minute, and **one local session by `admin` on 23 Mar 2024, 03:28–03:52**, with a configuration change and two playbacks. Its clock is the footage's clock, checked against the streams that restart after each power-on |
 
 ### 4.3 A public image of a recorder we had never seen (HeimVision K9604-W)
 

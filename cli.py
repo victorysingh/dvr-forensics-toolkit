@@ -745,10 +745,12 @@ def cmd_timeline(args) -> int:
     clock = ClockModel.from_observation(args.tz_offset, args.clock_observed,
                                         args.clock_reference)
     hik_idx, hname = load("carve/hik_index.json")
-    t = build(parse_rep, carve_rep, clock, ps_report=ps_rep, hik_index=hik_idx)
+    rlog, rname = load("hik_log.json")
+    t = build(parse_rep, carve_rep, clock, ps_report=ps_rep, hik_index=hik_idx,
+              recorder_log=rlog)
     t["generated_utc"] = utc_now()
     t["inputs"] = {n: sha256_file(os.path.join(args.out, n))
-                   for n in (pname, cname, psname, plname, hname) if n}
+                   for n in (pname, cname, psname, plname, hname, rname) if n}
     path = os.path.join(args.out, "timeline.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(t, fh, indent=2)
@@ -764,6 +766,10 @@ def cmd_timeline(args) -> int:
     for cam, v in (t.get("index_coverage") or {}).items():
         print(f"  {cam:<13} index: recorded {v['recorded_s'] / 3600:6.1f} h in {v['blocks']} "
               f"blocks; recovered {v['recovered_share']:.1%}")
+    if "power_cuts" in c:
+        print(f"  recorder log  {c['recorder_events']} power/user events; "
+              f"{c['power_cuts']} silence(s) on every camera explained by a logged power "
+              f"cut, {c['silences_not_in_log']} not in the log")
     kinds: dict = {}
     for x in t["correlations"] + t["anomalies"]:
         kinds[x["kind"]] = kinds.get(x["kind"], 0) + 1
