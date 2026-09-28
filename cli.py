@@ -1532,7 +1532,7 @@ def _unlabelled(out: str, clip: str) -> bool:
         with open(lp, "r", encoding="utf-8") as fh:
             for row in json.load(fh).get("streams", []):
                 if row["id"] == sid:
-                    return row.get("label") in (None, "", "outside_index")
+                    return row.get("label") in (None, "", "outside_index", "stale_tail")
     cp = os.path.join(out, "carve", "carve_report.json")
     if os.path.exists(cp):
         with open(cp, "r", encoding="utf-8") as fh:

@@ -28,8 +28,13 @@ AND the stream's own recorder times (from its "HK" descriptors) lie inside
 that record's window. On the real drive this held for 2,021 of 2,516
 streams, and the result is independently consistent: each channel keeps a
 single resolution, and all eight hold ~760-790 h. A block reused by a newer
-recording no longer describes older footage still in it - that footage is
-"outside_index", exactly as for Dahua.
+recording no longer describes older footage still in it: footage in a block
+that has a record, but whose own times END BEFORE that record starts, is
+"stale_tail" - an older recording cycle surviving past the new write
+pointer (research gap G2; Dahua's equivalent is `parse --remnants`). Its
+camera is unknown: the record describes the new footage, not it. Footage in
+a block with no record, or that fits no record for another reason, is
+"outside_index".
 """
 
 from __future__ import annotations
@@ -99,7 +104,9 @@ def read_index(dev, header_offsets: list[int], window: int = 4 << 20,
 
 def label_streams(index: dict, ps_rows: list[dict]) -> list[dict]:
     """Channel for each carved PS stream: its data block's record whose
-    window contains the stream's own recorder times - else outside_index."""
+    window contains the stream's own recorder times; stale_tail when the
+    block has records but the stream ends before the earliest of them
+    starts; else outside_index."""
     from datetime import datetime, timezone
     base = index.get("base")
     by_block: dict[int, list[dict]] = defaultdict(list)
@@ -117,11 +124,20 @@ def label_streams(index: dict, ps_rows: list[dict]) -> list[dict]:
         a, z = secs(row.get("time_first_local")), secs(row.get("time_last_local"))
         size = index.get("block_bytes", BLOCK)
         block = (row["offset"] - base) // size if base is not None and row["offset"] >= base else None
-        hit = None
+        hit = stale = None
         if a is not None and z is not None and block is not None:
-            hit = next((r for r in by_block.get(block, [])
+            recs = by_block.get(block, [])
+            hit = next((r for r in recs
                         if r["start"] - SLACK_S <= a and z <= r["end"] + SLACK_S), None)
-        out.append({"id": row["id"], "block": block,
-                    "label": f"CH{hit['channel']:02d}" if hit else "outside_index",
-                    "record_at": hit["at"] if hit else None})
+            if hit is None and recs:
+                first = min(recs, key=lambda r: r["start"])
+                if z < first["start"] - SLACK_S:
+                    stale = first
+        row_out = {"id": row["id"], "block": block,
+                   "label": (f"CH{hit['channel']:02d}" if hit else
+                             "stale_tail" if stale else "outside_index"),
+                   "record_at": (hit or stale or {}).get("at")}
+        if stale:
+            row_out["older_than_record_by_s"] = round(stale["start"] - z)
+        out.append(row_out)
     return out
