@@ -124,6 +124,7 @@ Sources: `STATUS.md` §2, `VALIDATION_REPORT.md` §8b.
 | Top layer | Dahua DHFS 4.1 with an **empty** index: a Dahua-family recorder formatted it and never recorded |
 | Underneath | Hikvision MPEG-PS footage, recovered by structure alone: **2,516 streams, 923 GiB, about 6,300 h**, every one dated from its `HK` descriptors, April 2021 (H.264) to 30 Aug 2024 (H.265 + audio) |
 | Surviving index | a master-sector copy and two HIKBTREE copies near the end of the disk: **922 records, 8 channels**; **2,021 of 2,516 streams** attributed to a camera |
+| The recorder | `DS-7B08HUHI-K1` on the platter, matching the team's unit (label, serial `F29196515`); the unit's full device serial is on the platter 202 times, so this unit wrote this drive |
 | Measured against that index | the carve recovered **99.6–99.7%** of the hours each camera recorded |
 | Checked against the picture | burned-in "Camera 01" / "Camera 03" where the index gave CH01 / CH03; on-screen clocks within 2 s of the decoded times |
 | Analytics (leads) | 68,639 frames of a 22 GB subset: person 517, face 73, bus 1; 64 implausible face boxes (a floor, buckets) flagged and not counted |
@@ -251,8 +252,11 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
 - **No UTC.** The time zone and clock error of neither recorder have been
   read, so every time is the recorder's own clock. The combined two-recorder
   view says "not aligned" for this reason.
-- **The OCR of burned-in camera titles and clocks has never run on a real
-  frame.** It needs ffmpeg and Tesseract, and so remains `synthetic_only`.
+- **The OCR reads 1 of 5 reference titles and no clock on real frames.**
+  It read "Camera 01" on drive 2 correctly, but no title on drive 1, where
+  thin white text sits on a bright wall, and no clock on either drive: both
+  recorders' clocks carry letters (a weekday, or AM/PM) that its clock
+  whitelist excludes. It remains `synthetic_only`.
 - **About 38% of CP Plus video frames do not decode strictly.** The cause
   is measured: 0.3-0.4% of the frames are missing from the disk, and each
   breaks the rest of its ~8.6 s group of pictures. Most have no intact copy
@@ -281,8 +285,8 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
    one axis.
 2. **Date drive 2's reformat from its own logs.** Dahua log records note hard
    drive formatting (Dragonas et al. 2024).
-3. **Run OCR on the frames already read by eye**, on a machine with ffmpeg
-   and Tesseract.
+3. **Make the OCR read what the eye read:** clocks with a weekday or AM/PM,
+   and white text on bright backgrounds (VALIDATION_REPORT §8c).
 4. **Speed:** one regex pass, threaded hashes, and a process pool.
 5. **Any real disk** from Honeywell, TP-Link, Godrej, Uniview or Matrix: run
    `survey` and `carve-annexb`, then write a plugin.

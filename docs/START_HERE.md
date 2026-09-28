@@ -87,7 +87,7 @@ If those pass, the engine below is intact:
 | Linear MD5/SHA-256 + per-block Merkle map | `core/hashing.py` | working |
 | Hash-chained custody ledger | `acquire/ledger.py` | working |
 | Signature DB + confidence scoring | `detect/` | working |
-| Recorder model: platter strings outside the video, the examiner's reading with hashed photos, cross-checked | `detect/model.py`, `cli.py identify-model`, `cli.py record-device` | working; not yet run on either drive |
+| Recorder model: platter strings outside the video, the examiner's reading with hashed photos, cross-checked | `detect/model.py`, `cli.py identify-model`, `cli.py record-device` | working; drive 2 `DS-7B08HUHI-K1` agrees with the unit and its serial; none found on drive 1's head image |
 | Partition parsing (MBR/GPT) | `detect/engine.py` | working |
 | Synthetic DVR image generator | `tests/synth_dvr.py` | working |
 | Vendor parser plugin SDK (field provenance) | `parsers/base.py` | working |
