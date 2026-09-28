@@ -4,19 +4,25 @@ This exists so the acquisition, detection and (later) carving engines can be
 developed and regression-tested before the physical Hikvision drive is
 imaged, and so CI has something deterministic to run against.
 
-IT IS NOT EVIDENCE AND IT IS NOT A VENDOR SAMPLE.  Anything validated only
-against this file is marked `synthetic_only` in the report - a parser that
-passes here has proven it can read a layout we invented, which is a test of
-the code, not of our understanding of the vendor's format.  Only the real
-DS-80xx drive can move Hikvision to `validated`.
+IT IS NOT EVIDENCE AND IT IS NOT A VENDOR SAMPLE.  Passing here proves the
+code reads this layout, not that the layout is the vendor's.  The Hikvision
+structures follow the layout OBSERVED on the team's drive 2 (ST1000VX005
+s/n Z9C2632A; parsers/hiklog.py, parsers/hikbtree.py): the magic 0x10 into
+the master sector, the master's fields at their observed offsets, two
+HIKBTREE copies where the master points, 48-byte leaf records on a block
+grid.  The values are ours, and the blocks are 256 KiB where the real drive
+uses 1 GiB.  The video itself is raw H.264, not Hikvision's MPEG-PS.
 
 Layout (64 MiB default):
 
     0x000000  MBR with one primary partition
-    0x000200  Hikvision master sector - HIKVISION@HANGZHOU magic
-    0x001000  HIKBTREE index header
-    0x100000  video region A - "active" recordings, 4 cameras
-    0x800000  video region B - "deleted" recording (no index entry)
+    0x000200  Hikvision master sector - HIKVISION@HANGZHOU at 0x210
+    0x001000  HIKBTREE index, copy 1 (magic at +0x10, records from +0x100)
+    0x010000  HIKBTREE index, copy 2
+    0x020000  system-log area (empty)
+    0x100000  data area, 256 KiB blocks; video region A - "active"
+              recordings, 4 cameras, each indexed by its block
+    0x800000  video region B - "deleted" recording (no index record)
     0xE00000  high-entropy region (stands in for encrypted/compressed data)
     ......    zero fill
 """
@@ -33,6 +39,10 @@ DEFAULT_SIZE = 64 * 1024 * 1024
 
 OFF_MASTER = 0x000200
 OFF_BTREE = 0x001000
+OFF_BTREE2 = 0x010000
+OFF_LOG, LOG_SIZE = 0x020000, 0x010000
+HIK_BLOCK = 0x40000                    # 256 KiB data blocks (1 GiB on the real drive)
+HIK_RECORDS_AT = 0x100                 # leaf records start this far into a HIKBTREE page
 OFF_VIDEO_A = 0x100000
 OFF_VIDEO_B = 0x800000
 OFF_ENTROPY = 0xE00000
@@ -65,30 +75,42 @@ def _mbr(total_size: int) -> bytes:
     return bytes(mbr)
 
 
-def _hik_master() -> bytes:
-    """Hikvision-shaped master sector. Field layout is our own invention
-    beyond the magic string - see module docstring."""
-    b = bytearray(SECTOR * 2)
-    b[0:18] = b"HIKVISION@HANGZHOU"
-    struct.pack_into("<Q", b, 0x20, 500_107_862_016)   # nominal capacity
-    struct.pack_into("<Q", b, 0x28, 256 * 1024 * 1024)  # data block size
-    struct.pack_into("<I", b, 0x30, 4)                  # channel count
-    b[0x40:0x50] = b"DS-8008HGHI-SH\x00\x00"
-    b[0x60:0x68] = b"V3.4.92\x00"
+def _hik_master(capacity: int, block: int = HIK_BLOCK, data_offset: int = OFF_VIDEO_A,
+                btrees: tuple[int, int] = (OFF_BTREE, OFF_BTREE2),
+                init_time: int = 1_758_412_800) -> bytes:
+    """A master sector with the observed layout (parsers/hiklog.py
+    MASTER_FIELDS): magic at +0x10, and fields that agree with each other."""
+    b = bytearray(SECTOR)
+    b[0x10:0x22] = b"HIKVISION@HANGZHOU"
+    b[0x30:0x3E] = b"HIK.2011.03.08"
+    count = (capacity - data_offset) // block
+    for off, value in ((0x48, capacity), (0x50, OFF_LOG), (0x58, LOG_SIZE),
+                       (0x60, OFF_LOG + LOG_SIZE), (0x68, 0), (0x78, data_offset),
+                       (0x80, count * block), (0x88, block), (0x90, count),
+                       (0x98, btrees[0]), (0xA0, 0x1000), (0xA8, btrees[1]), (0xB0, 0x1000)):
+        struct.pack_into("<Q", b, off, value)
+    struct.pack_into("<I", b, 0xF0, init_time)
     return bytes(b)
 
 
-def _hik_btree(entries: list[tuple[int, int, int, int]]) -> bytes:
-    """HIKBTREE header plus simple index entries:
-    (start_offset, length, camera_id, unix_start)."""
-    b = bytearray(SECTOR * 8)
-    b[0:8] = b"HIKBTREE"
-    struct.pack_into("<I", b, 0x10, len(entries))
-    b[0x20:0x26] = b"OFFSET"
-    pos = 0x40
-    for start, length, cam, ts in entries:
-        struct.pack_into("<QQII", b, pos, start, length, cam, ts)
-        pos += 24
+def hik_record(channel: int, start: int, end: int, block_offset: int) -> bytes:
+    """One 48-byte HIKBTREE leaf record, as observed (parsers/hikbtree.py)."""
+    r = bytearray(48)
+    r[0:8] = b"\xff" * 8
+    r[0x11] = channel
+    struct.pack_into("<IIQ", r, 0x18, start, end, block_offset)
+    return bytes(r)
+
+
+def _hik_btree(records: list[bytes]) -> bytes:
+    """A HIKBTREE page: the magic at +0x10, the version string, an OFFSET
+    marker (published), then the leaf records."""
+    b = bytearray(0x1000)
+    b[0x10:0x18] = b"HIKBTREE"
+    b[0x18:0x26] = b"HIK.2010.11.09"
+    b[0x40:0x46] = b"OFFSET"
+    for k, rec in enumerate(records):
+        b[HIK_RECORDS_AT + 48 * k:HIK_RECORDS_AT + 48 * (k + 1)] = rec
     return bytes(b)
 
 
@@ -110,14 +132,18 @@ def build(path: str, size: int = DEFAULT_SIZE, seed: int = 26150,
     img[0:512] = _mbr(size)
 
     index_entries: list[tuple[int, int, int, int]] = []
+    hik_records: list[tuple[int, int, int, int]] = []
 
     # --- active recordings, 4 cameras, 1 hour apart -----------------------
     pos = OFF_VIDEO_A
-    base_ts = 1_758_499_200            # 2025-09-22T00:00:00Z
+    base_ts = 1_758_499_200            # 2025-09-22 00:00:00 on the recorder's clock
     for i in range(8):
         clip = _clip(rng, frames=rng.randint(20, 40))
         img[pos:pos + len(clip)] = clip
         index_entries.append((pos, len(clip), i % 4, base_ts + i * 3600))
+        block_off = OFF_VIDEO_A + (pos - OFF_VIDEO_A) // HIK_BLOCK * HIK_BLOCK
+        hik_records.append((i % 4 + 1, base_ts + i * 3600, base_ts + i * 3600 + 60 + i,
+                            block_off))
         pos += len(clip) + rng.randint(1024, 4096)
 
     # --- "deleted" recording: present on the platter, absent from the index
@@ -125,10 +151,15 @@ def build(path: str, size: int = DEFAULT_SIZE, seed: int = 26150,
     img[OFF_VIDEO_B:OFF_VIDEO_B + len(deleted)] = deleted
 
     if vendor in ("hikvision", "mixed"):
-        m = _hik_master()
+        m = _hik_master(size)
         img[OFF_MASTER:OFF_MASTER + len(m)] = m
-        t = _hik_btree(index_entries)
-        img[OFF_BTREE:OFF_BTREE + len(t)] = t
+        # a block reserved when the disk was initialised: channel 255, not a camera
+        last = OFF_VIDEO_A + ((size - OFF_VIDEO_A) // HIK_BLOCK - 1) * HIK_BLOCK
+        recs = [hik_record(*r) for r in hik_records] + [
+            hik_record(255, 1_758_412_800, 1_758_412_800, last)]
+        t = _hik_btree(recs)
+        for at in (OFF_BTREE, OFF_BTREE2):
+            img[at:at + len(t)] = t
 
     if vendor in ("dahua", "mixed"):
         # DHFS superblock and a few DHAV-wrapped frames
@@ -158,6 +189,8 @@ def build(path: str, size: int = DEFAULT_SIZE, seed: int = 26150,
         "active_clips": len(index_entries),
         "deleted_clip": {"offset": OFF_VIDEO_B, "length": len(deleted)},
         "index_entries": index_entries,
+        "hik_records": hik_records, "hik_block_size": HIK_BLOCK,
+        "hik_btree_offsets": [OFF_BTREE, OFF_BTREE2],
         "entropy_region": {"offset": OFF_ENTROPY, "length": len(ent)},
     }
 

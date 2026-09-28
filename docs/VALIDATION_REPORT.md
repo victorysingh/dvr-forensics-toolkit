@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 453 pass, 0 fail: 441 on generated data with known ground truth, 12 on real media (9 on the CP Plus drive's image, 3 on the HeimVision E01) |
+| Automated tests | 432 pass, 0 fail: 420 on generated data with known ground truth, 12 on real media (9 on the CP Plus drive's image, 3 on the HeimVision E01) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
@@ -32,7 +32,7 @@ Two different things are validated here, and they must not be confused:
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
-| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container and index records `spec_only`, full-filesystem parser `synthetic_only`; HeimVision `spec_only`, observed on a third real image (§8e) |
+| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container, index records and full-filesystem parser `spec_only` (the parser not yet run on an intact Hikvision disk); HeimVision `spec_only`, observed on a third real image (§8e) |
 
 ## 2. Environment
 
@@ -55,7 +55,7 @@ DHFS_REAL_IMAGE=/path/to/first20GiB.dd python tests/test_pipeline.py   # + 8 rea
 Standard library only; runs on a bare Python install. Groups: Merkle trees;
 custody ledger (edits and deletions detected); signatures across block
 boundaries; bad-sector isolation; partitions; end-to-end scan; resume
-safety; Hikvision parser (`synthetic_only`); parser robustness on
+safety; Hikvision parser (`spec_only`, observed layout); parser robustness on
 non-matching disks; DHAV frames; DHFS parser and carver against generated
 disks with **known ground truth**, including a "twins" mode where two
 cameras have identical counters and clocks; metadata preservation (tamper
@@ -495,7 +495,7 @@ timezone has been read off the unit (§10).
 | Hikvision — video container | `spec_only` | MPEG-PS + `HK` descriptors decoded from real footage and cross-checked; not byte-matched to a Hikvision export |
 | Hikvision — index records | `spec_only` | decoded from the surviving HIKBTREE copies on real media and cross-checked (resolution per camera, hours per camera, 99.6% recovered vs recorded); not byte-matched to an export |
 | Hikvision — system log and master sector (`parsers/hiklog.py`) | `spec_only` | read off real media, six master-sector cross-checks, log clock checked against the footage; not matched against the log the recorder shows or exports |
-| Hikvision — full-filesystem parser (`parsers/hikvision.py`) | `synthetic_only` | written before we held media; its master-sector offsets differ from the real layout `hiklog.py` reads |
+| Hikvision — full-filesystem parser (`parsers/hikvision.py`) | `spec_only` | rewritten on 28 Sep on the layout observed on drive 2 - the master sector as `hiklog.py` reads it, the HIKBTREE copies where the master points, the 48-byte records `hikbtree.py` reads - and tested on a disk built to that layout, including a primary master overwritten and read from its backup; not yet run on an intact Hikvision disk. The first version decoded offsets invented for our fixture and would have found nothing on a real disk |
 | HeimVision (K9604-W) | `spec_only` | `plugins/heimvision.py`, read off the NIST CFReDS image (§8e); every field observed on real media; not byte-matched to a HeimVision export |
 | Honeywell | `spec_only` | `plugins/honeywell.py`, written from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430); tested on a disk built to the paper's description (10 tests, including recovery after a format); no Honeywell disk read |
 | TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand-string detection only; their video is recoverable by `carve-annexb` without a parser |
@@ -533,7 +533,7 @@ recorded with the result.
 
 On the Hikvision unit the same reference disk does more: it would be the first
 disk that recorder formatted *itself* that we hold, so it is also the check
-for `parsers/hikvision.py`, which is still `synthetic_only`.
+for `parsers/hikvision.py`, now written on the layout observed on drive 2 but never run on an intact Hikvision disk.
 
 A match (or an explained difference) is recorded here with both files'
 SHA-256.
