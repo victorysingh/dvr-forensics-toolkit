@@ -12,9 +12,15 @@ platter, so there are two sources here, kept apart and never blended:
     Reported with their offsets and status `candidate`: a string proves the
     text is on the disk, not that the disk came from that model - a disk
     moves between recorders, and the team's second drive did.
-  * EXAMINER OBSERVATION - model, serial and firmware read off the unit's
-    label or System Info screen at seizure, with the SHA-256 of the photo
-    that shows it.
+  * EXAMINER OBSERVATION - model, serial, MAC, device ID and firmware read
+    off the unit's label or System Info screen at seizure, with the SHA-256
+    of the photo that shows them.
+  * THE UNIT'S OWN IDENTIFIERS ON THE PLATTER - once the unit is recorded,
+    the platter search also looks for its serial, device ID and MAC (as
+    text in the usual forms, and the MAC as its 6 raw bytes).  A model
+    string can come from any unit of that model; the serial of *this* unit
+    on the disk shows this unit wrote to it.  Finding none shows nothing:
+    many recorders never write their identity to the disk.
 
 `check()` compares them with each other and with the vendor detection.  A
 disagreement is a finding to be explained, not an error: a disk formatted by
@@ -165,13 +171,52 @@ def select_blocks(blockmap: list[dict], device_size: int, max_bytes: int,
         "capped_at_bytes": max_bytes if capped else None}
 
 
-class ModelSearch:
-    """Model-numbered strings in bytes handed in order, block by block.  A
-    string straddling two blocks is found once: each block is searched with
-    the tail of the previous one in front of it."""
+MIN_IDENTIFIER = 6          # shorter strings match by chance too often to mean anything
 
-    def __init__(self):
+
+def normalize_mac(mac: str) -> Optional[str]:
+    """'02-00-5e-10-00-01' -> '02:00:5E:10:00:01'; None if not 12 hex digits."""
+    h = re.sub(r"[:\-. ]", "", (mac or "").strip())
+    if not re.fullmatch(r"[0-9A-Fa-f]{12}", h):
+        return None
+    return ":".join(h[i:i + 2] for i in range(0, 12, 2)).upper()
+
+
+def _token(text: str) -> "re.Pattern[bytes]":
+    # the identifier as a whole token, in either case
+    return re.compile(rb"(?<![0-9A-Za-z])" + re.escape(text.encode("ascii"))
+                      + rb"(?![0-9A-Za-z])", re.IGNORECASE)
+
+
+def identifier_forms(obs: Optional[dict]) -> list[dict]:
+    """What to search the platter for: the unit's serial, device ID and MAC as
+    the examiner recorded them, each in the forms it could be written in."""
+    out: list[dict] = []
+    for name in ("serial", "device_id"):
+        v = ((obs or {}).get(name) or "").strip()
+        if len(v) >= MIN_IDENTIFIER and v.isascii():
+            out.append({"identifier": name, "value": v, "form": "text", "pattern": _token(v)})
+    mac = (obs or {}).get("mac")
+    if mac:
+        bare = mac.replace(":", "")
+        for form, text in (("text, colons", mac), ("text, hyphens", mac.replace(":", "-")),
+                           ("text, no separators", bare)):
+            out.append({"identifier": "mac", "value": mac, "form": form, "pattern": _token(text)})
+        out.append({"identifier": "mac", "value": mac, "form": "6 raw bytes",
+                    "pattern": re.compile(re.escape(bytes.fromhex(bare)))})
+    return out
+
+
+class ModelSearch:
+    """Model-numbered strings - and, when given, the unit's own identifiers -
+    in bytes handed in order, block by block.  A string straddling two blocks
+    is found once: each block is searched with the tail of the previous one
+    in front of it."""
+
+    def __init__(self, identifiers: Optional[list[dict]] = None):
         self.found: dict[tuple[str, str], dict] = {}
+        self.identifiers = identifiers or []
+        self.ids: dict[tuple[str, str], dict] = {}
         self._tail, self._tail_end = b"", -1
 
     def feed(self, offset: int, data: bytes) -> None:
@@ -185,8 +230,27 @@ class ModelSearch:
                 if at + len(m.group()) <= offset:        # whole match was in the tail
                     continue
                 self._add(f, m.group().decode("ascii"), at, buf, m.start(), m.end())
+        for spec in self.identifiers:
+            for m in spec["pattern"].finditer(buf):
+                at = base + m.start()
+                if at + len(m.group()) <= offset:
+                    continue
+                self._add_id(spec, at, buf, m.start(), m.end())
         self._tail = data[-64:]
         self._tail_end = offset + len(data)
+
+    def _add_id(self, spec: dict, at: int, buf: bytes, s: int, e: int) -> None:
+        key = (spec["identifier"], spec["form"])
+        row = self.ids.get(key)
+        if row is None:
+            ctx = buf[max(0, s - CONTEXT):e + CONTEXT]
+            row = self.ids[key] = {
+                "identifier": spec["identifier"], "value": spec["value"], "form": spec["form"],
+                "count": 0, "offsets": [],
+                "context": "".join(chr(c) if 32 <= c < 127 else "." for c in ctx)}
+        row["count"] += 1
+        if len(row["offsets"]) < OFFSETS_KEPT:
+            row["offsets"].append(at)
 
     def _add(self, f: ModelFamily, model: str, at: int, buf: bytes, s: int, e: int) -> None:
         row = self.found.get((f.id, model))
@@ -203,19 +267,30 @@ class ModelSearch:
     def result(self, searched: dict) -> dict:
         rows = sorted(self.found.values(),
                       key=lambda r: (r["kind"] != "recorder", -r["count"], r["model"]))
-        return {"rule": RULE, "status": "candidate", "searched": searched,
-                "candidates": rows,
-                "notes": ["a model string on the platter shows the text is on this disk, "
-                          "not that the disk was seized from that model",
-                          "camera models on a recorder's disk name the cameras, not the recorder"]}
+        out = {"rule": RULE, "status": "candidate", "searched": searched,
+               "candidates": rows,
+               "notes": ["a model string on the platter shows the text is on this disk, "
+                         "not that the disk was seized from that model",
+                         "camera models on a recorder's disk name the cameras, not the recorder"]}
+        if self.identifiers:
+            out["unit_identifiers"] = {
+                "searched": [{k: s[k] for k in ("identifier", "value", "form")}
+                             for s in self.identifiers],
+                "found": sorted(self.ids.values(), key=lambda r: -r["count"])}
+            out["notes"].append("the unit's own serial, device ID or MAC on the platter shows "
+                                "this unit wrote to the disk; finding none shows nothing")
+        return out
 
 
 # ---------------------------------------------------------------------------
 # Examiner observation, and the check
 # ---------------------------------------------------------------------------
 def observation(model: str, serial: str = "", firmware: str = "", where: str = "",
-                photo: Optional[dict] = None, actor: str = "", when_utc: str = "") -> dict:
+                photo: Optional[dict] = None, actor: str = "", when_utc: str = "",
+                mac: str = "", device_id: str = "") -> dict:
     return {"model": model.strip(), "serial": serial.strip() or None,
+            "mac": normalize_mac(mac) if mac else None,
+            "device_id": device_id.strip() or None,
             "firmware": firmware.strip() or None, "read_from": where or None,
             "photo": photo, "recorded_by": actor or None, "recorded_utc": when_utc,
             "identified": identify(model)}
@@ -278,4 +353,26 @@ def check(observations: list[dict], platter: Optional[dict],
         out.append({"check": "model strings on the platter", "verdict": "not determined",
                     "detail": "found " + ", ".join(c["model"] for c in cands[:5])
                               + "; no examiner observation to compare with"})
+
+    # The unit's own serial / device ID / MAC - only when there are any to look for.
+    forms = identifier_forms(obs)
+    if forms and platter is not None:
+        ui = platter.get("unit_identifiers")
+        want = {(f["identifier"], f["value"]) for f in forms}
+        name = "the unit's own identifiers on the platter"
+        if ui is None or {(s["identifier"], s["value"]) for s in ui["searched"]} != want:
+            out.append({"check": name, "verdict": "not determined",
+                        "detail": "the platter was searched before these identifiers were "
+                                  "recorded - run identify-model again"})
+        elif ui["found"]:
+            out.append({"check": name, "verdict": "agree",
+                        "detail": "; ".join(f"{r['identifier']} {r['value']} ({r['form']}) "
+                                            f"{r['count']}x, first at 0x{r['offsets'][0]:X}"
+                                            for r in ui["found"][:4])
+                                  + " - this unit wrote to this disk"})
+        else:
+            out.append({"check": name, "verdict": "not determined",
+                        "detail": f"none of the unit's {', '.join(sorted({i for i, _ in want}))} "
+                                  f"in the {platter['searched']['bytes']:,} bytes searched; that "
+                                  "does not show the disk came from another unit"})
     return out
