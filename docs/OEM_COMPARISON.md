@@ -128,6 +128,7 @@ first-hand (**O**), in `plugins/heimvision.py`:
 | Camera id in frames | **yes** - channel at +0x2C, with a per-camera sequence; no index needed to attribute | O |
 | Time | Unix microseconds per frame; FAT times in the recorder's local zone (UTC-8 on this unit) | O |
 | Codec | H.265 1920x1080 15 fps, GOP ~10 s; audio G.711 A-law | O |
+| System records | ext3: `dvr_log.db` (event log) and `search.db` (index per file and per camera-hour), SQLite, read and checked against the disk; `index.bin` one byte per file slot; each frame carries its `search.db` segment id | O |
 | Status | `spec_only` | |
 
 ## 4a. TP-Link, Godrej, Uniview, Matrix
