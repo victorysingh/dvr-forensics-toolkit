@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 415 pass, 0 fail: 405 on generated data with known ground truth, 10 on real media (9 on the CP Plus drive's image, 1 on the HeimVision E01) |
+| Automated tests | 424 pass, 0 fail: 412 on generated data with known ground truth, 12 on real media (9 on the CP Plus drive's image, 3 on the HeimVision E01) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
@@ -356,11 +356,37 @@ on all four cameras:
   FAT write time (the recorder's local clock) is exactly 8 h behind the file's
   Unix end time - the recorder was set to UTC-8, although Marshall University
   is at UTC-4 in August. An examiner would have to report exactly this.
-- **Not explained:** CH02-CH04 each have frames ~8 s before recording began
-  (consistent with a pre-record buffer - not established); ~300 frames per
-  camera (0.02%) carry a time earlier than the frame before them; header
-  fields +0x4C/+0x50/+0x54, `index.bin`, and ext3's `search.db` / `dvr_log.db`
-  are undecoded.
+- **The recorder's own records, read and checked against the disk**
+  (partition 1 is ext3, read by `parsers/ext3.py`; `index.bin` is on the FAT):
+  - `dvr_log.db`, its event log (SQLite): 194 entries, ids 1-194 unbroken, so
+    none deleted. "reload environment." twice, 48 s after the partition was
+    made; "Rec begin" on all four cameras at 13:59:50-51 UTC; a stop and begin
+    per camera every hour; the last "Rec stop" at 14:00:01 the next day. No
+    clock or zone change is logged.
+  - `search.db`, its recording index (SQLite): all 806 files listed, **806 with
+    exactly the start and end their own header gives**; 96 camera-hour
+    segments, and every frame carries its segment's id (header +0x04). Its
+    per-hour frame counts are within 0.04% per camera of the frames on disk
+    but not equal, so they are reported, not used as ground truth.
+  - `index.bin`: one byte per file slot - `x` on 805; the one written file
+    not marked is the last, still open when recording stopped.
+- **The zone, measured a second way:** the ext3 times of `dvr_log.db` and
+  `search.db` (the recorder's Linux clock) are 8 h behind the last UTC time
+  each database holds - UTC-8 again, from a different file system. Both
+  measurements come from the recorder's own clocks; its error against true
+  time is still unmeasured.
+- **Pre-record, now bounded:** the first video of CH02, CH03 and CH04 is 7.5,
+  7.4 and 6.9 s before that camera's "Rec begin" in the log (CH01's is 0.4 s
+  after). Footage from before the recorder logged the start is consistent
+  with a pre-record buffer; that is still not established.
+- **Frame header, decoded further:** +0x04 the camera-hour segment, +0x28 the
+  camera number, +0x48 Unix seconds, +0x4C 0 on I-frames and 1 on P-frames.
+  +0x50/+0x54 are file offsets of an earlier frame's video (the same camera's /
+  any camera's, 0-2 s back); what they are for is not established. Audio is
+  stamped up to ~1 s behind the video beside it.
+- **Still not explained:** ~300 frames per camera (0.02%) carry a time earlier
+  than the frame before them; the per-channel offsets and sizes in the file
+  header; how `search.db` counts its frames and bytes.
 - Camera 1 extracted: 403.26 MB of H.265, 1,296,146 frames, SHA-256
   `0afab158218c9bf0...` (full value in its manifest).
 
