@@ -252,10 +252,17 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   view says "not aligned" for this reason.
 - **The OCR of burned-in camera titles and clocks has never run on a real
   frame.** It needs ffmpeg and Tesseract, and so remains `synthetic_only`.
-- **2,087 frames on drive 1 do not decode** even after a keyframe. The
-  suspected cause, a lost reference frame, is unverified.
-- **No real disk has been read for** the Honeywell plugin, the raw
-  H.264/H.265 carver, or the Hikvision full-filesystem parser.
+- **About 38% of CP Plus video frames do not decode strictly.** The cause
+  is measured: 0.3-0.4% of the frames are missing from the disk, and each
+  breaks the rest of its ~8.6 s group of pictures. Most have no intact copy
+  anywhere on the disk; the 29 split across a chain boundary are rejoined
+  (62.1% decode). With error concealment 99.8% of one recording displays,
+  with visible damage:
+  a viewing aid, not intact evidence (`VALIDATION_REPORT.md` §7).
+- **No real disk has been read for** the Honeywell plugin or the Hikvision
+  full-filesystem parser. The raw H.264/H.265 carver has run on one (the
+  HeimVision image): it finds the video, but cannot separate cameras that
+  share the same settings.
 - **On fast media the single pass is CPU-bound.**
 - **The s.63 certificate wording has not been checked against the Gazette.**
 - **The 23 Sep gaps on drive 1** may be the team's own handling of the unit.
