@@ -16,7 +16,7 @@ they are evidence).
 
 | PS asks for | Status | Where |
 |---|---|---|
-| Identify the DVR / vendor | **done** — signatures for all eight OEMs, confidence scores; on-platter evidence found for CP Plus (`CPPlusIPCam`) and Hikvision (`HK` descriptors, surviving master/index). **Model:** `identify-model` searches the non-video parts of the disk for model numbers; `record-device` records the model off the unit with hashed photos; the two are checked against the format on the disk. **Run 28 Sep:** drive 2 `DS-7B08HUHI-K1`, agreeing with the team's unit (label, serial `F29196515`, whose full device serial is on the platter 202 times); drive 1: no model string in its head image, and no CP Plus unit to read | `detect/`, `detect/model.py` |
+| Identify the DVR / vendor | **done** — signatures for all eight OEMs, confidence scores; on-platter evidence found for CP Plus (`CPPlusIPCam`) and Hikvision (`HK` descriptors, surviving master/index). **Model:** `identify-model` searches the non-video parts of the disk for model numbers; `record-device` records the model off the unit with hashed photos; the two are checked against the format on the disk. **Run 28 Sep:** drive 2 `DS-7B08HUHI-K1`, agreeing with the team's unit (label, serial `F29196515`, whose full device serial is on the platter 202 times); drive 1: no model string in its head image; its unit read on 28 Sep off the label and System Info - `CP-UNR-104F1` (a CP Plus NVR, Dahua-built, agreeing with the DHFS on the drive), firmware `V1.00.14.00.T`, SN, DevID and MAC; the whole-drive search for those identifiers is still to run | `detect/`, `detect/model.py` |
 | Create forensic images | **done** — whole-drive MD5 + SHA-256 in one read-only pass, per-block Merkle map, preserved metadata, 20 GiB head image; see `FORENSIC_IMAGE.md` | `acquire/`, `recover/preserve.py` |
 | MD5 and SHA-256 | **done** — both drives | `scan` |
 | Parse proprietary file systems | **done on real media** — Dahua/CP Plus DHFS 4.1 (2 drives); Hikvision HIKBTREE index records (surviving copies); **HeimVision** FAT32 ring + `luo`/`liu` frames (a third real image, NIST CFReDS) | `parsers/dahua.py`, `parsers/hikbtree.py` |
@@ -107,7 +107,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 412 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 434 tests, no hardware, ~1 minute.
 
 ## 4. Things learned the hard way
 
@@ -131,7 +131,7 @@ writeblock-rule                      udev rule keeping a drive read-only across 
 |---|---|---|
 | Byte-match a recovered clip against a native DVR export | the only route to `validated` for any vendor | the comparison is built (`validate-export`); needs a reference disk recorded on and exported from each unit — never the evidence drive (`VALIDATION_REPORT.md` §9) |
 | Recorder time zone + clock error | to state UTC; today every time is the recorder's own clock — and, since `combine` landed, the only thing keeping the two drives off one axis | read from the units' settings, or the seizure-time photo method in the SOP |
-| Were the 23 Sep gaps on drive 1 the team's handling? | our own footprint must be stated | team memory |
+| Were the 23 Sep gaps on drive 1 the team's handling? (21 Sep's is a restart the unit's own log records, VALIDATION_REPORT §8) | our own footprint must be stated | the unit's log for 23 Sep (exported to USB, or photographed); team memory |
 | Final project report | drafted in `FINAL_REPORT.md`; needs the team's review, and its limitations section updated after the field visit | everyone |
 
 ## 6. For JP — your lane
