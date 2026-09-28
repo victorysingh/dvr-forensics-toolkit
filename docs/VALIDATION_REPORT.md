@@ -516,6 +516,25 @@ for `parsers/hikvision.py`, which is still `synthetic_only`.
 A match (or an explained difference) is recorded here with both files'
 SHA-256.
 
+## 9a. Format definitions (Kaitai), compiled and checked
+
+`formats/*.ksy` publish each observed layout for others to reuse; the tool
+runs hand-written parsers. Until 28 Sep neither `.ksy` had been through a
+compiler. Now both are compiled by the official kaitai-struct-compiler
+(0.11.0; the Python it generates is in `formats/generated/`), and
+`python -m validate.ksy_check` compares what each reads with what the
+tool's own parser reads, field by field.
+
+| Check | Data | Result |
+|---|---|---|
+| Compile | - | both compile |
+| `hikvision_ps.ksy`, first version | synthetic PS stream | **failed on the first stream it was given**: it read a pack's packets to the end of the stream, not to the next pack header. Rewritten as a flat run of start-code units |
+| `hikvision_ps.ksy` against `recover/pscarve.py` | synthetic, 2 streams between noise | the `.ksy` reads each carved stream whole; packs (123 in all), stream maps, video and audio packets, and the HK times at the first and last stream map equal the carver's |
+| `dahua_dhfs41.ksy` against `parsers/dahua.py` | synthetic DHFS disk | superblock; the volume's extent and cluster size; all 64 cluster records, every field (the channel as the byte stored); 328 DHAV frames (type, number, length, date, ms, extension length, trailer) - all equal |
+| The check itself | the same disk, a `.ksy` with `next` and `prev` swapped | 18 records flagged: the check is not vacuous |
+| A test-fixture fault it found | the MPEG-PS test streams | their HK descriptor declared 14 bytes (0x0E, the value the carver matches on real footage) but held 13. The carver reads fixed offsets and never noticed; the compiled `.ksy` did. Fixed to 14; every MPEG-PS test passes |
+| Real media | - | **not yet run** - on the machine that holds the images: `python -m validate.ksy_check --dahua <drive 1 head image> --ps <drive 2> --ps-region <offset> <length>` (USER_MANUAL §3.4h) |
+
 ## 10. Open items
 
 - ~~Why 2,087 frames after a keyframe still do not decode.~~ **Answered on 28 Sep (§7):** a reference frame missing from the disk. Streams with a complete frame counter lose 0.13% of their frames after the keyframe, streams with a gap 22.2%; 90% of the missing frames sit on a 2 MiB cluster boundary, and most have no intact copy anywhere on the disk. Still to run: `decode-check`, which makes the same test frame by frame (it is in `validate.realmedia`).
@@ -524,4 +543,4 @@ SHA-256.
 - A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
 - Recorder timezones, which are what keep the two drives on separate axes in §8d.
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
-- Kaitai `.ksy` compiled and checked against the image.
+- ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** Still to run: `validate.ksy_check` on the real images.

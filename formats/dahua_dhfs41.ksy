@@ -6,7 +6,9 @@ meta:
 doc: |
   Documentation artifact, not the runtime parser (docs/TECH_STACK.md: Kaitai
   as documentation; parsers/dahua.py is hand-written against this layout).
-  Not yet machine-checked with kaitai-struct-compiler.
+  Compiled with kaitai-struct-compiler 0.11.0 and checked field by field
+  against parsers/dahua.py by validate/ksy_check.py (VALIDATION_REPORT.md
+  section 9a) - so far on synthetic disks; the real image is still to run.
 
   Every field's `doc` says what it rests on:
     OBSERVED  - read off real media we hold: Seagate SkyHawk ST1000VX013
