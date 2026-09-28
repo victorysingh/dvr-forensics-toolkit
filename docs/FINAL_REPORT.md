@@ -127,6 +127,7 @@ Sources: `STATUS.md` §2, `VALIDATION_REPORT.md` §8b.
 | Measured against that index | the carve recovered **99.6–99.7%** of the hours each camera recorded |
 | Checked against the picture | burned-in "Camera 01" / "Camera 03" where the index gave CH01 / CH03; on-screen clocks within 2 s of the decoded times |
 | Analytics (leads) | 68,639 frames of a 22 GB subset: person 517, face 73, bus 1; 64 implausible face boxes (a floor, buckets) flagged and not counted |
+| The recorder's own log | 43,108 system-log records, 28 Jan – 25 Aug 2024, read from the surviving master sector's log area: **188 power cuts** (power-on after an "illegal shut down"), and **one local session by `admin` on 23 Mar 2024, 03:28–03:52**, with a configuration change and two playbacks. Its clock is the footage's clock, checked against the streams that restart after each power-on |
 
 ### 4.3 A public image of a recorder we had never seen (HeimVision K9604-W)
 
@@ -228,6 +229,9 @@ Three findings go beyond the published work:
   the index that survived the reformat.
 - **The disk's history surfaced as a finding.** A Hikvision unit's disk
   carrying Dahua structures is flagged by the model check.
+- **The recorder's own account of itself.** Its system log, read from a disk
+  another recorder reformatted, names who used the unit and when the power
+  failed - and is checked against the footage rather than trusted.
 
 ## 9. Coverage of the eight OEMs
 
@@ -279,8 +283,11 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
 
    These make the first vendor `validated`, give UTC, and put both drives on
    one axis.
-2. **Date drive 2's reformat from its own logs.** Dahua log records note hard
-   drive formatting (Dragonas et al. 2024).
+2. **Date drive 2's reformat.** The Hikvision log survives but ends on
+   25 Aug 2024, 4½ days before the footage does, and holds no format record;
+   the Dahua-family recorder that reformatted the disk kept its own log, which
+   records hard-drive formatting (Dragonas et al. 2024) - on that recorder's
+   disk or flash, not this one.
 3. **Run OCR on the frames already read by eye**, on a machine with ffmpeg
    and Tesseract.
 4. **Speed:** one regex pass, threaded hashes, and a process pool.
