@@ -552,6 +552,64 @@ def test_dahua_parser(tmp: str) -> None:
           str(res.recordings[0].start_utc))
 
 
+class _BytesSink(_Sink):
+    def __init__(self):
+        super().__init__()
+        self.data: dict = {}
+
+    def write(self, b: bytes) -> None:
+        fr = next(dahua.walk_frames(b, 0))
+        self.frames.append(fr)
+        self.data[(fr.ftype, fr.frame_number)] = b
+
+
+def test_dahua_chain_split(tmp: str) -> None:
+    print("\n[dahua frames finished in the next chain cluster - synthetic]")
+    joined_total = lost_splits = 0
+    for seed in (26150, 1, 2):
+        img = os.path.join(tmp, f"dhfs-split-{seed}.img")
+        meta = synth_dahua.build(img, seconds=14, seed=seed, chain_splits=True)
+        raw = open(img, "rb").read()
+        parser = get_parser("Dahua")
+        with BlockDevice(img) as dev:
+            parser.parse(dev)
+            vol = parser.volumes[0]
+            foreign = missed = dup = 0
+            for f in vol.files:
+                sink = _BytesSink()
+                st = dahua.reassemble(dev, vol, f, sink)
+                got = [(fr.ftype, fr.frame_number) for fr in sink.frames]
+                truth = meta["survived"][f.camera]
+                foreign += len(set(got) - truth)
+                missed += len(truth - set(got))
+                dup += len(got) - len(set(got))
+                want = meta["joined"][f.camera]
+                check(f"[{seed}] CH{f.camera + 1}: every intact split frame is rejoined, "
+                      f"and nothing else", st["boundary_joined"] == len(want),
+                      f"{st['boundary_joined']} vs {len(want)}")
+                splits = {(t, fn): (a, b) for n, t, fn, a, b in meta["split"]
+                          if n == f.camera}
+                for j in st["joined_frames"]:
+                    key = (int(j["type"], 16), j["frame_number"])
+                    (o1, l1), (o2, l2) = j["parts"]
+                    check(f"[{seed}] frame {key[1]}: both halves reported where they lie",
+                          splits.get(key) == ((o1, l1), (o2, l2)), str(j["parts"]))
+                    check(f"[{seed}] frame {key[1]}: emitted bytes are exactly the two halves",
+                          sink.data.get(key) == raw[o1:o1 + l1] + raw[o2:o2 + l2])
+                lost = [k for k in splits if k not in want]
+                lost_splits += len(lost)
+                check(f"[{seed}] CH{f.camera + 1}: a split frame whose half was overwritten "
+                      f"is not emitted", not any(k in set(got) for k in lost))
+                joined_total += len(want)
+            check(f"[{seed}] no camera receives another camera's frames", foreign == 0,
+                  f"{foreign} foreign")
+            check(f"[{seed}] every surviving frame is recovered", missed == 0,
+                  f"{missed} missed")
+            check(f"[{seed}] no frame is emitted twice", dup == 0, f"{dup} duplicates")
+    check("the fixture exercises both intact and overwritten split frames",
+          joined_total > 0 and lost_splits > 0, f"joined {joined_total}, lost {lost_splits}")
+
+
 def test_dahua_robustness(tmp: str) -> None:
     print("\n[dahua parser robustness]")
     parser = get_parser("Dahua")
@@ -674,6 +732,11 @@ def test_dahua_real_media() -> None:
           st["video_counter_missing"] < 0.005 * st["video_counter_span"])
     check("CH01 hour one: no more frames than its counter span",
           st["video_frames"] <= st["video_counter_span"])
+    # 57 frames there are cut at a cluster end and finished in the next chain
+    # cluster; in 50 another camera's overflow later overwrote part of the
+    # second half, so exactly 7 rejoin intact.
+    check("CH01 hour one: 7 frames rejoined across a chain boundary, the "
+          "overwritten ones refused", st["boundary_joined"] == 7, str(st["boundary_joined"]))
 
     # The carver, with no index, over the region holding hour one - then the
     # index, used only to label what the carve found.
@@ -2626,6 +2689,7 @@ def main() -> int:
         test_parser_robustness(tmp)
         test_dahua_frames()
         test_dahua_parser(tmp)
+        test_dahua_chain_split(tmp)
         test_dahua_robustness(tmp)
         test_carver(tmp)
         test_preserve(tmp)
