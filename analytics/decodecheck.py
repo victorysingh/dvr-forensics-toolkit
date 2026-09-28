@@ -3,7 +3,9 @@ stream's own counter.
 
 VALIDATION_REPORT.md section 7: on drive 1, 2,087 video frames failed to
 decode even after a keyframe, and the suspected cause was a reference frame
-lost mid-stream.  That can be tested.  A DHAV frame carries a per-stream
+lost mid-stream.  Measured since, stream by stream (28 Sep): streams whose
+counter is complete lose 0.13% of their frames after the keyframe, streams
+with a gap 22.2%.  This makes the same test frame by frame.  A DHAV frame carries a per-stream
 counter, so a frame missing from the disk leaves a gap in it.  This asks the
 decoder which frames it could not decode, and puts each one in a class:
 
