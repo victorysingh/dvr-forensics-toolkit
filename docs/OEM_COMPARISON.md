@@ -128,10 +128,10 @@ first-hand (**O**), in `plugins/heimvision.py`:
 |---|---|---|
 | Disk | GPT; ext3 system partition (`search.db`, `dvr_log.db`); FAT32 video partition made by `mkdosfs` (the recorder runs Linux) | O |
 | Storage | a pre-allocated ring of 8 MiB `.dat` files in `dirNNNNN/` (17,152 on 150 GB); `ident.bin` "ok1ormated"; `index.bin` | O |
-| File header | 0x2080 bytes, `luo `, Unix start/end, per-channel start/end | O |
+| File header | 0x2080 bytes, `luo `, start/end (display clock), per-channel start/end | O |
 | Frames | 128-byte header `liu ` ... ` uil`, then the payload; the length field chains frames exactly | O |
 | Camera id in frames | **yes** - channel at +0x2C, with a per-camera sequence; no index needed to attribute | O |
-| Time | Unix microseconds per frame; FAT times in the recorder's local zone (UTC-8 on this unit) | O |
+| Time | microseconds per frame on the recorder's display clock (local time, as painted on the picture); FAT and ext3 times on its system clock, 8 h behind (zone setting UTC+8 on this unit) | O |
 | Codec | H.265 1920x1080 15 fps, GOP ~10 s; audio G.711 A-law | O |
 | System records | ext3: `dvr_log.db` (event log) and `search.db` (index per file and per camera-hour), SQLite, read and checked against the disk; `index.bin` one byte per file slot; each frame carries its `search.db` segment id | O |
 | Status | `spec_only` | |

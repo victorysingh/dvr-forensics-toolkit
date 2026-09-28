@@ -230,10 +230,12 @@ goes beyond.
     - every frame names its camera and carries a microsecond time;
     - 806 files were written: 24 h continuous on 4 cameras. CH01 has
       1,296,146 frames against the 1,296,150 that 24 h at 15 fps predicts.
-  - **The recorder's time zone measured two independent ways**, both UTC-8:
-    - the FAT clock against the frame times, on all 806 files;
-    - the Linux clock (ext3 file times) against the UTC times in the
-      recorder's own log.
+  - **The recorder's zone setting measured two independent ways**, both UTC+8:
+    - its system clock (FAT times) against the frame times, on all 806 files;
+    - its system clock (ext3 file times) against the times in its own log.
+    - The frame and log times equal the clock painted on the picture, so
+      they are local time, not UTC (corrected 29 Sep; first reported as
+      UTC-8).
   - **The recorder's own records checked, not trusted:**
     - its event log: 194 entries with no gaps, so none were deleted;
     - its recording index: 806 of 806 files listed with exactly the times
