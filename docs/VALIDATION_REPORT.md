@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 424 pass, 0 fail: 412 on generated data with known ground truth, 12 on real media (9 on the CP Plus drive's image, 3 on the HeimVision E01) |
+| Automated tests | 453 pass, 0 fail: 441 on generated data with known ground truth, 12 on real media (9 on the CP Plus drive's image, 3 on the HeimVision E01) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
@@ -40,7 +40,8 @@ Two different things are validated here, and they must not be confused:
 |---|---|
 | Workstation | Kali Linux, kernel 7.1.5, Python 3.14.6, booting from a USB SSD (Realtek RTL9210, `0bda:9210`) |
 | Tool | `dvr-forensics-toolkit`, commit `26fb542` or later (branch `shrestha/single-pass-recovery-report-ui`) |
-| Evidence | Seagate SkyHawk ST1000VX013, 1 TB, s/n `WWD4A3NX`, from a CP Plus DVR |
+| Evidence | Seagate SkyHawk ST1000VX013, 1 TB, s/n `WWD4A3NX`, from a CP Plus recorder |
+| Recorder unit (read 28 Sep) | CP Plus **`CP-UNR-104F1`**, a 4-channel NVR, hardware V1.0; firmware (System Version) **`V1.00.14.00.T`**, built 16/08/2025; SN `TSTSERIAL0000001`, DevID `0A0B0C0D`, MAC `02:00:5E:10:00:01` - from its label and its System Info screen (photos SHA-256 `2f873a693b6355d2...` and `bed79a8b0388affb...`; these are WhatsApp copies, which strip the time taken - the originals are to be hashed). A CP Plus NVR is Dahua-built, which agrees with the DHFS 4.1 on this drive. Whether this unit wrote the drive: its serial, DevID or MAC on the platter is still to be searched (`identify-model` over the whole drive) |
 | Adapter | generic USB 2.0 SATA bridge, Super Top M6116 (`14cd:6116`), 480 Mbit/s, own power supply |
 | Image | first 20 GiB of the drive, SHA-256 `c4098d59cff3973de9d281ba5613005ba52165743c36edfcf56f61aad8f4e610` (23 Sep 2026) |
 
@@ -252,6 +253,17 @@ recorder's clock:
   (114 min) and 16:50–16:51. Recording ends at 16:55:45 on 23 Sep, the day
   the drive was removed. Whether the 23 Sep gaps are the team's own handling
   of the unit is to be confirmed and recorded.
+- **The 21 Sep gap is a restart, in the recorder's own log.** Its event log,
+  photographed on the unit on 28 Sep (SHA-256 `f8dbf0efae073831...`), records
+  `Shutdown [21/09/2026 06:59:24PM]` at 18:59:24, `Reboot with Flag [0x01]` at
+  19:00:14, one disk in use (`Total Disk<1>, Operating Disk</dev/sda>`) at
+  19:00:16, and channels 1, 2 and 3 logging in at 19:00:27 - the drive's
+  recorder-wide gap at 18:59, to the minute. The unit's log and the drive's
+  footage therefore keep the same clock. Around it: logins from 127.0.0.2 at
+  18:41 and 19:09-19:15, one from the local console at 19:14:32, and a failed
+  `admin` login at 19:13:58. What caused the shutdown is not in these lines,
+  and the flag's meaning is not established. The log shows 68 entries for
+  that day; 15 are in the photo. The 23 Sep log is still to be read.
 - **A recurring interruption**: 10 one-camera interruptions on 10 different
   nights, all between 02:00 and 02:09, across all three cameras; all 6
   index-vs-first-frame disagreements over 5 s are among them. The pattern of
@@ -552,5 +564,8 @@ tool's own parser reads, field by field.
 - OSD reader: read clocks that carry a weekday or AM/PM (both of our recorders), and white text on bright backgrounds (§8c).
 - A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
 - Recorder timezones, which are what keep the two drives on separate axes in §8d.
+- The CP Plus unit's own log for 23 Sep - and, better than photos of it, the log exported
+  to a USB stick from the recorder's menu (one file, hashed). Then `identify-model` over
+  the whole of drive 1 for the unit's serial, DevID and MAC.
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
 - ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** Still to run: `validate.ksy_check` on the real images.

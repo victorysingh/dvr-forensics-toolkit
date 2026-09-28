@@ -245,11 +245,19 @@ it — that lives in the recorder's flash. Two sources, kept apart:
 ```bash
 # what the examiner read off the unit, with the photos that show it (hashed, not copied)
 python cli.py record-device --out out/CASE-001 --model CP-UNR-104F1 \
-    --serial <label> --firmware <System Info> --read-from label --photo label.jpg sysinfo.jpg
+    --serial <label> --mac <label> --device-id <label> --firmware <System Info> \
+    --read-from label --photo label.jpg sysinfo.jpg
 
 # model-numbered strings on the platter, outside the video (uses the scan's block map)
 python cli.py identify-model --device /dev/sdb --out out/CASE-001
 ```
+
+Once the unit is recorded, `identify-model` also searches for **its own** serial,
+device ID and MAC (the MAC as text in the usual forms and as its 6 raw bytes). A
+model string can come from any unit of that model; this unit's serial on the
+disk shows this unit wrote to it. Finding none shows nothing - many recorders
+never write their identity to the disk. It searches the non-video blocks up to
+`--max-gb` (4 GiB by default); raise it to cover a whole drive.
 
 `identify-model` reads only blocks the scan did not classify as video, plus
 both ends of the disk — minutes, not another full pass — and lists every
