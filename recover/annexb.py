@@ -35,9 +35,14 @@ has no date and no camera: nothing in an elementary stream carries either.
 One carved stream may also span several consecutive recordings of the same
 camera; a bare stream marks no boundary between them.
 
-Status: `synthetic_only` until it has recovered footage from a real disk of
-a vendor we have no parser for.  On our two drives it can be checked
-against the DHAV and MPEG-PS carvers, which know the container.
+Status: `synthetic_only`.  On one real disk, the NIST HeimVision image, it
+has been scored frame by frame by that recorder's parser
+(`python -m validate.heimvision_carve`, VALIDATION_REPORT 8e): it found
+every slice, but that recorder's four cameras share one parameter set, so
+every stream it made there mixes all four - not any one camera's footage.
+It stays `synthetic_only` until it has recovered one camera's footage from
+a real disk.  On our two drives it can be checked against the DHAV and
+MPEG-PS carvers, which know the container.
 
 Read-only: bytes are handed in by the scan, or read from a BlockDevice.
 Stdlib only.
