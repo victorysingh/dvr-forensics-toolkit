@@ -96,7 +96,9 @@ def plugins_view() -> dict:
     import parsers
     return {"registered": sorted(parsers.available_vendors()),
             "dropped_in": parsers.LOADED_PLUGINS, "errors": parsers.PLUGIN_ERRORS,
-            "plugin_dir": parsers.PLUGIN_DIR}
+            # the folder an examiner drops a plugin into: next to the executable
+            # in a packaged build, not the temporary folder it unpacks to
+            "plugin_dir": parsers.DROP_IN_DIR or parsers.PLUGIN_DIR}
 
 
 def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
