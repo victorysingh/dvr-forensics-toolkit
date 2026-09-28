@@ -137,7 +137,9 @@ goes beyond.
   - Two independent routes to the recorder's clock: the date in the container
     (DHAV packed date, Hikvision `HK` descriptor) and the clock burned into
     the picture. They are cross-checked; three frames were checked by eye, all
-    within 2 s.
+    within 2 s. The OCR route, run on real frames for the first time (28 Sep),
+    read 1 of 5 reference titles and no clock yet (`VALIDATION_REPORT.md`
+    §8c), so the by-eye checks are the evidence today.
   - No UTC is asserted without a stated time zone and a measured clock error.
   - The combined view (PR #8) refuses to put two recorders on one axis unless
     both state a time zone.
@@ -158,6 +160,10 @@ goes beyond.
   - The two are cross-checked. A Hikvision unit whose disk carries Dahua
     structures is flagged as a disk another recorder formatted, which is drive
     2's actual history.
+- **Evidence** (first real-media run, 28 Sep, PR #28). On drive 2,
+  `identify-model` finds `DS-7B08HUHI-K1` 208 times on the platter. That
+  agrees with the team's unit label. The unit's full device serial appears on
+  the platter 202 times, so this unit wrote this drive.
 - **Beyond what.** Rzayeva et al. (2025) list automatic manufacturer
   identification as one of their three innovations. We go on to check the
   manufacturer against the unit it was seized from, and we treat a mismatch
@@ -266,6 +272,10 @@ goes beyond.
     so every carved stream mixes all four. Only the container separates the
     cameras and gives the time. The carver therefore stays `synthetic_only`:
     it finds the video, but its streams here are not any one camera's footage.
+  - **The same result on our own drive 1** (first real-media run, 28 Sep,
+    PR #28). Over the first 8 GiB it covers 100% of the bytes the DHAV
+    carver recovered, plus 48.7 MiB more, but as **one** stream: the three
+    cameras share identical encoder settings.
 - **Beyond what.** Garfinkel (2007) makes structural validation the test for
   accepting a carved candidate. We apply it, then **measure** the result
   against ground truth on real media and publish what the carver cannot do.
@@ -294,6 +304,7 @@ goes beyond.
 | OSD titles and clock | Tesseract (Smith 2007) | OCR engine | a label only when frames agree; ambiguous dates left ambiguous |
 | Faces and objects | SSD (Liu et al. 2016), MobileNet (Howard et al. 2017), Ultra-Light face detector | detectors | static and implausible-box rules; "lead, not evidence" |
 | Procedure | SWGDE *Best Practices for Data Acquisition from DVRs*; ISO/IEC 27037:2012; NIST SP 800-86 | seizure and acquisition practice | `SOP_EXAMINATION.md`, `LINUX_ACQUISITION.md` |
+| Hikvision system log (`parsers/hiklog.py`) | Dragonas et al. 2023 (Hikvision log records); Hikvision's published SDK codes | where the log lives and how records are typed | 43,108 records from drive 2, read from the surviving master-sector copy with six cross-checks; power cuts and an admin session found; the log's clock checked against the footage |
 | Honeywell (`plugins/honeywell.py`) | Yoon & Hwang 2026 (DFRWS USA) | the first published analysis of Honeywell's surveillance filesystem | a plugin at `spec_only` from their description; no real Honeywell disk yet |
 | E01 images (`acquire/ewf.py`) | the libyal description of the Expert Witness (EWF) format | segments, section chain, chunk table, compressed and stored chunks | reproduces FTK Imager's stored MD5 and SHA-1 over a real 150 GB image (D12) |
 | HeimVision K9604-W (`plugins/heimvision.py`, `parsers/ext3.py`) | NIST CFReDS public image (Brunty & Mock 2021); the ext2/ext3 on-disk layout | a public, published test image | the layout decoded from the disk; the zone measured two ways; the recorder's own log and index checked against the disk (D12) |
@@ -308,16 +319,20 @@ goes beyond.
    *formatting the hard drive*. If the log area of the Dahua-family format on
    drive 2 holds such a record, it dates the reformat and may name the
    recorder that did it.
-2. **Model and serial from Hikvision logs.** The same authors (2023) analyse
-   Hikvision's on-disk log records. If they carry the device's model,
-   `identify-model` should read them directly rather than rely on loose strings.
+2. ~~**Model and serial from Hikvision logs.**~~ **Done, 28 Sep (PRs #28,
+   #29).** The model and the unit's serial were found on the platter outside
+   the log (D8). The Hikvision system log itself is now read, following the
+   record analysis of Dragonas et al. (2023) (`parsers/hiklog.py`, 43,108
+   records). It shows 188 power cuts and one local admin session. It keeps
+   the recorder's own clock, so it cannot give the time zone either.
 3. **Honeywell on a real disk.** The plugin is built from Yoon & Hwang (2026)
    (PR #13) and is `spec_only`; any real Honeywell disk or image is what
    moves it on.
-4. **Frames after a missing reference** on drive 1 (cause measured,
-   `VALIDATION_REPORT.md` §7), following Na et al. (2014): decode what each
-   still holds, for a viewing copy marked as such - never as intact
-   evidence.
+4. **Frames after a missing reference** on drive 1. The cause is measured
+   (`VALIDATION_REPORT.md` §7) and confirmed frame by frame: `decode-check`
+   explains 99.8% of the failures after a keyframe with a missing frame.
+   Following Na et al. (2014), decode what each such frame still holds, for
+   a viewing copy marked as such - never as intact evidence.
 
 ---
 
