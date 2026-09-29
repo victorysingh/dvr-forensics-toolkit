@@ -149,7 +149,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 554 in all: 531 on generated data with known ground
+- **Automated tests:** 557 in all: 534 on generated data with known ground
   truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -378,8 +378,9 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   of the 57 frames that had one.
   - It now runs YOLOX-S on the whole frame and a 2 x 2 grid of tiles, and
     YuNet for faces, and looks at a fisheye picture turned round as well.
-    It finds a person in 44 of 57, faces in 22 of 27 and vehicles in 8 of
-    12.
+    It finds a person in 44 of 57, faces in 22 of 27 and moving vehicles
+    in 7 of 12. It reports a car that stays in one place once, as a parked
+    vehicle: all 6 in a night car park, with none false on CAVIAR.
   - On CAVIAR CCTV footage that played no part in any choice, it finds 810
     of 1,089 labelled people, against 543 for the previous tiled models.
   - Its false alarms: 6 person frames, each a hand in the picture, and 1
@@ -388,8 +389,10 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   - On our own CP Plus cameras (210 frames, the deciding ones checked by a
     person) it found both people and gave no face false alarm, but called a
     dog a person, read a tree trunk as one in 2 frames, and reported **no
-    vehicle**: the car parked in full view at night scores 0.25-0.47, under
-    the 0.5 threshold, and the static rule would remove it anyway.
+    vehicle**: the car parked in full view at night scored 0.25-0.47, under
+    the 0.5 threshold, and the static rule removed it. Parked cars are now
+    reported as parked vehicles from 0.3 (§8a); drive 1 is still to be
+    re-scored.
   - A lead is worth reviewing; an empty list proves nothing
     (`VALIDATION_REPORT.md` §8a).
 - **On fast media the single pass is CPU-bound.**

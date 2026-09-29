@@ -33,6 +33,10 @@ about 0.6 s of model time a frame on a laptop CPU.
   footage.
 - `--models classic` is the SSD-MobileNet + UltraFace set measured before
   29 Sep 2026, kept to reproduce those results.
+- A car, bus or truck that stays in one place through much of a clip is
+  reported once per place, as a **parked vehicle** (`parked_vehicles` in
+  `analytics.json`, and a table in the report). Its boxes count from 0.3
+  because they recur. It is not counted among the moving vehicles.
 - `--rotate auto` (the default) also looks at a round fisheye picture turned
   a quarter, a half and three quarters of a turn. A camera that looks down
   shows people at every angle. Use `--rotate on` for a ceiling camera that

@@ -221,7 +221,8 @@ goes beyond.
 - **Measured, including what it gets wrong** (`VALIDATION_REPORT.md` §8a).
   - On 287 frames of real recorder footage labelled by eye, the first
     version found a person in 0 of 57 frames. The tool now finds 44 of 57,
-    faces in 22 of 27 and vehicles in 8 of 12.
+    faces in 22 of 27 and moving vehicles in 7 of 12, and reports parked
+    cars once per place (all 6 in a night car park, none false on CAVIAR).
   - Every false alarm is listed: six hands in the picture, and one head at
     a fisheye's edge.
   - It is checked on CAVIAR footage that played no part in any choice: 810
