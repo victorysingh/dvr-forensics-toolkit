@@ -147,8 +147,10 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 429 on generated data with known ground truth, plus
-  12 on real media (9 on the CP Plus drive's image, 3 on the HeimVision E01).
+- **Automated tests:** 493 in all: 474 on generated data with known ground
+  truth, 14 on real media (9 on the CP Plus drive's image, 5 on the
+  HeimVision E01 and its FTK listing), and 5 on vendor-made files from other
+  recorders (`VALIDATION_REPORT.md` §1).
   They cover the Merkle tree, the custody chain, bad sectors, device loss,
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the
@@ -172,6 +174,19 @@ Full account: `VALIDATION_REPORT.md`.
   - TP-Link: `detected_not_parsed`; its index is read when plain (from the VIGI firmware), but no footage is placed.
   - Matrix: `spec_only`, from Matrix's own documents (its recording tree).
   - Godrej: `detected_not_parsed`.
+- **Checked without an export** (`VALIDATION_REPORT.md` §8g), as SWGDE
+  18-Q-001 and ISO/IEC 17025 allow when no reference export exists:
+  - ffmpeg's `dhav` demuxer, a second implementation, agrees with ours frame
+    for frame on two real Dahua recordings (726 and 104 video frames);
+  - on three Hikvision-made files, our carve decodes identically to the
+    vendor's file (463/463, 215/215 frames), and the `HK` time equals the
+    painted clock, trails it by a constant 1 s, or equals the recorder's own
+    file-name start.
+  - on NIST's HeimVision image, FTK Imager's own file listing and our
+    reading agree on all 17,154 FAT32 files (size, write time) and the
+    recorder's 4 ext3 files, and FTK's times give the same UTC+8 zone
+    setting (§8e).
+  None of it raises a status.
 - **The route to `validated`** is built (`validate-export`, USER_MANUAL
   §3.4d). The evidence drives must not go back into their recorders, so the
   export comes from a **reference disk**: a spare disk that the same recorder
@@ -208,6 +223,28 @@ CPU-bound (26.7 MiB/s measured), and `TECH_STACK.md` records the planned fix.
   enclosed. It never ticks ownership, never makes the "working properly"
   statement, and never signs. Its wording is to be checked against the
   Gazette before use.
+- **What the courts now ask for.**
+  - *Pune Bar Association v. Union of India* (SC, 22 May 2026) upheld
+    s.63(4): the hash is "an electronic fingerprint", and Part B may come
+    from a s.79A Examiner or, "on the basis of unimpeachable material", from
+    another skilled person. The tool is built to give that expert the
+    material; it is not admissible in itself.
+  - *Randeep Singh @ Rana v. State of Haryana* (SC, 2024 INSC 887) threw out
+    CCTV on a CD that nobody could tie to the recorder: no hash, no marking,
+    copied by people who had not seen it, no certificate. Here every clip
+    carries a hash bound to the drive's Merkle root and the byte offsets it
+    came from, and the ledger records who did what.
+  - s.63(2) asks whether the device was working properly. The recorder's
+    own log answers from the device: 188 power cuts in drive 2's log; the
+    CP Plus unit's log, read on its screen, matching drive 1's recorder-wide
+    gap to the minute. Puducherry's G.O.Ms.No.27 (2025) names
+    the DVR/NVR itself as primary evidence and asks for the hash at seizure.
+- **Police procedure.** Kerala Police's CCTV seizure SOP asks for make and
+  model, a clock check against a reference, and native export. The tool
+  turns those into recorded, hashed steps (`record-device`,
+  `identify-model`, SOP 1.2, `validate-export`). MeitY's s.79A scheme (v2.0,
+  2025) lists "CCTV Forensics" and asks labs for ISO/IEC 17025 and a list of
+  every tool used.
 - **Procedure:** `SOP_EXAMINATION.md` and `LINUX_ACQUISITION.md` follow SWGDE
   DVR acquisition practice, ISO/IEC 27037 and NIST SP 800-86. Step 1.2 reads
   the recorder's clock against true time before anything else.
@@ -225,18 +262,28 @@ real drives, and adds:
 - a status for every vendor claim that only an export byte-match can raise;
 - measurement on two real drives, including the failures they exposed.
 
-Three findings go beyond the published work:
+Five claims survived a second round of checking against the literature
+and 30+ rival repositories (`RESEARCH_BASIS.md` §5, `docs/research/`):
 
+- **Footage recovered from under another vendor's reformat, and measured:**
+  about 6,300 h, 99.6% of what the drive's own surviving index says was
+  recorded. No paper or rival tests a cross-vendor reformat.
+- **Times checked, not trusted:** the recorder's log matched a video gap to
+  the minute; on NIST's HeimVision image the painted, frame and system
+  clocks are reconciled (zone setting UTC+8), where another team's
+  published timeline is ~11 h off the painted clock.
+- **Status earned, and checked without an export:** nothing is `validated`
+  before a byte-match; meanwhile each format shows its independent checks.
+- **Real media from three recorder families,** failures published; no paper
+  or rival has more than two.
 - **Cameras separated by stream continuity where the frames carry no camera
   number.** On our CP Plus unit the DHAV channel byte is 0 for every camera,
   where identifier-based demultiplexing, as in Information 2026, cannot help.
-- **A whole reformatted drive's footage recovered, and measured** against
-  the index that survived the reformat.
-- **The disk's history surfaced as a finding.** A Hikvision unit's disk
-  carrying Dahua structures is flagged by the model check.
-- **The recorder's own account of itself.** Its system log, read from a disk
-  another recorder reformatted, names who used the unit and when the power
-  failed - and is checked against the footage rather than trusted.
+  (The continuity principle is Park & Lee 2014's; the field evidence is ours.)
+
+Hashing, the Merkle map, the custody ledger, the s.63 draft, "AI as a lead"
+and offline use are engineering other teams also have, and are not pitched
+as unique.
 
 ## 9. Coverage of the eight OEMs
 
@@ -282,7 +329,9 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   full-filesystem parser has not read an intact Hikvision disk (it is written on
   drive 2's observed layout, whose primary master a reformat had overwritten). The raw H.264/H.265 carver has run on one (the
   HeimVision image): it finds the video, but cannot separate cameras that
-  share the same settings.
+  share the same settings. That is this tool's limit, not the field's:
+  CARVE (DFRWS APAC 2026) does it by OCR of the painted camera label or by
+  PRNU sensor noise.
 - **On fast media the single pass is CPU-bound.**
 - **The s.63 certificate wording has not been checked against the Gazette.**
 - **The 23 Sep gaps on drive 1** may be the team's own handling of the unit
@@ -374,3 +423,10 @@ Full list with links in `RESEARCH_BASIS.md`. The principal ones are:
 - *Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal* (SC, 2020)
 - Bharatiya Sakshya Adhiniyam 2023, s.63 and Schedule
 - IPVM *Dahua OEM Directory* (May 2024)
+- Park & Lee, Digital Investigation 2014 (DVR fragment forensics)
+- Giri, Yoon & Hwang, CARVE, DFRWS APAC 2026
+- *Pune Bar Association v. Union of India* (SC, 22 May 2026)
+- *Randeep Singh @ Rana v. State of Haryana* (SC, 2024 INSC 887)
+- Puducherry G.O.Ms.No.27 (2025); Kerala Police CCTV SOP; MeitY s.79A scheme v2.0 (2025)
+- SWGDE 18-Q-001 v2.1 and 12-Q-001; UK FSR-G-218 Issue 2; ISO/IEC 17025:2017
+- Hargreaves et al., DFPulse 2024; Dstl, *Recovery and Acquisition of Video Evidence* (2022)
