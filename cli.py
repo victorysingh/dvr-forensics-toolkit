@@ -1040,6 +1040,9 @@ def cmd_export_nist(args) -> int:
     from core.hashing import sha256_file
     from report import nist_export as N
 
+    if not os.path.isfile(args.es):
+        print(f"[!] no extracted stream at {args.es} - run `extract-carved` or `extract` first")
+        return 1
     es = open(args.es, "rb").read()
     try:
         start = N._parse_local(args.start)
@@ -2356,7 +2359,7 @@ def main() -> int:
     p.add_argument("--out", required=True, help="case directory")
     p.add_argument("--label", default="outside_index",
                    help="index label to extract: outside_index (default), CH01.., "
-                        "mixed-evidence, or all")
+                        "mixed-evidence, unlabelled (no index on the source), or all")
     p.add_argument("--ids", default="", help="comma-separated stream ids instead")
     p.add_argument("--format", choices=["auto", "dhav", "ps", "annexb"], default="auto",
                    help="which carve to extract from (auto: DHAV if it found streams, else "

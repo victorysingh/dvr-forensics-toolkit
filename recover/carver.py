@@ -563,7 +563,8 @@ def streams_from_report(report: dict, label: Optional[str] = None,
     out = []
     for row in report.get("streams", []):
         rec = row["recording"]
-        if label and row.get("index_label") != label:
+        # a stream no index labelled is shown as "unlabelled", so that name selects it
+        if label and (row.get("index_label") or "unlabelled") != label:
             continue
         if ids and rec["id"] not in ids:
             continue
