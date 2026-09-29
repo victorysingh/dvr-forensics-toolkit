@@ -102,7 +102,7 @@ one case view.
 | Recovery | `recover/carver.py` (DHAV), `recover/pscarve.py` (MPEG-PS, Hikvision), `recover/annexb.py` (raw H.264/H.265 for vendors with no parser), `recover/preserve.py` (metadata) |
 | Timeline Analysis | `analyse/timeline.py` (clock rule, gaps, recurring patterns, coverage), `analyse/combined.py` (several recorders) |
 | Reporting | `report/` (HTML + JSON, hashed into the ledger), `report/s63.py` (certificate draft), `viewer/` |
-| Machine Learning | `analyse/activity.py` (motion from frame sizes); `analytics/` (faces, objects, on-screen text), all labelled leads |
+| Machine Learning | `analyse/activity.py` (motion from frame sizes); `analytics/` (faces, objects, on-screen text, and face search by a reference photo), all labelled leads |
 | Validation | `validate/exportmatch.py` (recovered footage against the recorder's export) |
 
 ## 4. Results on real media
@@ -155,7 +155,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 591 in all: 568 on generated data with known ground
+- **Automated tests:** 605 in all: 582 on generated data with known ground
   truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -163,7 +163,7 @@ Full account: `VALIDATION_REPORT.md`.
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the
   CASE/UCO export and the certificate.
-- **Damaged or tampered disks:** 9,600 corrupted disks fed to all 8 vendor parsers (`VALIDATION_REPORT.md` §8m). The first 3,200 found 144 crashes and 1 hang in 22 places, all fixed. None crashes or hangs now, and a parser can no longer end in a traceback. The three carvers and the E01 reader were fuzzed too: one bug, a damaged E01 set left its evidence file open, fixed.
+- **Damaged or tampered disks:** 9,600 corrupted disks fed to all 8 vendor parsers (`VALIDATION_REPORT.md` §8o). The first 3,200 found 144 crashes and 1 hang in 22 places, all fixed. None crashes or hangs now, and a parser can no longer end in a traceback. The three carvers and the E01 reader were fuzzed too: one bug, a damaged E01 set left its evidence file open, fixed.
 - **Write blocking:** root writes refused on a sacrificial loop device, and
   the block re-applied automatically after 2 of 2 real reconnects.
 - **Reproducibility:** five independent reads over three days agree bit for
@@ -403,6 +403,14 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
     reported as parked vehicles from 0.3. Re-scored from its stored boxes,
     drive 1's night car is reported, as a parked vehicle, in 26 of its 35
     frames, with no false one (§8a).
+- **Face search is measured on stand-ins.** It ranks faces by likeness to an
+  examiner's photo and calls the closest candidates, never matches. On LFW
+  faces shrunk and encoded to recorder size, the same person passes in 97.8%
+  of pairs with eyes 12 px or more apart, and no pair of different people
+  passes at any size. On strangers in 12 real surveillance clips it gave one
+  false candidate: an upside-down head at a fisheye's edge, which the
+  saved lined-up face shows is not a face. The same person in real recorder
+  footage is not measured: we hold no labelled footage of one (§8n).
   - A lead is worth reviewing; an empty list proves nothing
     (`VALIDATION_REPORT.md` §8a).
 - **On fast media the single pass is CPU-bound.**

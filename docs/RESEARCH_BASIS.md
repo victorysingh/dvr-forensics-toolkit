@@ -215,8 +215,9 @@ goes beyond.
   - Every model file is pinned by SHA-256 and recorded in the custody
     ledger.
   - Every output is labelled "lead, not evidence".
-  - Nobody is identified: the tool detects faces but does not recognise
-    them.
+  - Nobody is identified. Detection says where a face is, not whose. Face
+    search, run only when an examiner supplies a photo, ranks the faces by
+    likeness and calls the closest *candidates*, never matches (§8n).
   - Motion activity comes from compressed frame sizes, with no decoding.
 - **Measured, including what it gets wrong** (`VALIDATION_REPORT.md` §8a).
   - On 287 frames of real recorder footage labelled by eye, the first
@@ -236,8 +237,17 @@ goes beyond.
   - A detection fixed in place through a clip is flagged and not counted
     (a steel pot scored as a face at 0.99), and so is a face box spanning
     most of the frame.
+- **Face search is built for recorder-sized faces** (`VALIDATION_REPORT.md`
+  §8n).
+  - The numbers are OpenCV's own: our numpy code reproduces its
+    `FaceRecognizerSF` to a cosine of 0.99999, with no OpenCV dependency.
+  - It is measured where CCTV lives: LFW faces shrunk and H.264-encoded to
+    recorder size, and strangers in real recorder footage. That sets the
+    smallest face it will call a candidate.
 - **What is not new, and is credited.** The models are public: YOLOX
-  (Megvii) and YuNet (OpenCV Zoo). Tiling is SAHI (Akyon et al., ICIP 2022),
+  (Megvii), YuNet and SFace (OpenCV Zoo; SFace is Zhong et al. [34],
+  measured on LFW [35]); faces are aligned to ArcFace's five-point template
+  (insightface). Tiling is SAHI (Akyon et al., ICIP 2022),
   and rotation for overhead fisheye is RAPiD's idea (Duan et al., CVPR
   Workshops 2020). What is ours is putting them on footage recovered from a
   raw DVR disk, tied to the evidence chain, with the accuracy measured on
@@ -262,7 +272,7 @@ goes beyond.
 - Robust against damaged or tampered disks: 9,600 corrupted disks fed to
   all 8 vendor parsers found 144 crashes and a hang, now fixed. A parser can
   no longer end in a traceback. The three carvers and the E01 reader were
-  fuzzed the same way (`VALIDATION_REPORT.md` §8m).
+  fuzzed the same way (`VALIDATION_REPORT.md` §8o).
 - Magnet Witness (formerly DVR Examiner, from DME Forensics), the leading
   commercial tool, is closed. We do not claim to match its vendor coverage.
   We claim a method that shows its evidence.
@@ -525,6 +535,8 @@ Honeywell). They are the engineering under the five lines above.
 31. UK Forensic Science Regulator. *FSR-G-218 Issue 2, Method Validation in Digital Forensics* (2024) — [PDF](https://assets.publishing.service.gov.uk/media/5f6ca608d3bf7f7231ac65e0/218_Method_Validation_in_Digital_Forensics_Issue_2_New_Base_Final.pdf). Sections read. ISO/IEC 17025:2017 cl. 7.2.2.1 (secondary summary; the standard is paywalled).
 32. C. Hargreaves, F. Breitinger, L. Dowthwaite, H. Webb, M. Scanlon. *DFPulse: The 2024 digital forensic practitioner survey.* Forensic Science International: Digital Investigation 51:301844, 2024. doi:10.1016/j.fsidi.2024.301844. Read in full.
 33. Dstl. *Recovery and Acquisition of Video Evidence*, v3.0, 28 Feb 2022 — [gov.uk](https://www.gov.uk/government/publications/recovery-and-acquisition-of-video-evidence). Relevant passages read.
+34. Y. Zhong et al. *SFace: Sigmoid-Constrained Hypersphere Loss for Robust Face Recognition.* IEEE Transactions on Image Processing 30, 2021; arXiv:2205.12010. The model card (OpenCV Zoo, `face_recognition_sface`) read; the paper not read in full.
+35. G. B. Huang, M. Ramesh, T. Berg, E. Learned-Miller. *Labeled Faces in the Wild: A Database for Studying Face Recognition in Unconstrained Environments.* UMass Amherst Technical Report 07-49, 2007. Used as data (§8n).
 
 Items 15–17 and 20 are standard references not re-fetched on 28 Sep; items
 1–14, 18–19 and 21–22 were checked on 28 Sep, and 23–33 on 29 Sep, as

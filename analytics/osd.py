@@ -324,8 +324,7 @@ def run(clips: list[str], case_dir: str, frames: int = FRAMES, window_s: int = W
             "the recorder painted into the picture, read by a machine. It carries the "
             "share of sampled frames that agreed and is a lead for an examiner, who "
             "can confirm it by looking at the frame itself.",
-            "The label names a camera; it identifies no person. There is no "
-            "recognition of any kind in this tool.",
+            "The label names a camera; it identifies no person.",
             "The clock check compares the picture's clock with the date decoded from "
             "the container. Both are the recorder's own wall clock, so they should "
             "agree; a disagreement says one of the two is wrong, not which.",

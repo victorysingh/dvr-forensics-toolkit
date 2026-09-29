@@ -2514,6 +2514,120 @@ def test_caviar_eval(tmp: str) -> None:
           json.dumps(s))
 
 
+def test_face_search_rules() -> None:
+    """Face search: the alignment undoes any turn, scale and shift of a face
+    exactly; a face is a candidate only if alike enough and large enough;
+    results rank across clips; the model is pinned and analyse-video never
+    runs it."""
+    print("\n[analytics: face search rules]")
+    import math
+    from analytics.face_rules import (MATCH_MIN, MIN_EYE_PX, NOTES, TEMPLATE, apply, eye_px,
+                                      is_candidate, ranked, similarity)
+    from analytics.models import MODEL_SETS, MODELS
+    ident = similarity(TEMPLATE)
+    check("the template aligned onto itself is left where it is",
+          all(abs(x - y) < 1e-9 for r1, r2 in zip(ident, [[1, 0, 0], [0, 1, 0]]) for x, y in zip(r1, r2)),
+          str(ident))
+    th, k, sx, sy = 0.35, 0.42, 811.0, 233.5          # a small face, tilted, far into the frame
+    seen = [(k * (math.cos(th) * x - math.sin(th) * y) + sx, k * (math.sin(th) * x + math.cos(th) * y) + sy)
+            for x, y in TEMPLATE]
+    back = [apply(similarity(seen), p) for p in seen]
+    check("a face turned, shrunk and moved is brought back onto the template exactly",
+          all(abs(a - b) < 1e-6 for p, q in zip(back, TEMPLATE) for a, b in zip(p, q)), str(back))
+    try:
+        similarity([(5, 5)] * 5)
+        same_point = False
+    except ValueError:
+        same_point = True
+    check("five points in one place are refused, not divided by zero", same_point)
+    check("eye distance is measured between the two eye points",
+          eye_px([(10, 10), (13, 14), (0, 0), (0, 0), (0, 0)]) == 5.0)
+    face = lambda s, e: {"similarity": s, "eye_px": e}
+    check("a candidate needs the similarity and the size: alike and large yes, alike but "
+          "tiny no, large but unlike no, both exactly at the limits yes",
+          [is_candidate(face(0.6, 30)), is_candidate(face(0.6, MIN_EYE_PX - 0.5)),
+           is_candidate(face(MATCH_MIN - 0.01, 60)), is_candidate(face(MATCH_MIN, MIN_EYE_PX))]
+          == [True, False, False, True])
+    clips = [{"clip": "a.h264", "faces": [{"t_s": 1.0, "similarity": 0.2}, {"t_s": 5.0, "similarity": 0.7}]},
+             {"clip": "b.ps", "faces": [{"t_s": 2.0, "similarity": 0.5}]}]
+    check("faces are ranked across clips, most alike first, each with its clip",
+          [(f["clip"], f["t_s"]) for f in ranked(clips)] == [("a.h264", 5.0), ("b.ps", 2.0), ("a.h264", 1.0)])
+    check("SFace is pinned with its Apache-2.0 licence, and no analyse-video model set uses it",
+          MODELS["sface"]["license"] == "Apache-2.0" and len(MODELS["sface"]["sha256"]) == 64
+          and all("sface" not in (s["faces"], s["objects"]) for s in MODEL_SETS.values()))
+    check("every result carries the words: a candidate, not an identification",
+          "NOT AN IDENTIFICATION" in NOTES[0] and any("absent" in n for n in NOTES))
+
+
+def test_face_search_report(tmp: str) -> None:
+    """A face search result reaches the case report as candidates, with the
+    photo's hash, the models and the warning, and is listed among its inputs;
+    a PS clip's faces get the recorder's time."""
+    print("\n[analytics: face search in the report]")
+    import cli
+    from report.case import load_case
+    from report.html import render
+    case = os.path.join(tmp, "face-case")
+    os.makedirs(os.path.join(case, "analytics"), exist_ok=True)
+    os.makedirs(os.path.join(case, "carve"), exist_ok=True)
+    with open(os.path.join(case, "carve", "ps_report.json"), "w", encoding="utf-8") as fh:
+        json.dump({"streams": [{"id": "ps-00007", "time_first_local": "2024-08-30 14:00:00"}]}, fh)
+    clips = [{"clip": "ps-00007.ps", "faces": [{"t_s": 90.0, "similarity": 0.61, "eye_px": 21.0,
+                                                "candidate": True}]},
+             {"clip": "cam2.h264", "faces": [{"t_s": 3.0, "similarity": 0.12, "eye_px": 9.0,
+                                              "candidate": False}]}]
+    stamped = cli._recorder_times(case, clips, "faces")
+    check("a face in a Hikvision PS clip gets the recorder's time; a clip with no clock gets none",
+          stamped and clips[0]["faces"][0]["time_local"] == "2024-08-30 14:01:30"
+          and "time_local" not in clips[1]["faces"][0], str(clips))
+    os.remove(os.path.join(case, "carve", "ps_report.json"))   # a stand-in, not a whole carve
+    model = {"name": "SFace", "license": "Apache-2.0", "sha256": "ab" * 32, "source": "https://x"}
+    fs = {"rule": "analytics.face_search.sface.v1", "status": "candidates for review, not identification",
+          "reference": {"photo": "suspect.jpg", "photo_sha256": "cd" * 32, "faces_in_photo": 1,
+                        "turned": 0, "eye_px": 88.0},
+          "models": {"faces": dict(model, name="YuNet", license="MIT"), "recognition": model},
+          "match_min": 0.363, "min_eye_px": 12,
+          "totals": {"clips": 2, "frames_analysed": 40, "faces_compared": 2, "candidates": 1, "too_small": 1},
+          "top": [dict(f, clip=c["clip"]) for c in clips for f in c["faces"]], "clips": clips,
+          "notes": ["A CANDIDATE, NOT AN IDENTIFICATION."]}
+    with open(os.path.join(case, "analytics", "face_search.json"), "w", encoding="utf-8") as fh:
+        json.dump(fs, fh)
+    c = load_case(case)
+    page = render(c)
+    check("the case carries the face search, hashed", c.get("face_search", {}).get("sha256") is not None
+          and c["face_search"]["totals"]["candidates"] == 1)
+    check("the report shows it as candidates, with the photo's hash, the warning and the "
+          "recorder time, and lists face_search.json among its inputs",
+          "Face search — candidates, not identifications" in page and "cd" * 32 in page
+          and "it does not say who anyone is" in page and "2024-08-30 14:01:30" in page
+          and "analytics/face_search.json" in page)
+
+
+def test_face_eval(tmp: str) -> None:
+    """The face search measurement's bookkeeping: LFW's pairs file read as
+    same / different pairs, the face nearest the centre chosen, results
+    binned by eye distance."""
+    print("\n[analytics: face search measurement]")
+    from validate.face_eval import binned, central, read_pairs
+    p = os.path.join(tmp, "pairs.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("2\t1\nAnn_Lee\t1\t3\nBo_Chan\t2\tCy_Das\t1\nDee_Fox\t1\t2\nEd_Gray\t4\tFay_Hu\t2\n")
+    one, both = read_pairs(p, 1), read_pairs(p, 5)
+    check("pairs.txt: a 3-field row is one person twice, a 4-field row two people; folds kept",
+          one == [(True, ("Ann_Lee", 1), ("Ann_Lee", 3)), (False, ("Bo_Chan", 2), ("Cy_Das", 1))]
+          and len(both) == 4 and both[3] == (False, ("Ed_Gray", 4), ("Fay_Hu", 2)))
+    faces = [{"box": [0.0, 0.0, 0.2, 0.2]}, {"box": [0.4, 0.45, 0.62, 0.6]}]
+    check("the face nearest the centre is the subject; none if nothing is near it",
+          central(faces) is faces[1] and central(faces[:1]) is None)
+    rows = [{"same": True, "eye_px": 9.0, "similarity": 0.2}, {"same": True, "eye_px": 30.0, "similarity": 0.7},
+            {"same": False, "eye_px": 30.5, "similarity": 0.4}, {"same": False, "eye_px": 31.0, "similarity": 0.1}]
+    b = {x["eye_px"]: x for x in binned(rows, 0.363)}
+    check("binned by eye distance: passes counted per bin for the same person and for different people",
+          b["8-10"] == {"eye_px": "8-10", "faces": 1, "same": 1, "same_pass": 0, "diff": 0, "diff_pass": 0}
+          and b["24-32"] == {"eye_px": "24-32", "faces": 3, "same": 1, "same_pass": 1, "diff": 2,
+                             "diff_pass": 1}, str(b))
+
+
 def test_hikbtree(tmp: str) -> None:
     """HIKBTREE records as observed on real media: found by shape, the data
     base found as the common residue, copies de-duplicated, and a carved
@@ -4592,6 +4706,9 @@ def main() -> int:
         test_analytics_tiles()
         test_analytics_models()
         test_caviar_eval(tmp)
+        test_face_search_rules()
+        test_face_search_report(tmp)
+        test_face_eval(tmp)
         test_parked_vehicles()
         test_analytics_apply(tmp)
         test_parser_safety_net()

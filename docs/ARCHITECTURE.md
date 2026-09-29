@@ -207,6 +207,8 @@ out/<case>/
   carve/annexb_report.json  raw H.264/H.265 streams (carve-annexb); es_streams/ when extracted
   validation/export_<clip>.json  recovered footage vs the recorder's own export
   analytics/analytics.json  faces and objects in extracted clips (optional layer)
+  analytics/face_search.json  faces ranked by likeness to a reference photo: candidates
+                          (optional layer); pictures in analytics/face_search/
   analytics/osd.json      camera titles and the clock read off the picture (optional layer)
   preserved/              filesystem metadata as whole scan blocks + manifest
   parse_<vendor>.json     volumes, recordings, field provenance

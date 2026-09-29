@@ -33,8 +33,8 @@ a = Analysis(  # noqa: F821
     pathex=[ROOT],
     datas=datas,
     hiddenimports=hidden,
-    excludes=["numpy", "onnxruntime", "kaitaistruct", "analytics.detect", "tkinter",
-              "matplotlib", "PIL", "IPython"],
+    excludes=["numpy", "onnxruntime", "kaitaistruct", "analytics.detect", "analytics.face_search",
+              "tkinter", "matplotlib", "PIL", "IPython"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)  # noqa: F821

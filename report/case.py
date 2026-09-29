@@ -360,6 +360,15 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
             "parked": [dict(s, clip=c["clip"]) for c in an.get("clips", [])
                        for s in c.get("parked_vehicles", [])][:100]}
 
+    fs = _load(j("analytics", "face_search.json"))
+    if fs:
+        case["face_search"] = {
+            "sha256": _hashed(j("analytics", "face_search.json")), "status": fs.get("status"),
+            "rule": fs.get("rule"), "reference": fs.get("reference", {}),
+            "models": fs.get("models", {}), "match_min": fs.get("match_min"),
+            "min_eye_px": fs.get("min_eye_px"), "totals": fs.get("totals", {}),
+            "notes": fs.get("notes", []), "top": fs.get("top", [])[:50]}
+
     osd = _load(j("analytics", "osd.json"))
     if osd:
         named = [s for s in osd.get("streams", []) if s.get("label")]

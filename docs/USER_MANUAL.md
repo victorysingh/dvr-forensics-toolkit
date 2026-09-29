@@ -24,8 +24,11 @@ to it:
 - writes a report and keeps a hash-chained chain of custody.
 
 It measures motion activity from compressed frame sizes (§3.4a) as a lead for
-review. It does **not** yet: decode video to MP4, run face/object detection, read the
-on-screen clock, or sign reports; the BSA s.63 certificate is produced as a draft (§3.4g). Nothing
+review. An optional layer, installed separately, finds people, faces and
+vehicles in recovered footage (§3.4o), ranks faces by likeness to a photo the
+examiner supplies (§3.4p) and reads the camera title and clock painted in the
+picture (§3.4b); everything it gives is a lead, never evidence. It does **not**
+sign reports; the BSA s.63 certificate is produced as a draft (§3.4g). Nothing
 it produces is labelled `validated` — see §6.
 
 ## 2. Requirements
@@ -183,9 +186,10 @@ disagreement is reported and is not resolved for you — the frame is the
 arbiter. Nothing here converts a time to UTC.
 
 A title is what the installer typed ("Parking"), not a channel number, and it
-is OCR of pixels: confirm it in the frame before it goes near a finding. The
-OCR's accuracy has not yet been measured on real footage — `docs/OSD_OCR.md`
-§6 says exactly what that means and how to settle it.
+is OCR of pixels: confirm it in the frame before it goes near a finding.
+Measured on six real recorders' files it is weak: the clock was found on 3 of
+6, 5 of 36 clock frames were read exactly, and no title was read right
+(`docs/VALIDATION_REPORT.md` §8c, `docs/OSD_OCR.md` §6).
 
 ### 3.4c More than one recorder in the same case
 
@@ -531,6 +535,57 @@ A `.dav` keeps the recorder's own frame times; any other clip needs `--start`
 the camera's switch elevation, and each switch's own offset, whose spread is
 the uncertainty. With `--zone` it also states the clock error. It needs at
 least one dusk and one dawn switch.
+
+### 3.4o People, faces and vehicles in recovered footage (a lead, not evidence)
+
+Optional: it needs ffmpeg, numpy and onnxruntime, installed apart from the
+forensic core (`analytics/README.md`); the packaged `.exe` does not include it.
+
+```bash
+python cli.py analyse-video --out out/CASE-001            # every clip extract-carved wrote
+python cli.py analyse-video --out out/CASE-001 --ids carve-00012,carve-00013 --fps 2
+```
+
+YOLOX-S looks for people, vehicles and bags, on the whole frame and on a
+2 x 2 grid of tiles so that small people are seen; YuNet looks for faces. A
+round fisheye picture is also looked at turned round (`--rotate`). A
+detection that stays in one place through a clip is flagged and not counted,
+except that a car which stays put is reported once, as a parked vehicle.
+Each model's SHA-256 goes into the custody ledger, and the report gains
+section 6b. Face *detection* says where a face is, not whose.
+
+Measured on 287 real recorder frames labelled by eye, it finds a person in
+44 of 57 and still misses distorted and distant people
+(`docs/VALIDATION_REPORT.md` §8a): **an empty list does not mean nobody was
+there.**
+
+### 3.4p Face search by a reference photo (candidates, not identifications)
+
+Optional, the same layer as §3.4o. Run it only when the investigation
+supplies a photo of a person:
+
+```bash
+python cli.py face-search --out out/CASE-001 --photo person.jpg
+python cli.py face-search --out out/CASE-001 --photo person.jpg --video exported.mp4
+```
+
+Every face YuNet finds in the sampled frames is lined up on its eyes, nose
+and mouth and turned into 128 numbers by SFace, then scored against the
+photo's face: the cosine between the two, 1 = alike, 0 = unrelated. A face
+scoring at least 0.363 (OpenCV's published threshold for SFace) whose eyes
+are at least 12 pixels apart in the recording is a **candidate**. Smaller
+faces are listed with their score but never made candidates.
+
+It writes `analytics/face_search.json` and, in `analytics/face_search/`, the
+photo's face and, for the most alike faces in each clip, the frame and the
+lined-up face to put beside it. The photo's SHA-256, the models' and the
+thresholds go into the custody ledger; the report gains section 6b-ii.
+
+A candidate is a moment to compare by eye with the photo; it says nothing
+about who anyone is. On recorder-sized faces the same person can score below
+the threshold and a stranger above it, and a face turned away, covered or too
+small is never compared, so **no candidate does not mean the person is
+absent**. How often it errs, by face size: `docs/VALIDATION_REPORT.md` §8n.
 
 ### 3.5 Look at the results
 
