@@ -1756,10 +1756,17 @@ def cmd_identify_model(args) -> int:
                     {f"{f['identifier']} {f['value']}" for f in forms}))
                       + " (record-device)")
             ms = model.ModelSearch(forms)
-            for k, (off, n) in enumerate(blocks):
-                ms.feed(off, dev.read_at(off, n))
+            # the matching is CPU-bound (~6 MiB/s a process); a whole drive
+            # needs it spread over processes to keep up with the reads
+            workers = getattr(args, "workers", 0) or (min(8, max(1, (os.cpu_count() or 1) - 1))
+                                                      if len(blocks) > 64 else 1)
+            if workers > 1:
+                print(f"  workers       {workers} processes match while this one reads")
+
+            def progress(k: int) -> None:
                 if k and k % 500 == 0:
                     print(f"    {k}/{len(blocks)} blocks", flush=True)
+            model.search_blocks(dev.read_at, blocks, ms, workers, progress)
     except (PermissionNeeded, DeviceError) as exc:
         print(f"[!] {exc}")
         return 1
@@ -2391,6 +2398,9 @@ def main() -> int:
     p.add_argument("--max-gb", type=float, default=4.0,
                    help="most bytes to read (default 4 GiB; raise it to search every "
                         "non-video block of a whole drive)")
+    p.add_argument("--workers", type=int, default=0,
+                   help="processes for the pattern matching (default: one per core, up to 8, "
+                        "for searches over 64 blocks; 1 = in this process)")
     p.set_defaults(func=cmd_identify_model)
 
     p = sub.add_parser("hik-log",
