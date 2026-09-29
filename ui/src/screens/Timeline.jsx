@@ -31,7 +31,8 @@ export default function Timeline({ c }) {
         <Kpi label="Remnants" value={n.remnant || 0}
           sub="index entries with no footage" src="timeline.json" />
         <Kpi label="Gaps" value={gaps.length}
-          sub="periods with no footage on any camera" src="timeline.json" />
+          sub={`periods a camera has no footage · ${gaps.filter((g) => g.system_wide).length} on every camera`}
+          src="timeline.json" />
       </div>
 
       <Section title="Cameras">
@@ -41,15 +42,15 @@ export default function Timeline({ c }) {
               __k: k, camera: k,
               first: v.first_local ?? v.first ?? "",
               last: v.last_local ?? v.last ?? "",
-              events: v.events ?? v.count ?? 0,
+              recordings: v.recordings ?? 0,
               covered: v.covered_s ?? 0,
             }))}
             cols={[
               { key: "camera", label: "Camera" },
               { key: "first", label: "First (recorder clock)", render: (r) => clockTime(r.first) },
               { key: "last", label: "Last (recorder clock)", render: (r) => clockTime(r.last) },
-              { key: "events", label: "Events", cls: "text-right font-mono", sort: "num",
-                render: (r) => num(r.events) },
+              { key: "recordings", label: "Indexed recordings", cls: "text-right font-mono",
+                sort: "num", render: (r) => num(r.recordings) },
               { key: "covered", label: "Covered", cls: "text-right font-mono", sort: "num",
                 render: (r) => dur(r.covered) },
             ]} />
@@ -65,8 +66,9 @@ export default function Timeline({ c }) {
           <DataTable search={false} page={60}
             rows={gaps.map((g, i) => ({
               __k: i,
-              from: g.from_local ?? g.from ?? "", to: g.to_local ?? g.to ?? "",
-              secs: g.seconds ?? g.duration_s ?? 0, camera: g.camera_id ?? "all",
+              from: g.start_local ?? "", to: g.end_local ?? "",
+              secs: g.duration_s ?? 0,
+              camera: g.system_wide ? "all" : [g.camera, ...(g.shared_with || [])].join(", "),
             }))}
             cols={[
               { key: "from", label: "From (recorder clock)", render: (r) => clockTime(r.from) },
@@ -83,7 +85,7 @@ export default function Timeline({ c }) {
           rests on - which a lane cannot show. */}
       {events.length > 0 && (
         <Section title="Events"
-          hint={`${num(events.length)} on the timeline · "time basis" says what each time rests on`}>
+          hint={`${num(events.length)} of ${num((n.indexed || 0) + (n.unindexed || 0) + (n.remnant || 0))} shown · "time basis" says what each time rests on`}>
           <DataTable
             rows={events.map((e, i) => ({
               __k: i,

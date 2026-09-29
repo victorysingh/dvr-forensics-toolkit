@@ -9,7 +9,10 @@
    evidence behind a claim is, and the same colour means the same thing on
    every screen.  --color-lead is reserved for anything a model produced.
 */
-@theme {
+/* `static`: emit every variable, not only those a utility class uses - the
+   camera colours are read by inline styles (camColor), which Tailwind cannot
+   see, and without this the lanes and bars render with no colour at all. */
+@theme static {
   --color-ink: #16202b;
   --color-ink-dim: #5b6b7c;
 

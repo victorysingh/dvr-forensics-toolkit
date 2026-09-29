@@ -1822,6 +1822,52 @@ def test_timeline_recurring() -> None:
           len(r) == 1 and r[0]["start_local"] == "02:00" and len(r[0]["days"]) == 3, str(r))
 
 
+def test_case_view() -> None:
+    """What the case console shows, as load_case builds it for the screens."""
+    print("\n[case view]")
+    from report.case import _labelled_thumb, _with_local_span, vendor_matrix
+
+    def claim(source, when):
+        return {"source": source, "raw_value": f"0x0 = {when} recorder-local"}
+
+    rec = {"id": "r", "timestamps": [claim("index", "2026-09-03 12:53:53"),
+                                     claim("index", "2026-09-03 14:00:00"),
+                                     claim("container", "2026-09-03 12:53:52")]}
+    got = _with_local_span(rec)
+    check("a recording's span is its index start and end, as the timeline takes them",
+          (got["start_time_local"], got["end_time_local"])
+          == ("2026-09-03 12:53:53", "2026-09-03 14:00:00") and "start_time_local" not in rec,
+          str(got))
+    only_frames = {"id": "h", "timestamps": [claim("container", "2026-01-02 03:04:05"),
+                                             claim("container", "2026-01-02 03:09:05")]}
+    got = _with_local_span(only_frames)
+    undated = _with_local_span({"id": "u", "timestamps": [claim("index", "not a time")]})
+    check("with no index times the span is the first and last frame; with none it is empty",
+          (got["start_time_local"], got["end_time_local"])
+          == ("2026-01-02 03:04:05", "2026-01-02 03:09:05")
+          and undated["start_time_local"] is None and undated["end_time_local"] is None,
+          f"{got} {undated}")
+
+    clip = {"clip": "c.h265", "detections": [
+        {"t_s": 5.0, "detections": [
+            {"label": "person", "score": 0.59, "static": False, "implausible": False},
+            {"label": "face", "score": 0.91, "static": True, "implausible": False}]},
+        {"t_s": 10.0, "detections": [
+            {"label": "face", "score": 0.95, "static": False, "implausible": True}]}]}
+    shown = _labelled_thumb({"file": "a.jpg", "t_s": 5.0}, clip)
+    flagged = _labelled_thumb({"file": "b.jpg", "t_s": 10.0}, clip)
+    empty = _labelled_thumb({"file": "c.jpg", "t_s": 15.0}, clip)
+    check("a thumbnail is labelled by the counted boxes on its frame, never by flagged ones",
+          (shown["label"], shown["score"], shown["clip"]) == ("person", 0.59, "c.h265")
+          and (flagged["label"], flagged["score"]) == ("flagged, not counted", None)
+          and empty["label"] is None, f"{shown} {flagged} {empty}")
+
+    hik = next(r for r in vendor_matrix() if r["vendor"] == "Hikvision")
+    check("the vendor matrix says drive 2 was read, and claims no more than spec_only for it",
+          hik["parser_status"] == "spec_only" and "not yet read" not in hik["media"]
+          and "intact" in hik["basis"], str(hik))
+
+
 def test_timeline_recorder_log() -> None:
     """The recorder's own log set against the footage: a silence on every
     camera with a logged power-on is a power cut; one without is reported as
@@ -4264,6 +4310,7 @@ def main() -> int:
         test_timeline_clock_default()
         test_timeline_recurring()
         test_timeline_recorder_log()
+        test_case_view()
         test_ps_carver(tmp)
         test_static_detections()
         test_analytics_eval(tmp)

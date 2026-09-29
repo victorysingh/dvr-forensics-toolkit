@@ -17,6 +17,12 @@ export default function Dashboard({ c }) {
   const tot = Object.values(labels).reduce(
     (a, v) => ({ streams: a.streams + v.streams, frames: a.frames + v.frames,
                  bytes: a.bytes + v.bytes }), { streams: 0, frames: 0, bytes: 0 });
+  // A Hikvision disk carries MPEG-PS, not DHAV, and its index is read while the
+  // carved streams are labelled (carve/hik_index.json), not by `parse`.
+  const ps = !tot.streams && c.ps_carve ? c.ps_carve : null;
+  const hikIndex = !c.parse && ps?.labels ? ps.labels : null;
+  // channel 255 marks a block reserved at format time, not a camera (hikbtree.py)
+  const hikCams = Object.keys(hikIndex?.index_channels || {}).filter((k) => k !== "255").length;
 
   const det = s?.detections?.[0];
   const ver = c.custody?.verify || {};
@@ -45,14 +51,26 @@ export default function Dashboard({ c }) {
             src="scan_report.json" />
         )}
 
-        <Kpi label="Recordings" value={c.parse ? c.parse.recordings_total : 0}
-          sub={c.parse ? `${camCount} camera${camCount === 1 ? "" : "s"} in the index`
-                       : "filesystem not parsed"}
-          src={c.parse ? c.parse.file : "parse_*.json"} />
+        {hikIndex ? (
+          <Kpi label="Index records" value={hikIndex.index_records}
+            sub={`HIKBTREE records, ${hikCams} camera channel${hikCams === 1 ? "" : "s"} · read while labelling`}
+            src="carve/hik_index.json" />
+        ) : (
+          <Kpi label="Recordings" value={c.parse ? c.parse.recordings_total : 0}
+            sub={c.parse ? `${camCount} camera${camCount === 1 ? "" : "s"} in the index`
+                         : "filesystem not parsed"}
+            src={c.parse ? c.parse.file : "parse_*.json"} />
+        )}
 
-        <Kpi label="Footage recovered" value={tot.streams}
-          sub={`${num(tot.frames)} frames · ${bytes(tot.bytes)}`}
-          src="carve/carve_report.json" />
+        {ps ? (
+          <Kpi label="Footage recovered" value={ps.streams_total}
+            sub={`MPEG-PS streams · ${bytes(ps.bytes)}`}
+            src="carve/ps_report.json" />
+        ) : (
+          <Kpi label="Footage recovered" value={tot.streams}
+            sub={`${num(tot.frames)} frames · ${bytes(tot.bytes)}`}
+            src="carve/carve_report.json" />
+        )}
 
         {labels.outside_index && (
           <Kpi label="Outside the index" value={labels.outside_index.streams}
