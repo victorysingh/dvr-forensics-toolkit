@@ -154,7 +154,24 @@ paper. Detail and what is tested: VALIDATION_REPORT §8f.
 | Integrity | CRC-16 on the superblock, each abstract group and each block header **F** | CRC-32 on the format sector **F** |
 | Plugin | `plugins/uniview.py`, `spec_only`: recordings, extraction, footage without the index | `plugins/tplink.py`, `detected_not_parsed`: index and system log read when plain; no footage placed |
 
-## 4a. Godrej, Matrix (and TP-Link, Uniview before the plugins)
+## 4d. Matrix, from its own documents (29 Sep)
+
+Matrix's support documents describe the disk as an ordinary Linux folder tree,
+`<volume>/CameraNN/DD_Mon_YYYY/HH/HH_MM_SS~HH_MM_SS.stm1`, with `.evnt`,
+`.ifrm` and `.tmid` beside each recording (Matrix Wiki, *Backup recording files
+from HDD*, 2018). `plugins/matrix.py` reads it (`spec_only`, P = the vendor's
+own published documents); VALIDATION_REPORT §8h.
+
+| Aspect | Matrix SATATYA | Tag |
+|---|---|---|
+| Filesystem | a Linux filesystem, type **not documented**; read here as ext2/3/4 (incl. one RAID 1 mirror) | P / ? |
+| Container | `.stm`, not published; played only by Matrix's Device Player | P |
+| Camera | the `CameraNN` folder | P |
+| Time | folder (date, hour) and file name (start~end): the recorder's clock | P |
+| Sidecars | `.evnt` (events), `.ifrm` (keyframes), `.tmid` (time index) - formats not published | P |
+| RAID | 0 and 1 (5 and 10 on NVRX); the RAID volume is mounted as one tree (`RAID0` in the example) | P |
+
+## 4a. Godrej (and TP-Link, Uniview, Matrix before the plugins)
 
 What the tool does today for each: recognise a brand string (`HONEYWELL`,
 `TP-LINK`, `GODREJ`, `UNIVIEW`, `MATRIX`) wherever it appears on the
@@ -228,8 +245,9 @@ not filled from forum talk. Sources are listed in §5.2.
   written up as such, not as tampering.
 - **Uniview, TP-Link.** Nothing published - but their firmware answers
   questions 1-5 and 7 (§4c), and both now have plugins.
-- **Godrej, Matrix.** Nothing published to parse from. Their
-  video is recoverable by `carve-annexb`. Their exports (TP-Link to USB,
+- **Matrix.** Its documents give the recording tree (§4d); a plugin reads it.
+- **Godrej.** Nothing published to parse from. Its
+  video is recoverable by `carve-annexb`. Exports (TP-Link to USB,
   Matrix to AVI) are what `validate-export` would compare against, once a
   unit is available to record on.
 

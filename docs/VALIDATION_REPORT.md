@@ -32,7 +32,7 @@ Two different things are validated here, and they must not be confused:
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
-| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container, index records and full-filesystem parser `spec_only` (the parser not yet run on an intact Hikvision disk); HeimVision `spec_only`, observed on a third real image (§8e); Uniview `spec_only` and TP-Link's index, from the vendors' own firmware (§8f) |
+| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container, index records and full-filesystem parser `spec_only` (the parser not yet run on an intact Hikvision disk); HeimVision `spec_only`, observed on a third real image (§8e); Uniview `spec_only` and TP-Link's index, from the vendors' own firmware (§8f); Matrix `spec_only`, from Matrix's own documents (§8h) |
 
 ## 2. Environment
 
@@ -510,6 +510,44 @@ and nothing here has met a real Uniview or VIGI disk. The first such disk
 is the test: its superblock CRC, group CRCs and GOP trailers either check or
 they do not.
 
+## 8h. Matrix, from its own documents
+
+Matrix publishes no firmware (its download server asks for a login) and no
+format. Its support documents do describe the disk, though. "How to Backup
+recording files from HDD in SATATYA Devices?" (Matrix Wiki, V1R1, 2018) says
+the recorder keeps its recordings as ordinary files in a folder tree:
+
+`<volume>/CameraNN/DD_Mon_YYYY/HH/HH_MM_SS~HH_MM_SS.stm1`
+
+with `.evnt`, `.ifrm` and `.tmid` files beside each recording. The worked
+example is `\\192.168.51.254\hvr\RAID0\Camera01\21_Apr_2018\14\14_47_19~14_59_59.stm1`.
+The system manual (V8R7) adds that the NVR runs embedded Linux and formats
+the disk itself, and that only Matrix's Device Player plays or converts a
+`.stm` file.
+
+`plugins/matrix.py` reads that tree:
+
+| What | How | Tag |
+|---|---|---|
+| Filesystem | ext2/3/4 on the whole disk, in an MBR/GPT partition, or in one mirror of a Linux md RAID 1. **Which filesystem Matrix uses is not documented**; XFS or a striped RAID member is named in the report, not read | ext4: kernel documentation |
+| Cameras | `CameraNN` folders, up to three levels below the root | Matrix document |
+| Recordings | one per `.stm<N>` file: camera, date and hour from the folders, start and end from the file name - the recorder's clock, not converted; the file's inode time as a second statement | Matrix document |
+| Where on the disk | every byte of each file located through the filesystem (extents or block maps) | ext4 |
+| Codec | from the first NAL unit inside the file | measured |
+| Extraction | the `.stm` and its sidecars **as stored**, each hashed - the container is not published, so it is not unwrapped; coded pictures counted from the slices inside | |
+
+The ext reader (`parsers/ext3.py`) gained ext4 for this. It now reads
+extent trees (in the inode and behind index blocks), allocated-but-unwritten
+extents (as zeros) and 64-bit group descriptors, and still refuses what it
+does not read (inline data, encryption, compression, meta_bg). It is tested
+on an ext4 image built to the kernel's documented layout (4 tests).
+
+**What is tested**: disks built to the documents (`tests/synth_matrix.py`, 8
+tests). The disks have two cameras, H.264 and H.265 recordings split into
+fragments, sidecars, and a stray file. They come in four layouts: plain,
+RAID 1 member, RAID 0 member and XFS. As with Uniview, only a real Matrix
+disk can show whether its filesystem is ext4 at all.
+
 ## 8c. OSD reader (optional layer — first real run 28 Sep: 1 of 5 reference titles, no clock)
 
 `cli.py read-osd` reads the burned-in channel title and clock, which is the
@@ -563,7 +601,8 @@ timezone has been read off the unit (§10).
 | Honeywell | `spec_only` | `plugins/honeywell.py`, written from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430); tested on a disk built to the paper's description (10 tests, including recovery after a format); no Honeywell disk read |
 | Uniview | `spec_only` | `plugins/uniview.py`, from the storage driver in Uniview's own firmware (§8f); tested on a disk built to it (11 tests, including footage found with the index wiped); no Uniview disk read |
 | TP-Link | `detected_not_parsed` (index: `spec_only`) | `plugins/tplink.py`, from the VIGI firmware (§8f): the format sector and the index are detected, and a plain index is read (recordings per camera, GOP rows, system log); footage is not placed on the disk, because the zone geometry was not recovered - `carve-annexb` recovers it; an encrypted index is reported as encrypted |
-| Godrej, Matrix | `detected_not_parsed` | brand-string detection only; their video is recoverable by `carve-annexb` without a parser |
+| Matrix | `spec_only` | `plugins/matrix.py`, from Matrix's own documents (§8h): the recording tree on ext2/3/4, incl. one RAID 1 mirror; the .stm container is not published and is extracted as stored; tested on disks built to the documents (8 tests); no Matrix disk read, and the recorder's filesystem type is not documented |
+| Godrej | `detected_not_parsed` | brand-string detection only; its video is recoverable by `carve-annexb` without a parser |
 
 **To reach `validated`** — Dahua/CP Plus, and Hikvision the same way.
 
