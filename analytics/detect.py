@@ -9,8 +9,9 @@ and reports - it just cannot run this.
 What it does: decodes extracted clips with ffmpeg at a sampled frame rate and
 runs two ONNX models on each sampled frame (analytics/models.py):
   * YuNet - face DETECTION, on the whole 1920 x 1080 frame. It finds that a
-    face is present and where. It does not identify anyone; there is no
-    recognition here.
+    face is present and where. It does not identify anyone; comparing faces
+    with a photo is face search (analytics/face_search.py), a separate step
+    run only on an examiner's photo.
   * YOLOX-S (COCO) - people, vehicles and carried objects, on the whole
     1920 x 1080 frame and on each tile of a 2 x 2 grid of overlapping tiles
     (analytics/tiles.py), so that small people are seen.
@@ -62,24 +63,26 @@ def sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
-def load_models(model_set: str = DEFAULT_SET) -> dict:
-    """Open the set's two models, refusing any file whose hash is not the pinned one."""
+def open_model(key: str):
+    """One model of analytics/models.py MODELS, refused unless its hash is the pinned one."""
     opts = ort.SessionOptions()
     opts.log_severity_level = 3
     # leave the rest of the machine to anything else running (e.g. a scan)
     opts.intra_op_num_threads = int(os.environ.get("PS26150_ANALYTICS_THREADS", "4"))
+    m = MODELS[key]
+    path = os.path.join(HERE, "models", m["file"])
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"model {m['file']} missing - see analytics/README.md")
+    got = sha256_file(path)
+    if got != m["sha256"]:
+        raise ValueError(f"model {m['file']} hash {got} is not the pinned {m['sha256']}")
+    return ort.InferenceSession(path, opts, providers=["CPUExecutionProvider"])
+
+
+def load_models(model_set: str = DEFAULT_SET) -> dict:
+    """Open the set's two models, refusing any file whose hash is not the pinned one."""
     s = MODEL_SETS[model_set]
-    out = {"set": model_set}
-    for job in ("faces", "objects"):
-        m = MODELS[s[job]]
-        path = os.path.join(HERE, "models", m["file"])
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"model {m['file']} missing - see analytics/README.md")
-        got = sha256_file(path)
-        if got != m["sha256"]:
-            raise ValueError(f"model {m['file']} hash {got} is not the pinned {m['sha256']}")
-        out[job] = ort.InferenceSession(path, opts, providers=["CPUExecutionProvider"])
-    return out
+    return {"set": model_set, **{job: open_model(s[job]) for job in ("faces", "objects")}}
 
 
 def scale_for(model_set: str, n: int) -> int:
@@ -88,13 +91,14 @@ def scale_for(model_set: str, n: int) -> int:
     return OBJECT_SCALE if model_set != "classic" or n > 1 else 1
 
 
-def decode(path: str, fps: float, codec: str = "hevc", scale: int = 1):
+def decode(path: str, fps: float, codec: str = "hevc", scale: int = 1,
+           size: Optional[tuple] = None):
     """Yield (seconds from the first decoded frame, RGB frame) at `fps`, the
-    frame `scale` times DECODE_W x DECODE_H."""
+    frame `scale` times DECODE_W x DECODE_H, or `size` (w, h) if given."""
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg not found - install it to use the analytics layer")
     fmt = ["-f", codec] if codec else []          # PS: let ffmpeg detect the container
-    w, h = DECODE_W * scale, DECODE_H * scale
+    w, h = size or (DECODE_W * scale, DECODE_H * scale)
     cmd = ["ffmpeg", "-v", "quiet", *fmt, "-i", path,
            "-vf", f"fps={fps},scale={w}:{h}",
            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
@@ -200,17 +204,19 @@ def yolox(sess, rgb: np.ndarray, low: float) -> list[dict]:
     return found
 
 
-def yunet(sess, rgb: np.ndarray, low: float) -> list[dict]:
+def yunet(sess, rgb: np.ndarray, low: float, points: bool = False) -> list[dict]:
     """YuNet as OpenCV runs it: BGR, values 0-255, the picture padded to a
     multiple of 32; per stride 8/16/32 a score sqrt(class x objectness) and a
-    box relative to its grid cell."""
+    box relative to its grid cell.  With `points`, each face also carries its
+    five points (eyes, nose tip, mouth corners) in pixels of `rgb`, which face
+    search aligns the face by (analytics/face_rules.py)."""
     h, w = rgb.shape[:2]
     H, W = (h + 31) // 32 * 32, (w + 31) // 32 * 32
     img = np.zeros((H, W, 3), np.float32)
     img[:h, :w] = rgb[:, :, ::-1]
     outs = dict(zip([o.name for o in sess.get_outputs()],
                     sess.run(None, {"input": img.transpose(2, 0, 1)[None]})))
-    boxes, scores = [], []
+    boxes, scores, kps = [], [], []
     for s in (8, 16, 32):
         cols = W // s
         sc = np.sqrt(np.clip(outs[f"cls_{s}"][0, :, 0], 0, 1) * np.clip(outs[f"obj_{s}"][0, :, 0], 0, 1))
@@ -222,11 +228,19 @@ def yunet(sess, rgb: np.ndarray, low: float) -> list[dict]:
         bw, bh = np.exp(bb[:, 2]) * s, np.exp(bb[:, 3]) * s
         boxes.append(np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1))
         scores.append(sc[idx])
+        if points:     # each point relative to its grid cell, like the box centre
+            k = outs[f"kps_{s}"][0][idx].reshape(-1, 5, 2)
+            kps.append((k + np.stack([idx % cols, idx // cols], 1)[:, None, :]) * s)
     if not boxes:
         return []
     b, s = np.concatenate(boxes).astype(np.float32), np.concatenate(scores).astype(np.float32)
-    return [{"label": "face", "score": round(float(s[i]), 3), "box": _box(*b[i], w, h)}
-            for i in _nms(b, s, 0.3)]
+    keep = _nms(b, s, 0.3)
+    found = [{"label": "face", "score": round(float(s[i]), 3), "box": _box(*b[i], w, h)} for i in keep]
+    if points:
+        k = np.concatenate(kps)
+        for d, i in zip(found, keep):
+            d["points"] = [[round(float(x), 2), round(float(y), 2)] for x, y in k[i]]
+    return found
 
 
 def _tiled(detector, sess, rgb: np.ndarray, n: int, low: float) -> list[dict]:
@@ -409,7 +423,8 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
                        f"and >= {STATIC_SHARE:.0%} of a clip's analysed frames",
         "notes": [
             "Face DETECTION only: it marks that a face appears and where. Nobody is "
-            "identified; there is no face recognition in this tool.",
+            "identified. Comparing faces with a photo is a separate step (face-search), "
+            "run only when an examiner supplies one.",
             "Scores are the models' own confidence, not the probability that a "
             "detection is correct. Small, distant, dark or blurred subjects are missed; "
             "shapes are sometimes mistaken for people or vehicles.",
