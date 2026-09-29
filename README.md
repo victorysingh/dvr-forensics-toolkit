@@ -14,9 +14,9 @@ Forensics Toolkit — Multi-Vendor DVR/NVR Forensic Analysis
 
 **Smart India Hackathon 2026 · SIH26150 · NTRO · Blockchain & Cybersecurity · Team Chronicles.exe (178295)**
 
-   ![Screenshot_2026-09-30_035020](<img width="1290" height="597" alt="Screenshot 2026-09-30 035020" src="https://github.com/user-attachments/assets/9ae9bf0d-9988-44c4-aab6-419c452d1d52" />
+   <img width="1290" height="597" alt="Screenshot 2026-09-30 035020" src="https://github.com/user-attachments/assets/9ae9bf0d-9988-44c4-aab6-419c452d1d52" />
 
-)
+
 The case console on two real drives: (1) all eight PS vendors, each with its status; (2) the pipeline from acquisition to report; (3) 2,246 recordings recovered from outside the index; (4) people and faces detected in recovered footage; (5) AI triage, leads never called evidence; (6) court exports: BSA s.63, CASE/UCO, NIST.
 
 ---
