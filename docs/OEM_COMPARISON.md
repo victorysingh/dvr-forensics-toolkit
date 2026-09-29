@@ -136,7 +136,25 @@ first-hand (**O**), in `plugins/heimvision.py`:
 | System records | ext3: `dvr_log.db` (event log) and `search.db` (index per file and per camera-hour), SQLite, read and checked against the disk; `index.bin` one byte per file slot; each frame carries its `search.db` segment id | O |
 | Status | `spec_only` | |
 
-## 4a. TP-Link, Godrej, Uniview, Matrix
+## 4c. Uniview and TP-Link, from their own firmware (29 Sep)
+
+Neither has a published format, but both publish firmware. The storage code
+in it was read by static disassembly (nothing run) and turned into two
+drop-in plugins; the evidence level is `vendor_firmware` (F), ranked with a
+paper. Detail and what is tested: VALIDATION_REPORT §8f.
+
+| Aspect | Uniview (NVR301-04LS3-W B3612.1.21.220408) | TP-Link VIGI (NVR1008H V2 240119) |
+|---|---|---|
+| Who wrote the storage code | Uniview's own kernel module `comm.ko` ("UBS") **F** | TP-Link's own libraries on OpenWrt/uClibc (`liblayouthddb.so`, TP's `libsqlite3`) - no Dahua, Hikvision or Xiongmai code **F** |
+| Layout | superblock 0x20131031 at LBA 0 and at the end; abstract zone (an entry per block); 256 MiB data blocks **F** | V1: format sector at 512 MiB, database area, zones; V0: ext4 with `sys.bin` and zone files **F** |
+| Index | per block: an 8 KiB header (camera, times) and a GOP index (time, page offset, pages) **F** | SQLite in a "TpFile" header (`TP-Link format1`); can be AES-encrypted **F** |
+| Container | GOP 0x2006 of packets 0x1357 with DTS/PTS; trailer with the GOP length and 0x6003 **F** | GOPs in zones; header layout not recovered |
+| Camera | a 4-number channel id in each block header **F** | `channelId` in the index **F** |
+| Time | Unix s + ms, the recorder's kernel clock; zone not in the code **F** | integers in the index; zone kept in flash, not on the disk (inferred) |
+| Integrity | CRC-16 on the superblock, each abstract group and each block header **F** | CRC-32 on the format sector **F** |
+| Plugin | `plugins/uniview.py`, `spec_only`: recordings, extraction, footage without the index | `plugins/tplink.py`, `detected_not_parsed`: index and system log read when plain; no footage placed |
+
+## 4a. Godrej, Matrix (and TP-Link, Uniview before the plugins)
 
 What the tool does today for each: recognise a brand string (`HONEYWELL`,
 `TP-LINK`, `GODREJ`, `UNIVIEW`, `MATRIX`) wherever it appears on the
@@ -208,7 +226,9 @@ not filled from forum talk. Sources are listed in §5.2.
   plugin detect independently). On a Honeywell unit with a DHFS disk, the
   model check reads "differ", which is explained by [1] and should be
   written up as such, not as tampering.
-- **TP-Link, Godrej, Uniview, Matrix.** Nothing published to parse from. Their
+- **Uniview, TP-Link.** Nothing published - but their firmware answers
+  questions 1-5 and 7 (§4c), and both now have plugins.
+- **Godrej, Matrix.** Nothing published to parse from. Their
   video is recoverable by `carve-annexb`. Their exports (TP-Link to USB,
   Matrix to AVI) are what `validate-export` would compare against, once a
   unit is available to record on.

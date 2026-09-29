@@ -22,6 +22,9 @@ overstates what we know.
 
     SOURCE_PUBLISHED  offset/layout attested by published research or an
                       existing open-source parser
+    SOURCE_FIRMWARE   offset/layout read from the vendor's own firmware code
+                      (static disassembly, nothing executed) - what the
+                      recorder is programmed to write, not yet seen on a disk
     SOURCE_FIXTURE    offset/layout corroborated ONLY by tests/synth_dvr.py,
                       whose non-magic field layout is our own invention
     SOURCE_OBSERVED   offset/layout read off real vendor media we possess
@@ -47,15 +50,20 @@ from core.contract import (
 # Where a decoded field's layout comes from.  Ordered weakest to strongest.
 SOURCE_FIXTURE = "fixture"
 SOURCE_PUBLISHED = "published"
+SOURCE_FIRMWARE = "vendor_firmware"
 SOURCE_OBSERVED = "observed_real_media"
 
-_SOURCE_RANK = {SOURCE_FIXTURE: 0, SOURCE_PUBLISHED: 1, SOURCE_OBSERVED: 2}
+# Firmware ranks with a paper: both say what the recorder should write, and
+# neither has been checked against a disk it wrote.
+_SOURCE_RANK = {SOURCE_FIXTURE: 0, SOURCE_PUBLISHED: 1, SOURCE_FIRMWARE: 1,
+                SOURCE_OBSERVED: 2}
 
 # A field sourced only from our fixture can never support more than
 # `synthetic_only`, however cleanly it parses.
 _SOURCE_TO_STATUS = {
     SOURCE_FIXTURE: VALIDATION_SYNTHETIC,
     SOURCE_PUBLISHED: VALIDATION_SPEC_ONLY,
+    SOURCE_FIRMWARE: VALIDATION_SPEC_ONLY,
     SOURCE_OBSERVED: VALIDATION_SPEC_ONLY,
 }
 

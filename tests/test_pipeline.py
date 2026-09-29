@@ -2893,6 +2893,160 @@ def test_honeywell(tmp: str) -> None:
           and man["output"]["frames"] == 90 and len(man["output"]["sha256"]) == 64)
 
 
+def test_uniview(tmp: str) -> None:
+    """The Uniview plugin against a disk built to the layout in the recorder's
+    own storage driver (comm.ko): superblock and copy with CRC-16, abstract
+    zone, block headers, GOP index, and GOPs that check themselves - so
+    footage is found with the index and without it."""
+    print("\n[Uniview plugin (spec_only, from the firmware's storage driver)]")
+    import argparse
+    import cli
+    from detect.engine import SignatureScanner
+    from plugins import uniview as U
+    from report.case import vendor_matrix
+    from tests import synth_uniview as SU
+
+    img = os.path.join(tmp, "uniview.img")
+    truth = SU.build(img)
+    p = get_parser("Uniview")
+    p.block_bytes = SU.BLOCK                  # the fixture's 1 MiB blocks, not 256 MiB
+    with BlockDevice(img) as dev:
+        found = p.detect(dev)
+        res = p.parse(dev)
+    v = res.volume
+    check("the plugin registers, detects the UBS superblock, and says spec_only from firmware",
+          found and res.validation_status == "spec_only"
+          and {f["source"] for f in res.field_provenance} == {"vendor_firmware"})
+    check("superblock and its tail copy: CRC-16 (kernel crc16) checks, fields decoded",
+          v["superblock"]["crc_ok"] and v["tail_copy"] == "matches"
+          and v["superblock"]["device_id"] == SU.DEVICE_ID
+          and (v["superblock"]["az_pos"], v["superblock"]["dz_pos"]) == (SU.AZ_POS, SU.DZ_POS),
+          str(v["superblock"]))
+    check("the abstract zone lists the blocks; each block is named by its own header",
+          v["abstract"]["entries"] == 4 and not v["abstract"]["groups_crc_failed"]
+          and v["block_kinds"] == {"record": 2, "snapshot": 1, "none": 1}, str(v["block_kinds"]))
+    recs = res.recordings
+    check("one recording per block, its camera and recorder-clock times from the block header",
+          [(r.id, r.camera_id, r.codec) for r in recs]
+          == [("unv-b00000", "chan 0/0/1/0", "h264"), ("unv-b00001", "chan 0/0/2/0", "h264")]
+          and recs[0].start_utc is None
+          and recs[0].timestamps[0].raw_value.endswith("2024-07-01 10:40:00 recorder-local")
+          and len(p.extents["unv-b00000"]) == truth["gops"][0], str([r.id for r in recs]))
+    with BlockDevice(img) as dev:
+        st = p.extract_recording(dev, "unv-b00000", os.path.join(tmp, "unv_rec"))
+    out = open(os.path.join(tmp, st["file"]), "rb").read()
+    check("extract: the video packets without their headers, audio left out, every GOP checked",
+          out == truth["video"][0] and st["gops"] == 3 and st["gops_failing_checks"] == 0
+          and st["frames"] == 15 and st["file"].endswith(".h264"), str(st))
+    with BlockDevice(img) as dev:
+        runs = p.recover_video_area(dev)
+    check("without the index: GOPs found by their own trailers; the older GOP past a "
+          "block's write position is a run of its own",
+          [r.id for r in runs] == ["unv-gops-00000", "unv-gops-00001", "unv-stale-00002"]
+          and runs[2].offset == truth["stale_gop"] and p.video_area_stats["past_write_position"] == 1,
+          str([(r.id, hex(r.offset)) for r in runs]))
+
+    fmt = os.path.join(tmp, "uniview_formatted.img")
+    SU.build(fmt, formatted=True)
+    pf = get_parser("Uniview")
+    pf.block_bytes = SU.BLOCK
+    with BlockDevice(fmt) as dev:
+        res_f = pf.parse(dev)
+        runs_f = pf.recover_video_area(dev)
+    check("abstract zone and block headers wiped: no recordings - and the footage still found",
+          res_f.recordings == [] and len(runs_f) == 3
+          and sum(r.frame_count for r in runs_f) == 29, str([r.frame_count for r in runs_f]))
+
+    bad = bytearray(open(img, "rb").read())
+    bad[0x0C] ^= 0xFF                          # corrupt the head superblock
+    with open(os.path.join(tmp, "uniview_badhead.img"), "wb") as fh:
+        fh.write(bad)
+    with BlockDevice(os.path.join(tmp, "uniview_badhead.img")) as dev:
+        rb = p.parse(dev)
+    check("a head superblock that fails CRC is reported, and the tail copy is used",
+          rb.volume["superblock_used"] == "tail copy" and len(rb.recordings) == 2)
+    with BlockDevice(os.path.join(tmp, "unknown_vendor.img")) as dev:
+        check("a disk with no UBS superblock is not detected", not p.detect(dev))
+
+    sc = SignatureScanner()
+    with open(img, "rb") as fh:
+        sc.scan_block(0, fh.read(1 << 20), 0, "")
+    row = next(r for r in vendor_matrix() if r["vendor"] == "Uniview")
+    check("the scan detects Uniview by the plugin's own signature; the matrix lists the parser",
+          any(d.vendor == "Uniview" for d in sc.detections())
+          and row["parser"] == "Uniview" and row["parser_status"] == "spec_only", str(row))
+
+    saved = U.UniviewParser.block_bytes
+    U.UniviewParser.block_bytes = SU.BLOCK
+    try:
+        rc = cli.cmd_extract(argparse.Namespace(device=img, vendor="Uniview",
+                                                recording="unv-b00001",
+                                                out=os.path.join(tmp, "unv_out"), tz_offset=None))
+    finally:
+        U.UniviewParser.block_bytes = saved
+    man = json.load(open(os.path.join(tmp, "unv_out", "unv-b00001.manifest.json"),
+                         encoding="utf-8"))
+    check("extract --vendor Uniview works through the plugin, with a hashed manifest",
+          rc == 0 and man["validation_status"] == "spec_only" and man["output"]["frames"] == 10
+          and man["output"]["first_time_local"] == "2024-07-01 10:50:00", str(man["output"]))
+
+
+def test_tplink(tmp: str) -> None:
+    """The TP-Link plugin against disks built to what the VIGI firmware shows:
+    it finds the format sector and the index, reads a plain index by its
+    columns, and reports an unreadable one as such - never a guess."""
+    print("\n[TP-Link plugin (from the VIGI firmware)]")
+    from report.case import vendor_matrix
+    from tests import synth_tplink as ST
+
+    def parser():
+        p = get_parser("TP-Link")
+        p.format_at = ST.FORMAT_AT             # the fixture's 1 MiB, not 512 MiB
+        return p
+
+    img = os.path.join(tmp, "tplink.img")
+    truth = ST.build(img)
+    p = parser()
+    with BlockDevice(img) as dev:
+        found = p.detect(dev)
+        res = p.parse(dev)
+    v = res.volume
+    idx = v["index"] or {}
+    check("the format sector is found and its CRC-32 checks; the TpFile header's slots read",
+          found and v["format_sector"]["version"] == ST.VERSION and v["format_sector"]["crc32_ok"]
+          and [s["type"] for s in v["databases"][0]["head"]["slots"]] == [1, 2, 3], str(v["format_sector"]))
+    check("a plain index is read by its columns: recordings per camera, GOP rows, system log",
+          res.validation_status == "spec_only" and idx.get("database_at") == truth["db_at"]
+          and len(idx["events"]) == truth["events"] and idx["gops"] == truth["gops"]
+          and [e["detail"] for e in idx["system_log"]][-1] == "system time changed"
+          and idx["cameras"][0]["first_clock"] == "2024-07-01 10:40:00"
+          and idx["cameras"][0]["time_unit"] == "s", str(idx.get("cameras")))
+    check("no footage is placed on the disk: the zone geometry was not recovered",
+          res.recordings == [] and any("carve-annexb" in n for n in res.notes))
+
+    enc = os.path.join(tmp, "tplink_encrypted.img")
+    ST.build(enc, encrypted=True)
+    with BlockDevice(enc) as dev:
+        re_ = parser().parse(dev)
+    check("an index that is not plain SQLite is reported as encrypted or unreadable, not parsed",
+          re_.validation_status == "detected_not_parsed" and re_.volume["index"] is None
+          and "encrypted" in re_.volume["databases"][0]["status"], re_.volume["databases"][0]["status"])
+
+    v0 = os.path.join(tmp, "tplink_v0.img")
+    ST.build(v0, with_format=False)
+    with BlockDevice(v0) as dev:
+        pp = parser()
+        alone, hinted = pp.detect(dev), pp.detect(dev, [ST.DB_AT])
+        rv = pp.parse(dev, hint_offsets=[ST.DB_AT])
+    check("with no format sector, the index is found at the offset the scan reports",
+          not alone and hinted and rv.volume["index"]["database_at"] == ST.DB_AT)
+    with BlockDevice(os.path.join(tmp, "unknown_vendor.img")) as dev:
+        check("a disk with no VIGI marker is not detected", not parser().detect(dev))
+    row = next(r for r in vendor_matrix() if r["vendor"] == "TP-Link")
+    check("the matrix lists the plugin but keeps TP-Link at detected_not_parsed: no footage placed",
+          row["parser"] == "TP-Link" and row["parser_status"] == "detected_not_parsed", str(row))
+
+
 def test_s63_certificate(tmp: str) -> None:
     """The s.63 certificate draft: the Schedule's wording, the case's own
     hashes and device facts, and nothing said on a person's behalf."""
@@ -3301,6 +3455,8 @@ def main() -> int:
         test_model(tmp)
         test_annexb_carver(tmp)
         test_honeywell(tmp)
+        test_uniview(tmp)
+        test_tplink(tmp)
         test_s63_certificate(tmp)
         test_real_media_tools(tmp)
         test_ewf(tmp)

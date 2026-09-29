@@ -10,8 +10,9 @@ The rules every plugin inherits (see parsers/base.py and START_HERE Rule 3):
     never open a device itself - so it cannot introduce a write path.
   * Every decoded field records where its layout came from (FieldSpec.source).
     A layout inferred from our own test fixture is `fixture`; from a paper or
-    an open-source parser, `published`; read off real media we hold,
-    `observed_real_media`.  The weakest one sets the plugin's status.
+    an open-source parser, `published`; from the vendor's own firmware code,
+    `vendor_firmware`; read off real media we hold, `observed_real_media`.
+    The weakest one sets the plugin's status.
   * It never reports `validated`.  That is a human decision, recorded after a
     byte-match against the recorder's own native export.
   * Every Recording it returns carries Provenance (disk offset, sectors, rule).
