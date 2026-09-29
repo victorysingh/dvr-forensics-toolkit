@@ -147,7 +147,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 539 in all: 516 on generated data with known ground
+- **Automated tests:** 542 in all: 519 on generated data with known ground
   truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -322,11 +322,13 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   built: the offset from the cameras' infrared switches at dusk and dawn
   (`VALIDATION_REPORT.md` §8l). It is tested on generated days and real
   night and day footage, and not yet run on our drives' outdoor cameras.
-- **The OCR reads 1 of 5 reference titles and no clock on real frames.**
-  It read "Camera 01" on drive 2 correctly, but no title on drive 1, where
-  thin white text sits on a bright wall, and no clock on either drive: both
-  recorders' clocks carry letters (a weekday, or AM/PM) that its clock
-  whitelist excludes. It remains `synthetic_only`.
+- **The on-screen text reader (OCR) is weak.** Measured on six real
+  recorders' files (36 painted clocks), it found the clock on 3 of the 6,
+  read 5 frames exactly and 9 wrongly (a year off, or 12 hours off when "PM"
+  is lost), and read no title right. The wrong readings are years or hours
+  off, so the comparison with the container's own date flags them. On our
+  drives it read "Camera 01" correctly and nothing on drive 1's bright
+  scenes. It remains `synthetic_only`: a lead to check, not a time source.
 - **About 38% of CP Plus video frames do not decode strictly.** The cause
   is measured: 0.3-0.4% of the frames are missing from the disk, and each
   breaks the rest of its ~8.6 s group of pictures. Most have no intact copy

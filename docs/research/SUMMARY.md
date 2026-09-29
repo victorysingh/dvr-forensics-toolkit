@@ -64,7 +64,7 @@ the final report. "Done" marks what the team has built since the hunts.
 
 | Gap | Status |
 |---|---|
-| G1: read the burned-in clock and camera name as a third, "recorder-claimed" time source | **Built** (OSD reader; weekday/AM-PM clocks in #34); accuracy on real frames still to be measured |
+| G1: read the burned-in clock and camera name as a third, "recorder-claimed" time source | **Built and measured**: on six real recorders' files the clock is found on 3 of 6, 5 of 36 painted clocks read exactly, no title right (VALIDATION_REPORT §8c). A lead, not a time source |
 | G2: older footage left in in-use blocks ("stale tails"; Byun et al. 2026 measured +966% recoverable area on dashcams) | **Done** for Hikvision (#41) and Uniview (#43, `unv-stale-*`) |
 | G3: encryption: detect and label it instead of carving nothing | **Done**: entropy labelling (#40); TP-Link's encrypted index reported as such (#43). No open tool or paper decrypts a DVR disk |
 | G4: a scripted scenario list on the CP Plus unit (record, delete, format, overwrite, clock change, export after each) | open: needs the unit |

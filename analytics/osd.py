@@ -63,11 +63,16 @@ def have_tools() -> None:
             "(apt install ffmpeg tesseract-ocr); see analytics/README.md")
 
 
+# Files ffmpeg recognises on its own: the PS streams read-osd passes, and the
+# containers a recorder's own export comes in (validate/osd_eval.py reads those).
+CONTAINERS = (".ps", ".dav", ".mp4", ".avi", ".mkv", ".mov")
+
+
 def codec_of(path: str) -> str:
-    """Bare elementary streams need the codec stated; a PS container does not."""
+    """Bare elementary streams need the codec stated; a container does not."""
     if path.endswith(".h264"):
         return "h264"
-    if path.endswith(".ps"):
+    if path.lower().endswith(CONTAINERS):
         return ""
     return "hevc"
 
