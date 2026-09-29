@@ -493,19 +493,28 @@ contain people. The 24 people found come from two clips. This measures
 the direction and rough size of the gain; it does not predict recall on
 other cameras.
 
-### On our own drive (29 Sep - sampled, labels pending)
+### On our own drive (29 Sep - sampled with tiling, labels pending)
 
 The runs above are public clips. The same measurement on the team's own
-cameras is set up: `analytics_eval` sampled 35 keyframes evenly from each of
-six indexed drive-1 recordings - *Road View 1*, *Road View 2* and *Parking*,
-at 17:00 and at 22:00 on 3 Sep 2026 (`out/realchecks/analytics_eval/`, 210
-frames). It ran before tiling was merged, so it must be re-sampled with the
-current detector before the labels are scored. One result needs no labels:
-on all 35 night frames of *Parking*, where a car is parked in full view, the
-object model said *suitcase* and never *car* - the same miss as the parked
-cars in the Hikvision night clip above. Evenly sampled quiet hours hold few
-people, so person recall from this set must be reported with its count.
+cameras is set up: `analytics_eval sample --frames 35` over six indexed
+drive-1 recordings - *Road View 1*, *Road View 2* and *Parking*, at 17:00 and
+at 22:00 on 3 Sep 2026 - with the tool's 3 x 3 tiling (`out/realchecks/drive1_recall/`,
+210 frames). The same 210 keyframes were sampled once before tiling was
+merged, which shows what tiling changes on this footage before any label:
 
+| Clip | Before tiling (models said) | With tiling (models said) | With tiling, reported |
+|---|---|---|---|
+| *Parking*, 22:00 (a car parked in full view in every frame) | *suitcase* 35 of 35, *car* 0 | *car* 14, *suitcase* 23, *backpack* 1 | *backpack* 1 - every *car* flagged static |
+| *Road View 1*, 17:00 | *person* 1 | *person* 1, *face* 7 | the same |
+| *Road View 2*, 17:00 | *person* 1 | *person* 2, *car* 1 | *person* 1, *car* 1 |
+| the other three | nothing | *suitcase* 1 (*Road View 2*, 22:00) | the same |
+
+So tiling lets the model see the parked car, and the static rule then
+removes it, as it did the parked cars in the Hikvision night clip above.
+Whether the 7 faces on *Road View 1* are right, and how many people the
+tool misses, is what the labels will say. Evenly sampled quiet hours hold
+few people, so person recall from this set must be reported with its
+count.
 
 ## 8b. Second drive: Hikvision footage under a Dahua-family format
 
@@ -1141,5 +1150,5 @@ tool's own parser reads, field by field.
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
 - ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** ~~Still to run on the real images.~~ **Run 29 Sep: agree on both drives' images (§9a).**
 - ~~The ffmpeg cross-check on drive 1's own `.dav` files.~~ **Run 29 Sep (§8g):** 719,097 of 719,097 emitted frames identical. It found one thing to fix: after a frame-counter gap the DHAV date and millisecond counter can disagree by up to ~3 s (6 files, 227 frames). Frames after such a gap should carry that wider time uncertainty in the timeline and report; today they do not.
-- Analytics recall on our own cameras: 210 drive-1 frames sampled (§8a), to be re-sampled with tiling, then labelled and scored.
+- Analytics recall on our own cameras: 210 drive-1 frames sampled with tiling (§8a); to be labelled and scored.
 - ~~Drive 2 `label-ps` re-run on the drive.~~ **Run 29 Sep (§8b):** 440 `stale_tail`, 55 `outside_index`; index unchanged since 26 Sep.
