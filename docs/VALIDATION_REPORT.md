@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 460 pass, 0 fail: 447 on generated data with known ground truth, 13 on real media (9 on the CP Plus drive's image, 4 on the HeimVision E01) - counted with #34-#41 merged |
+| Automated tests | 467 pass, 0 fail: 452 on generated data with known ground truth (2 need ffmpeg), 13 on real media (9 on the CP Plus drive's image, 4 on the HeimVision E01), 2 on a Hikvision-made sample file (§8f) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
@@ -496,12 +496,54 @@ drawn only where every case states its recorder's timezone.
 On the two drives held, this reports **not aligned**: neither recorder's
 timezone has been read off the unit (§10).
 
+## 8f. Independent checks: a vendor-made sample and a second implementation
+
+With no recorder or spare disk available for a native export, two checks
+test our decoding on things we did not make ourselves. Neither is a byte-match with
+an export of our drives, so neither changes a status from `spec_only`.
+
+**A Hikvision-made file** (`python -m validate.ps_sample FILE --out DIR`).
+The file is a Hikvision player file (`IMKH`) from VideoLAN's public sample
+archive: `streams.videolan.org/samples/IMKH/00000001541000000.mp4`, 5 MiB,
+SHA-256 `79b1e55723a4e0fa8fc7bf1724f0faba6f193e1a3557c92c2cb3c0857de69862`.
+It comes from a different recorder, site ("amelek.net" watermark), year (2018)
+and codec generation (H.264, 1920×1080) than drive 2.
+
+| Check | Result |
+|---|---|
+| Carve | one Program Stream from 0x28, right after the 40-byte `IMKH` header; 463 packs, 18.48 s; the last 6,436 bytes are the pack the 5 MiB cut truncated |
+| Frames (ffmpeg) | **463/463 video frames identical** (MD5 per decoded frame) between our carved bytes and the vendor file; the vendor file's 464th frame is the truncated one and decodes with errors |
+| `HK` time | the 10 stream maps decode to 2018-04-09 01:55:34 … 01:55:52, 2 s apart, spanning the same 18 s as the pack clock |
+| Painted clock | on the keyframe after each stream map, read by eye: 01:55:33 … 01:55:51. **10/10 are the `HK` time minus exactly 1 s**, a constant offset, not noise |
+
+So the `HK` 0x40 bit layout (year, month, day, hour, minute, second) holds
+on a second Hikvision recorder. On this file the stream-map second runs 1 s
+ahead of the painted clock; on drive 2 it matched to the second (§8b). The
+offset differs between recorders, so a Hikvision `HK` time is good to about
+1 s unless it has been checked against that recorder's painted clock.
+Pinned in the tests: the 10 descriptors and readings always run, and the full
+file runs when `HIK_IMKH_SAMPLE` points at it.
+
+**A second implementation of the DHAV frame walk**
+(`python -m validate.dhav_crosscheck FILES_OR_DIRS`). This compares ffmpeg's
+`dhav` demuxer with our walker frame by frame on the same `.dav`: payload
+size, payload Adler-32, keyframe flag, and time (ffmpeg's `-copyts` time must
+fall inside the frame's own DHAV second).
+- **What it shows:** independent *code* agreeing. An implementation error would have to be repeated exactly by the other side.
+- **What it doesn't:** our field layout was taken from ffmpeg's `dhav.c`, so a misreading both share is not tested. This is not independent knowledge of the format.
+- **Known differences, reported rather than hidden:** ffmpeg skips 0xF1 aux frames, and it keeps frames whose header checksum fails, which we reject.
+- **On generated data:** 60/60 video and 30/30 audio frames identical, and every time inside its own second. With one header checksum broken, the tool reports "ours 59, ffmpeg 60" and where.
+- **Pending:** the run on the CP Plus drive's `.dav` files, on the machine that holds them:
+  ```
+  python -m validate.dhav_crosscheck out/cpplus_WWD4A3NX/carve/streams --ffmpeg PATH/ffmpeg --out dhav_crosscheck.json
+  ```
+
 ## 9. Vendor format status
 
 | Vendor | Status | Why not better |
 |---|---|---|
-| Dahua / CP Plus | `spec_only` | layout read off real media and consistent throughout (§3), but no footage has been byte-matched against the recorder's own export |
-| Hikvision — video container | `spec_only` | MPEG-PS + `HK` descriptors decoded from real footage and cross-checked; not byte-matched to a Hikvision export |
+| Dahua / CP Plus | `spec_only` | layout read off real media and consistent throughout (§3), but no footage has been byte-matched against the recorder's own export. The frame walk has a second-implementation check against ffmpeg's `dhav` demuxer (§8f), shown on generated data; its run on the drive's own `.dav` files is pending |
+| Hikvision — video container | `spec_only` | MPEG-PS + `HK` descriptors decoded from real footage and cross-checked; also checked on a Hikvision-made player file from another recorder (§8f): 10/10 `HK` times decode to the painted clock minus a constant 1 s, and 463/463 frames are identical to ffmpeg's decode of the vendor file. Not byte-matched to an export of our drive |
 | Hikvision — index records | `spec_only` | decoded from the surviving HIKBTREE copies on real media and cross-checked (resolution per camera, hours per camera, 99.6% recovered vs recorded); not byte-matched to an export |
 | Hikvision — system log and master sector (`parsers/hiklog.py`) | `spec_only` | read off real media, six master-sector cross-checks, log clock checked against the footage; not matched against the log the recorder shows or exports |
 | Hikvision — full-filesystem parser (`parsers/hikvision.py`) | `spec_only` | rewritten on 28 Sep on the layout observed on drive 2 - the master sector as `hiklog.py` reads it, the HIKBTREE copies where the master points, the 48-byte records `hikbtree.py` reads - and tested on a disk built to that layout, including a primary master overwritten and read from its backup; not yet run on an intact Hikvision disk. The first version decoded offsets invented for our fixture and would have found nothing on a real disk |
