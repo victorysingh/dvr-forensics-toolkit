@@ -107,7 +107,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 447 tests, no hardware, ~1 minute.
+`python tests/test_pipeline.py` — 450 tests, no hardware, ~1 minute (452 with ffmpeg on PATH).
 
 ## 4. Things learned the hard way
 
