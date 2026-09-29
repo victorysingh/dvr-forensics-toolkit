@@ -94,6 +94,7 @@ A scan writes to `out/<case-id>/`:
 | `custody_ledger.jsonl` | the hash-chained custody log |
 | `codec_profile.json` | aggregate H.264/H.265 statistics |
 | `oem_coverage.json` | explicit per-OEM position for every vendor the PS names |
+| `regions.json` | every block classed video / empty / structured / container without video / unstructured from the block map; high-entropy runs with no video structure, and a verdict that never claims "encrypted" (`detect/regions.py`) |
 | `scan_state.json` | resume state; refuses to resume onto a different device |
 
 `blockmap.jsonl` doubles as the Merkle leaf list — the root recomputes from it

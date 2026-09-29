@@ -62,6 +62,7 @@ class ScanSession:
         self.blockmap_path = os.path.join(out_dir, "blockmap.jsonl")
         self.report_path = os.path.join(out_dir, "scan_report.json")
         self.state_path = os.path.join(out_dir, "scan_state.json")
+        self.regions: dict = {}           # detect.regions summary, set when a scan finishes
         self.ledger = CustodyLedger(os.path.join(out_dir, "custody_ledger.jsonl"),
                                     actor=case.investigator, case_id=case.case_id)
 
@@ -238,6 +239,14 @@ class ScanSession:
                 except Exception as exc:                 # noqa: BLE001
                     self._tap_failed(tap, "finish", exc)
 
+            # High-entropy blocks with no video structure (an encrypted disk
+            # carves nothing): classified from the block map, no second read.
+            from detect.regions import summarise
+            with open(self.blockmap_path, "r", encoding="utf-8") as fh:
+                self.regions = summarise(json.loads(line) for line in fh if line.strip())
+            with open(os.path.join(self.out_dir, "regions.json"), "w", encoding="utf-8") as fh:
+                json.dump(self.regions, fh, indent=2)
+
             self.ledger.append("scan_completed", {
                 "bytes_read": bytes_read, "blocks": len(leaves),
                 "bad_sectors": len(bad_regions),
@@ -247,6 +256,7 @@ class ScanSession:
                 "codec": scanner.codec.to_dict(),
                 "complete_pass": stats.complete_pass,
                 "reconnects": self.reconnects,
+                "regions": {k: self.regions[k] for k in ("counts", "flagged_blocks", "verdict")},
             }, data_hash=root)
             report.ledger_head = self.ledger.head
 
