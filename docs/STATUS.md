@@ -29,7 +29,7 @@ they are evidence).
 | Chain of custody | **done** — hash-chained ledger; every action recorded with the hash of what it produced | `acquire/ledger.py` |
 | Reduce analysis time (a PS success criterion) | **measured** - one read of the drive instead of five: a 1 TB drive over the team's USB 2 bridge takes ~11.3 h in one pass, ~56.6 h one read per task, ~21.9 h imaging first (and ~931 GiB free). taps now run in a process each - 2.24x the serial pass in the same run, fast enough that a slow laptop is again limited by the USB 2 drive, not the CPU (PERFORMANCE.md §5) | `docs/PERFORMANCE.md`, `demo/bench_single_pass.py` |
 | Reports | **done** — HTML + JSON, hashed into the ledger; BSA 2023 s.63 certificate drafted from the case (Part A/B, hash report enclosed), wording matching the Gazette word for word (tested) | `report/`, `report/s63.py` |
-| AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence". **Measured** against 287 labelled real frames: no false alarm, but a person found in 0 of 57 frames that had one, faces 3 of 27, vehicles 4 of 12 (`VALIDATION_REPORT.md` §8a) - an empty list proves nothing | `analyse/activity.py`, `analytics/` |
+| AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence". **Measured** against 287 labelled real frames: untiled, a person found in 0 of 57 frames that had one; tiled (3 x 3, now the default), 24 of 57, faces 11 of 27, vehicles 5 of 12, for 1 false alarm in 230 frames and about 9 times the model time (`VALIDATION_REPORT.md` §8a) - an empty list proves nothing | `analyse/activity.py`, `analytics/` |
 | Support 5–6 OEMs | **honest answer**: 3 of the eight decoded from real media (Dahua, CP Plus, Hikvision), plus **HeimVision** - an "other commonly used platform" - decoded from a real NIST image; **Honeywell parsed from published research** (Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) as a drop-in plugin, `spec_only`, no media; **Uniview parsed from its own firmware's storage driver** (`spec_only`, no media) and **TP-Link's index read** from its firmware (footage not placed; `detected_not_parsed`); **Matrix parsed from its own documents** (the recording tree; `spec_only`, no media); **Godrej parsed from Qualvision's firmware** (its SeeThru recorders run Qualvision's software; `spec_only`, no media) - so all eight have a plugin. For TP-Link, and any vendor without a plugin, the video can still be recovered with no parser: `carve-annexb` finds raw H.264/H.265 by its parameter sets (no dates or cameras; `synthetic_only`) | `plugins/`, `detect/survey.py`, `recover/annexb.py` |
 
 Named deliverables:
@@ -107,7 +107,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 500 tests, no hardware, ~1 minute (502 with ffmpeg on PATH).
+`python tests/test_pipeline.py` — 508 tests, no hardware, ~1 minute (510 with ffmpeg on PATH).
 
 ## 4. Things learned the hard way
 

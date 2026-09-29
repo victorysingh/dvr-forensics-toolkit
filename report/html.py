@@ -401,9 +401,9 @@ def render(case: dict, examiner_notes: str = "") -> str:
             "<b>detection</b> (no identification — there is no face recognition in this "
             "tool) and object detection. Scores are the models' own confidence, not the "
             "probability a detection is correct. Each row is a moment to review in the "
-            "footage itself. On real footage labelled by eye it raised no false alarm but "
-            "missed most people, so <b>an empty list does not mean nobody was "
-            "there</b>.</div>")
+            "footage itself. On real footage labelled by eye it found a person in fewer "
+            "than half the frames that had one, so <b>an empty list does not mean nobody "
+            "was there</b>.</div>")
         add(table(["Model", "Licence", "SHA-256"],
                   [[m["name"], m["license"], mono(m["sha256"])] for m in an["models"].values()]))
         add(f"<p>{an['clips']} clips, {an['frames_analysed']:,} frames analysed. Frames with: "
