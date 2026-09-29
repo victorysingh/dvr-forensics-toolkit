@@ -56,9 +56,35 @@ def _load(path: str) -> Optional[dict]:
         return json.load(fh)
 
 
-def _artefacts(case_dir: str) -> list[dict]:
+def _manifest_paths(case_dir: str) -> list[str]:
+    """Extraction manifests in the case folder and one folder down: `extract
+    --out` may point at a subfolder (USER_MANUAL 3.4: `--out clips/`)."""
+    if not os.path.isdir(case_dir):
+        return []
+    out = []
+    for name in sorted(os.listdir(case_dir)):
+        path = os.path.join(case_dir, name)
+        if name.endswith(".manifest.json"):
+            out.append(name)
+        elif os.path.isdir(path) and name != "carve":         # carve/ has its own lists
+            try:
+                out += [f"{name}/{n}" for n in sorted(os.listdir(path))
+                        if n.endswith(".manifest.json")]
+            except OSError:
+                continue
+    return out
+
+
+def _same_device(a: str, b: str) -> bool:
+    norm = lambda p: os.path.normcase(os.path.normpath(p.replace("\\", "/")))
+    return norm(a) == norm(b)
+
+
+def _artefacts(case_dir: str, device: str = "", notes: Optional[list] = None) -> list[dict]:
     """Every file the case produced as footage, with the SHA-256 its own
-    manifest recorded - the "electronic record/output" a court would see."""
+    manifest recorded - the "electronic record/output" a court would see.
+    Footage whose manifest names another source device than the case's scan
+    is left out, and said so: it is not this drive's record."""
     out = []
     for manifest, sub in (("carve/extracted.json", "carve/streams"),
                           ("carve/ps_extracted.json", "carve/ps_streams"),
@@ -70,14 +96,20 @@ def _artefacts(case_dir: str) -> list[dict]:
                 if f.get("sha256"):
                     out.append({"record": f"{sub}/{name}", "bytes": f.get("bytes"),
                                 "sha256": f["sha256"], "source": manifest})
-    for name in sorted(os.listdir(case_dir)) if os.path.isdir(case_dir) else []:
-        if name.endswith(".manifest.json"):
-            m = _load(os.path.join(case_dir, name)) or {}
-            outs = m.get("outputs") or ({m["output"]["file"]: m["output"]} if m.get("output") else {})
-            for fname, f in outs.items():
-                if f.get("sha256"):
-                    out.append({"record": fname, "bytes": f.get("bytes"), "sha256": f["sha256"],
-                                "source": name})
+    for name in _manifest_paths(case_dir):
+        m = _load(os.path.join(case_dir, name)) or {}
+        src = m.get("source_device") or ""
+        if device and src and not _same_device(src, device):
+            if notes is not None:
+                notes.append(f"{name}: footage from {src}, not the scanned device - not "
+                             "certified with this drive.")
+            continue
+        folder = name.rsplit("/", 1)[0] + "/" if "/" in name else ""
+        outs = m.get("outputs") or ({m["output"]["file"]: m["output"]} if m.get("output") else {})
+        for fname, f in outs.items():
+            if f.get("sha256"):
+                out.append({"record": folder + fname, "bytes": f.get("bytes"),
+                            "sha256": f["sha256"], "source": name})
     return out
 
 
@@ -109,7 +141,7 @@ def build(case_dir: str, part: str = "B", declarant: Optional[dict] = None,
                                    "source": "scan_report.json (single read-only pass)"})
                     algos.add(a.upper())
     if records in ("footage", "both"):
-        arts = _artefacts(case_dir)
+        arts = _artefacts(case_dir, (scan.get("device") or {}).get("path", ""), notes)
         if not arts:
             notes.append("No extracted footage with a recorded SHA-256 was found in the case.")
         for x in arts:

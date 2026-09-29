@@ -147,11 +147,10 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 531 in all: 510 on generated data with known ground
-  truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5
-  on the HeimVision E01 and its FTK listing), and 7 on vendor-made files: 5
-  from other recorders and 2 on NIST's reference export
-  (`VALIDATION_REPORT.md` §1).
+- **Automated tests:** 534 in all: 512 on generated data with known ground
+  truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
+  HeimVision E01 and its FTK listing), and 7 on vendor-made files: 5 from
+  other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
   They cover the Merkle tree, the custody chain, bad sectors, device loss,
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the
