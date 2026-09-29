@@ -362,6 +362,13 @@ goes beyond.
   be documented and testable to be relied on; each field here cites its
   firmware function, and the status stays `spec_only` until a real disk
   checks it.
+- **Then Godrej (29 Sep, `VALIDATION_REPORT.md` §8j).** Godrej's SeeThru
+  recorders run Qualvision's software, so Qualvision's firmware was read the
+  same way: the QVFS disk head, and a 20-byte frame head whose time the
+  firmware's own debug print decodes with Dahua's packed-date shifts. A
+  self-checking frame chain then finds and dates footage without the index.
+  With Matrix from its own documents (§8h), all eight named OEMs now have a
+  plugin, each with its source and what it does not know.
 
 ---
 

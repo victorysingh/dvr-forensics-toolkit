@@ -28,14 +28,14 @@ compiled and checked against the tool's own parsers (`VALIDATION_REPORT.md` §9a
 
 | | Dahua | CP Plus | Hikvision | Honeywell | TP-Link | Godrej | Uniview | Matrix |
 |---|---|---|---|---|---|---|---|---|
-| Filesystem | DHFS 4.1 **O** | DHFS 4.1 on our unit **O** (Dahua OEM) | `HIKVISION@HANGZHOU` master sector + `HIKBTREE` index **P**; index records decoded from surviving copies on our drive **O** | GPT; Partition 1 proprietary (header, block list, channel list, record state, video area), Partition 2 ext4 **P** | ? | ? | ? | ? |
-| Video container | DHAV frames **O P** | DHAV **O** | MPEG-2 Program Stream with `HK` stream-map descriptors **O** | 20-byte Custom Header before each NAL unit **P** | ? | ? | ? | ? |
+| Filesystem | DHFS 4.1 **O** | DHFS 4.1 on our unit **O** (Dahua OEM) | `HIKVISION@HANGZHOU` master sector + `HIKBTREE` index **P**; index records decoded from surviving copies on our drive **O** | GPT; Partition 1 proprietary (header, block list, channel list, record state, video area), Partition 2 ext4 **P** | ? | Qualvision QVFS: disk head `QVEX` v1.0 and two regions **F** | ? | ? |
+| Video container | DHAV frames **O P** | DHAV **O** | MPEG-2 Program Stream with `HK` stream-map descriptors **O** | 20-byte Custom Header before each NAL unit **P** | ? | frames with a 20-byte head (`00 00 01` E0-EB, u32 length), chained **F** | ? | ? |
 | Codec seen | H.265 **O** | H.265 **O** | H.264, 960×576, 25 fps **O** | H.264 (unit supports H.265) **P** | ? | ? | ? | ? |
-| Camera id in frames | none — every camera writes channel 0; aux frames carry the channel title **O** | same **O** | none in the stream; the index names the channel per 1 GiB block **O** | none in the frame header; the channel list names it per chunk **P** | ? | ? | ? | ? |
-| Time encoding | packed local date, no zone, + ms counter **O P** | same **O** | `HK` descriptor 0x40: year byte + packed M/D/h/m/s, local, no zone **O** | Unix seconds (lists), Unix microseconds per frame; zone not stated **P** | ? | ? | ? | ? |
-| Detection in this tool | superblock magic + DHAV frames | Dahua-family structures + `CPPlusIPCam` channel title **O** | master magic + index header; `HK` stream-map descriptor **O** | `HONEYWELL` string | `TP-LINK` string | `GODREJ` string | `UNIVIEW` string | `MATRIX` string (weak: a common word) |
-| Parser | yes | yes (Dahua parser) | index records (real media) + MPEG-PS carver; full-FS parser fixture only | yes, drop-in plugin from the paper | no | no | no | no |
-| Our status | `spec_only` | `spec_only` | container and index `spec_only`; full-FS parser `synthetic_only` | `spec_only` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` | `detected_not_parsed` |
+| Camera id in frames | none — every camera writes channel 0; aux frames carry the channel title **O** | same **O** | none in the stream; the index names the channel per 1 GiB block **O** | none in the frame header; the channel list names it per chunk **P** | ? | not in the frame head; the index (not decoded) names it **F** | ? | ? |
+| Time encoding | packed local date, no zone, + ms counter **O P** | same **O** | `HK` descriptor 0x40: year byte + packed M/D/h/m/s, local, no zone **O** | Unix seconds (lists), Unix microseconds per frame; zone not stated **P** | ? | DHTIME (Dahua's packed local date) + ms, no zone **F** | ? | ? |
+| Detection in this tool | superblock magic + DHAV frames | Dahua-family structures + `CPPlusIPCam` channel title **O** | master magic + index header; `HK` stream-map descriptor **O** | `HONEYWELL` string | `TP-LINK` string | `QVEX` head at LBA 0; `GODREJ` string | `UNIVIEW` string | `MATRIX` string (weak: a common word) |
+| Parser | yes | yes (Dahua parser) | index records (real media) + MPEG-PS carver; full-FS parser fixture only | yes, drop-in plugin from the paper | no | `plugins/godrej.py` | no | no |
+| Our status | `spec_only` | `spec_only` | container and index `spec_only`; full-FS parser `synthetic_only` | `spec_only` | `detected_not_parsed` | `spec_only` | `detected_not_parsed` | `detected_not_parsed` |
 | Real media held | via the CP Plus drive | yes | footage on the second drive, under a Dahua-family format | no | no | no | no | no |
 
 ---
@@ -171,7 +171,7 @@ own published documents); VALIDATION_REPORT §8h.
 | Sidecars | `.evnt` (events), `.ifrm` (keyframes), `.tmid` (time index) - formats not published | P |
 | RAID | 0 and 1 (5 and 10 on NVRX); the RAID volume is mounted as one tree (`RAID0` in the example) | P |
 
-## 4a. Godrej (and TP-Link, Uniview, Matrix before the plugins)
+## 4a. A vendor with no plugin (as TP-Link, Uniview, Matrix and Godrej were before theirs)
 
 What the tool does today for each: recognise a brand string (`HONEYWELL`,
 `TP-LINK`, `GODREJ`, `UNIVIEW`, `MATRIX`) wherever it appears on the
@@ -190,6 +190,19 @@ footage exist regardless:
   USER_MANUAL §3.4f).
 - **The plugin route** — one file in `plugins/` once the layout is known
   (`plugins/_template.py`).
+
+
+## 4e. Godrej, from Qualvision's firmware (29 Sep)
+
+| | Godrej (SeeThru = Qualvision) |
+|---|---|
+| Who makes it | Godrej's cloud portal drives Qualvision's `/tdkcgi` API; Qualvision's firmware implements the same handlers **F** |
+| Source for the layout | Qualvision NVR401L-4P4 firmware (20240531), its application `Sofia`, by static disassembly - nothing run **F** |
+| Layout | disk head `QVEX` v1.0 at LBA 0 with two (start, size) regions; frames of a 20-byte head - `00 00 01` + type E0-EB, u32 length, DHTIME, ms - then the payload, the next head straight after **F** |
+| Time | DHTIME: Dahua's packed local date, bit for bit, + ms; no zone **F** |
+| Camera | not in the frame head; in the index, not decoded |
+| Plugin | `plugins/godrej.py`, `spec_only`: head, frame chain, dated runs, video out; no camera |
+| Not known | the index (VIDEO/PIC, HM), frame-type meanings, 6 head bytes; whether every Godrej model is Qualvision-made |
 
 ## 5. Research questions (for the researchers)
 
@@ -246,8 +259,9 @@ not filled from forum talk. Sources are listed in §5.2.
 - **Uniview, TP-Link.** Nothing published - but their firmware answers
   questions 1-5 and 7 (§4c), and both now have plugins.
 - **Matrix.** Its documents give the recording tree (§4d); a plugin reads it.
-- **Godrej.** Nothing published to parse from. Its
-  video is recoverable by `carve-annexb`. Exports (TP-Link to USB,
+- **Godrej.** Nothing published by a third party - but Godrej's SeeThru
+  recorders run Qualvision's software, whose firmware answers the layout
+  questions (§4e); a plugin reads it. Exports (TP-Link to USB,
   Matrix to AVI) are what `validate-export` would compare against, once a
   unit is available to record on.
 

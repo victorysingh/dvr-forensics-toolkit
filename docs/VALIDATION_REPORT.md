@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 514 pass, 0 fail: 493 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 7 on vendor-made files: 5 from other recorders (§8g) and 2 on NIST's reference export (§8i) |
+| Automated tests | 518 pass, 0 fail: 497 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 7 on vendor-made files: 5 from other recorders (§8g) and 2 on NIST's reference export (§8i) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
@@ -697,6 +697,50 @@ to 1 s.
 python -m validate.dhav_crosscheck out/cpplus_WWD4A3NX/carve/streams --ffmpeg PATH/ffmpeg --out dhav_crosscheck.json
 ```
 
+## 8j. Godrej, from Qualvision's firmware
+
+Godrej publishes no format and no firmware. But its SeeThru cloud portal
+drives Qualvision's `/tdkcgi` API, which Qualvision's firmware implements, so
+a SeeThru recorder runs Qualvision's software (`docs/research/vendor_formats.md`).
+Qualvision's application `Sofia` (NVR401L-4P4, 20240531, a public download)
+was read by static disassembly - nothing run - with
+`docs/research/fwread/sofia.py`, each structure from a named function:
+
+- **Disk head** (`IDiskExt::CheckHead`): `QVEX` v1.0 at LBA 0, with two
+  (start, size) regions bounded by the size field at +0x0C.
+- **Frames** (`CheckFrameHead`, `LoadFrameHead`, `ReadPacket`): a 20-byte head
+  - `00 00 01` + type E0-EB, a u32 payload length - and the next frame at
+  head + 20 + length.
+- **Frame time** (`CHOTUpload::OpenFile`): a DHTIME at +8 and milliseconds at
+  +0x0C. The firmware's own debug print decodes it with exactly Dahua's
+  packed-date shifts; the research notes had this as an assumption, and the
+  disassembly makes it firmware evidence.
+
+`plugins/godrej.py` finds footage by the frame chain alone: a head is believed
+only when the next head follows exactly where its length says, several in a
+row. It dates each run on the recorder's wall clock. Not decoded, so not
+claimed:
+- the VIDEO/PIC and HM index blocks, so no run is given a camera;
+- what each frame type means;
+- six bytes of the head;
+- whether every Godrej model is Qualvision-made. A Godrej disk with no `QVEX`
+  head stays `detected_not_parsed`.
+
+| Check (a disk built to the reading) | Result |
+|---|---|
+| Head | read as the firmware checks it; region bounds hold; the size field is the disk in sectors |
+| Runs | both at their offsets, every frame, first and last times to the millisecond |
+| A lone fake frame head in random bytes | passed over: it chains to nothing |
+| Video | extracted exactly (payloads with a start code); audio left out |
+| A head failing the firmware's own bounds check | refused |
+| Other plugins | none claims the QVFS disk; Godrej claims no other vendor's |
+
+With this, all eight named OEMs have a plugin. Three are read from real media
+(Dahua, CP Plus, Hikvision) and one comes from published research (Honeywell).
+Three come from the vendors' own firmware (Uniview; TP-Link's index; Godrej
+via Qualvision) and one from the vendor's own documents (Matrix). Only the
+first three are observed; none is `validated`.
+
 ## 9. Vendor format status
 
 | Vendor | Status | Why not better |
@@ -711,7 +755,7 @@ python -m validate.dhav_crosscheck out/cpplus_WWD4A3NX/carve/streams --ffmpeg PA
 | Uniview | `spec_only` | `plugins/uniview.py`, from the storage driver in Uniview's own firmware (§8f); tested on a disk built to it (11 tests, including footage found with the index wiped); no Uniview disk read |
 | TP-Link | `detected_not_parsed` (index: `spec_only`) | `plugins/tplink.py`, from the VIGI firmware (§8f): the format sector and the index are detected, and a plain index is read (recordings per camera, GOP rows, system log); footage is not placed on the disk, because the zone geometry was not recovered - `carve-annexb` recovers it; an encrypted index is reported as encrypted |
 | Matrix | `spec_only` | `plugins/matrix.py`, from Matrix's own documents (§8h): the recording tree on ext2/3/4, incl. one RAID 1 mirror; the .stm container is not published and is extracted as stored; tested on disks built to the documents (8 tests); no Matrix disk read, and the recorder's filesystem type is not documented |
-| Godrej | `detected_not_parsed` | brand-string detection only; its video is recoverable by `carve-annexb` without a parser |
+| Godrej (Qualvision QVFS) | `spec_only` | `plugins/godrej.py`, from Qualvision's own firmware (§8j); tested on a disk built to it; no Godrej or Qualvision disk read; cameras and the index not decoded |
 
 **To reach `validated`** — Dahua/CP Plus, and Hikvision the same way.
 
