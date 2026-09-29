@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 549 pass, 0 fail: 526 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 551 pass, 0 fail: 528 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -1197,6 +1197,30 @@ The whole workflow, run as an examiner would run it: from `ps26150-dvr.exe`
   §3.4 extracts to `--out clips/`, and the certificate looked only at the
   case folder's top level. It now looks one folder down, and it leaves out
   (and says so) any footage whose manifest names another device.
+
+**Re-run on 29 Sep evening, from `staging` (`e9a7527`).** The executable was
+rebuilt with the permanent build environment. It ran with no Python on the
+path, into fresh folders; the demo copies were not touched.
+
+| | Result |
+|---|---|
+| A. NIST image: scan (triage), parse, extract camera 2, timeline, report, CASE/UCO, certificate | every step exits 0; `verify`: custody chain intact across 8 entries, Merkle root **MATCH** over 512 blocks |
+| B. Dahua `.dav`: scan with carving, extract-carved, NIST export, report, certificate | 2,042 frames, 1 stream; the export decodes with no error (H.264 High, 2592x1520, 15 fps, 49.8 s, as before); `verify`: chain intact across 13 entries, **MATCH** |
+| `analyse-video` from the executable | **not available**: "the optional analytics layer is not installed". The build leaves out numpy, onnxruntime and the detectors by design (`packaging/ps26150.spec`) |
+| `analyse-video` with the analytics environment (`python cli.py analyse-video`, numpy + onnxruntime) on the same case | runs: 48 frames in 37 s, person in 14, face in 7 (YOLOX-S + YuNet, tiles and rotation) |
+
+So for the demo, the executable does everything except the AI, and the AI
+runs from the analytics Python on the case folder the executable made. An
+AI-capable executable would need a second build that bundles onnxruntime,
+numpy and the models (hundreds of MB).
+
+Two small faults found, both fixed with a test:
+- **`--label unlabelled` selected nothing.** On a source with no filesystem
+  index (a single `.dav`), the scan names the carved stream "unlabelled",
+  but `extract-carved --label unlabelled` matched nothing: only `all` or
+  `--ids` worked. It now selects what the scan calls unlabelled.
+- **`export-nist` with a missing input** ended in a Python traceback. It
+  now says what is missing and exits 1.
 
 ## 8l. The recorder's clock from daylight (`analyse/daylight.py`)
 

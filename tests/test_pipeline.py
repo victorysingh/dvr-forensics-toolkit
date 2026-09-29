@@ -1260,6 +1260,10 @@ def test_inline_carve(tmp: str) -> None:
         from report.case import load_case as _lc
         rows = rep["streams"]
         out_sel = carver.streams_from_report(rep, label="outside_index")
+        bare = {"streams": [dict(rows[0], index_label=None)]}     # a source with no index
+        check("a stream no index labelled is selected as 'unlabelled', the name the scan "
+              "prints for it", len(carver.streams_from_report(bare, label="unlabelled")) == 1
+              and not carver.streams_from_report(bare, label="outside_index"))
         ex_dir = os.path.join(tmp, "inl-tap", "carve", "streams")
         man = os.path.join(tmp, "inl-tap", "carve", "extracted.json")
         with BlockDevice(img) as dev:
@@ -3692,6 +3696,13 @@ def test_nist_export(tmp: str) -> None:
     except ValueError as exc:
         refused = "H.265" in str(exc)
     check("H.265 is refused, not re-encoded (Level 0 is H.264)", refused)
+    import argparse
+    import cli
+    rc = cli.cmd_export_nist(argparse.Namespace(es=os.path.join(tmp, "no_such_stream.h264"),
+                                                out=os.path.join(tmp, "nist_missing"),
+                                                start="2017-09-18 19:24:59", fps=15.0))
+    check("export-nist with no stream to read says so and exits 1 (the dress rehearsal "
+          "of 29 Sep found a traceback)", rc == 1)
 
     web3 = os.path.join(os.environ.get("VENDOR_SAMPLES", ""), "WEB3.mp4")
     if os.path.isfile(web3):
