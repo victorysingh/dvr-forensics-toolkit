@@ -1885,14 +1885,30 @@ def test_hikbtree(tmp: str) -> None:
             {"id": "older", "offset": base + 3 * gib + 9000,
              "time_first_local": loc(t0 - 400_000), "time_last_local": loc(t0 - 390_000)},
             {"id": "unused", "offset": base + 1 * gib, "time_first_local": loc(t0),
+             "time_last_local": loc(t0 + 10)},
+            {"id": "newer", "offset": base + 3 * gib + 20000,
+             "time_first_local": loc(t0 + 200_000), "time_last_local": loc(t0 + 200_100)},
+            {"id": "no_record", "offset": base + 20 * gib, "time_first_local": loc(t0),
              "time_last_local": loc(t0 + 10)}]
-    lab = {x["id"]: x["label"] for x in hikbtree.label_streams(idx, rows)}
+    labels = {x["id"]: x for x in hikbtree.label_streams(idx, rows)}
+    lab = {k: v["label"] for k, v in labels.items()}
     check("a stream inside its block's record window gets the record's channel",
           lab["in"] == "CH05", str(lab))
-    check("older footage left in a reused block is outside_index",
-          lab["older"] == "outside_index")
+    check("older footage left in a reused block is stale_tail, with how much older, and "
+          "no camera", lab["older"] == "stale_tail"
+          and labels["older"]["older_than_record_by_s"] == 390_000, str(labels["older"]))
+    check("footage newer than its block's record, or in a block with no record, is "
+          "outside_index - never stale_tail",
+          lab["newer"] == "outside_index" and lab["no_record"] == "outside_index")
     check("a block reserved at initialisation (channel 255) labels nothing",
           lab["unused"] == "outside_index")
+    from analyse.timeline import ClockModel, build as build_timeline
+    ps = {"streams": [dict(r, bytes=1000, index_label=lab[r["id"]]) for r in rows]}
+    tl = build_timeline(None, None, ClockModel(), ps_report=ps)
+    kinds = {e["id"]: (e["kind"], e["camera"]) for e in tl["events"]}
+    check("the timeline shows stale_tail as a remnant of unknown camera, like Dahua's",
+          kinds["older"] == ("remnant", "UNKNOWN") and kinds["in"] == ("indexed", "CH05")
+          and tl["counts"]["remnant"] == 1, str(kinds))
 
 
 def test_combined(tmp: str) -> None:

@@ -294,7 +294,9 @@ def render(case: dict, examiner_notes: str = "") -> str:
                 f"HIKBTREE records survived the reformat ({len(pl['index_headers'])} identical "
                 f"copies near the end of the disk). A stream is given a camera only when its "
                 f"data block has a record whose window contains the stream's own recorder "
-                f"times; older footage left in a reused block is outside_index.</p>")
+                f"times. <b>stale_tail</b>: footage in a block that has a record but is older "
+                f"than it - a previous recording cycle surviving past the new write pointer, "
+                f"camera unknown. <b>outside_index</b>: footage no record accounts for.</p>")
             add(table(["Label", "Streams"], list(pl["tally"].items())))
         add(table(["Stream", "Camera", "Offset", "Size", "Duration", "From (recorder clock)", "To"],
                   [[r["id"], r.get("label") or "-", f"0x{r['offset']:X}", size(r["bytes"]),
