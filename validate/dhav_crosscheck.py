@@ -45,6 +45,7 @@ import zlib
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 
+from core import proc
 from parsers import dahua as D
 
 RULE = "validate.dhav_crosscheck.v1"
@@ -110,7 +111,10 @@ def ffmpeg_frames(path: str, ffmpeg: str) -> dict:
     """ffmpeg's packets, with the recorder-local times kept (-copyts)."""
     cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "quiet", "-copyts", "-f", "dhav",
            "-i", path, "-map", "0", "-c", "copy", "-f", "framecrc", "-"]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=False).stdout
+    r = proc.run(cmd, timeout=proc.STREAM_S, capture_output=True, text=True)
+    if r.timed_out:
+        raise RuntimeError(f"ffmpeg did not finish {path} within {proc.STREAM_S} s")
+    out = r.stdout
     kinds: dict[str, str] = {}
     video, audio = [], []
     for line in out.splitlines():
@@ -213,7 +217,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     total = {k: sum(r["video"][k] for r in rows) for k in ("ours", "ffmpeg", "matching_prefix")}
     agree = [r for r in rows if r["video"]["identical"] and r["audio"]["identical"]]
     report = {"rule": RULE, "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-              "ffmpeg": subprocess.run([args.ffmpeg, "-version"], capture_output=True,
+              "ffmpeg": proc.run([args.ffmpeg, "-version"], timeout=proc.PROBE_S, capture_output=True,
                                        text=True).stdout.split("\n")[0],
               "files": len(rows), "files_identical": len(agree), "video_frames": total,
               "status_note": "independent implementation, shared field layout (dhav.c): "

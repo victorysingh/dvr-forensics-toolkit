@@ -62,6 +62,7 @@ import os
 import subprocess
 import sys
 
+from core import proc
 from analytics.static import counted, flag_implausible, flag_static
 
 CLASSES = {"person": {"person"}, "face": {"face"},
@@ -91,13 +92,8 @@ def at_rate(clip: str, fps: float, w: int | None = None, h: int | None = None):
            "-vf", f"fps={fps},scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     n = w * h * 3
     with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
-        k = 0
-        while True:
-            buf = p.stdout.read(n)
-            if len(buf) < n:
-                break
+        for k, buf in enumerate(proc.read_chunks(p, n)):    # a decoder silent too long is stopped
             yield k, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-            k += 1
 
 
 def keyframes(clip: str, every: int = 1, w: int | None = None, h: int | None = None):
@@ -111,13 +107,8 @@ def keyframes(clip: str, every: int = 1, w: int | None = None, h: int | None = N
            "-fps_mode", "vfr", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     n = w * h * 3
     with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
-        k = 0
-        while True:
-            buf = p.stdout.read(n)
-            if len(buf) < n:
-                break
+        for k, buf in enumerate(proc.read_chunks(p, n)):    # a decoder silent too long is stopped
             yield k * every, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-            k += 1
 
 
 def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=print,
@@ -186,7 +177,7 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
         if not clip_hits:
             log(f"  no frame decoded from {clip}")
     os.makedirs(os.path.join(out, "sheets"), exist_ok=True)
-    subprocess.run(["ffmpeg", "-nostdin", "-v", "quiet", "-y", "-start_number", "0",
+    proc.run(["ffmpeg", "-nostdin", "-v", "quiet", "-y", "-start_number", "0",
                     "-i", os.path.join(out, "frames", "%03d.jpg"),
                     "-vf", f"tile={SHEET}x{SHEET}:margin=4:padding=4",
                     # numbered from 00, as labels.csv's `sheet` column is
