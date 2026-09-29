@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 460 pass, 0 fail: 447 on generated data with known ground truth, 13 on real media (9 on the CP Plus drive's image, 4 on the HeimVision E01) - counted with #34-#41 merged |
+| Automated tests | 478 pass, 0 fail: 465 on generated data with known ground truth, 13 on real media (9 on the CP Plus drive's image, 4 on the HeimVision E01) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
@@ -32,7 +32,7 @@ Two different things are validated here, and they must not be confused:
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
-| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container, index records and full-filesystem parser `spec_only` (the parser not yet run on an intact Hikvision disk); HeimVision `spec_only`, observed on a third real image (§8e) |
+| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container, index records and full-filesystem parser `spec_only` (the parser not yet run on an intact Hikvision disk); HeimVision `spec_only`, observed on a third real image (§8e); Uniview `spec_only` and TP-Link's index, from the vendors' own firmware (§8f) |
 
 ## 2. Environment
 
@@ -456,6 +456,60 @@ places every `00 00 01` in the 806 written files by the parser.
 HeimVision export. `tests/test_pipeline.py` pins these numbers when
 `HEIMVISION_E01` points at the image.
 
+## 8f. Two more vendors, from their own firmware (Uniview, TP-Link)
+
+No disk from either is held, and nothing is published about either format
+(OEM_COMPARISON §5.1). Both vendors publish their firmware, though, and the
+code that writes the disk says what the disk holds. Two firmware images were
+unpacked and their storage code read by **static disassembly** - nothing was
+run (`docs/research/vendor_formats.md`). A new evidence level records this:
+`vendor_firmware`, ranked with a paper - it says what the recorder is
+programmed to write, not what a disk showed - so both stay at most
+`spec_only`.
+
+**Uniview** (NVR301-04LS3-W, B3612.1.21.220408; storage is the kernel module
+`comm.ko`, whose symbol table survives, so each structure is tied to a named
+function):
+
+| Structure | From the driver | Checked in the plugin |
+|---|---|---|
+| Superblock, 64 KiB at LBA 0 and a copy at the end | magic 0x20131031, version 0x2000, CRC-16, device ID, UUID, capacity, block count, abstract/data zone positions (`UBS_RS_SuperInit`, `UBS_MT_PrintSuper`, `UBS_RS_OpenSuper`) | CRC-16 (the kernel's `crc16`); the copy used if the head fails |
+| Abstract zone | one 128-byte entry per data block, 31 to a 4 KiB group, CRC-16 per group (`UBS_RS_SetupAbstNode2`, `UBS_RS_CrcCheck2`) | group CRCs |
+| Data blocks | 256 MiB each, block *n* at DzPos + *n* × 256 MiB (`UBS_Open`) | |
+| Block header, 8 KiB | 0x5050 v0x400: channel id, start/end time + ms, counts, write position, segments (`UBS_MT_DispDiskDbSuper`) | CRC-16 |
+| GOP index at +0x2000 | 32 bytes per GOP: time, and start and length in 4 KiB pages (`UBS_DB_SetSubIndx4`) | |
+| GOPs | header 0x2006; packets 0x1357 (DTS, PTS, flags, length); end 0x6002; the last 8 bytes of the GOP's last page hold its length and 0x6003 (`UBS_DB_RecoveryFromDataBlk`, `UBS_DB_ChkIGrpInfo`) | every GOP: the stated length must equal the bytes walked |
+
+That trailer is what makes Uniview footage recoverable with no index: the
+plugin walks GOPs by their own structure, as the recorder does when it
+repairs a block. GOPs past a block's write position are reported separately,
+as older footage (research gap G2, `docs/research/papers_usp.md`).
+
+**TP-Link VIGI** (NVR1008H V2, 240119; `liblayouthddb.so` and TP's own
+`libsqlite3.so`):
+
+| Structure | From the firmware |
+|---|---|
+| Two layouts | V0: TP's partitioning, swap, ext4 with `sys.bin` and zone files; V1: raw disk |
+| V1 format sector | at 512 MiB (retried up to 560 MiB past bad sectors): "TP-Link Corporation Limited, NVR FOR VERSION x.y.z", CRC-32 at +0x1FC (`rawDiskLayout_diskInfoFormatCheck`) |
+| The index | SQLite behind a 512-byte "TpFile" header: magic "TP-Link format1", then key slots (big-endian type, encrypt, length, data) (`sqliteTpFileInit`, `getTpFileKey`) |
+| Encryption | TP's SQLite build carries an AES codec (`CodecAES`, `sqlite3_key`); the layout library calls `db_encrypt()` with a key taken from the header's slots |
+| Tables | `tEventInfo` (recording per camera), `tGopInfo` (each GOP's zone, offset, length), `tZoneInfo`, `tSlogInfo` (the system log, on the disk) - from the CREATE TABLE statements |
+| Not recovered | the zone geometry (data-zone start, zone size): loaded at run time from an on-disk record whose layout was not read; the GOP header |
+
+So the TP-Link plugin reads the index where it is plain SQLite, finds its
+tables by their columns, and reports each camera's recordings and the system
+log as the index states them. It places **no** footage on the disk; video is
+recovered by `carve-annexb`. Where the index is encrypted it says so, and
+stops.
+
+**What is tested**: disks built to these readings (`tests/synth_uniview.py`,
+`tests/synth_tplink.py`, 18 tests). They prove the code follows the firmware
+as read. They cannot prove every model and firmware version writes the same,
+and nothing here has met a real Uniview or VIGI disk. The first such disk
+is the test: its superblock CRC, group CRCs and GOP trailers either check or
+they do not.
+
 ## 8c. OSD reader (optional layer — first real run 28 Sep: 1 of 5 reference titles, no clock)
 
 `cli.py read-osd` reads the burned-in channel title and clock, which is the
@@ -507,7 +561,9 @@ timezone has been read off the unit (§10).
 | Hikvision — full-filesystem parser (`parsers/hikvision.py`) | `spec_only` | rewritten on 28 Sep on the layout observed on drive 2 - the master sector as `hiklog.py` reads it, the HIKBTREE copies where the master points, the 48-byte records `hikbtree.py` reads - and tested on a disk built to that layout, including a primary master overwritten and read from its backup; not yet run on an intact Hikvision disk. The first version decoded offsets invented for our fixture and would have found nothing on a real disk |
 | HeimVision (K9604-W) | `spec_only` | `plugins/heimvision.py`, read off the NIST CFReDS image (§8e); every field observed on real media; not byte-matched to a HeimVision export |
 | Honeywell | `spec_only` | `plugins/honeywell.py`, written from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430); tested on a disk built to the paper's description (10 tests, including recovery after a format); no Honeywell disk read |
-| TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand-string detection only; their video is recoverable by `carve-annexb` without a parser |
+| Uniview | `spec_only` | `plugins/uniview.py`, from the storage driver in Uniview's own firmware (§8f); tested on a disk built to it (11 tests, including footage found with the index wiped); no Uniview disk read |
+| TP-Link | `detected_not_parsed` (index: `spec_only`) | `plugins/tplink.py`, from the VIGI firmware (§8f): the format sector and the index are detected, and a plain index is read (recordings per camera, GOP rows, system log); footage is not placed on the disk, because the zone geometry was not recovered - `carve-annexb` recovers it; an encrypted index is reported as encrypted |
+| Godrej, Matrix | `detected_not_parsed` | brand-string detection only; their video is recoverable by `carve-annexb` without a parser |
 
 **To reach `validated`** — Dahua/CP Plus, and Hikvision the same way.
 
