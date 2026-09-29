@@ -42,7 +42,7 @@ Two different things are validated here, and they must not be confused:
 | Workstation | Kali Linux, kernel 7.1.5, Python 3.14.6, booting from a USB SSD (Realtek RTL9210, `0bda:9210`) |
 | Tool | `dvr-forensics-toolkit`, commit `26fb542` or later (branch `shrestha/single-pass-recovery-report-ui`) |
 | Evidence | Seagate SkyHawk ST1000VX013, 1 TB, s/n `WWD4A3NX`, from a CP Plus recorder |
-| Recorder unit (read 28 Sep) | CP Plus **`CP-UNR-104F1`**, a 4-channel NVR, hardware V1.0; firmware (System Version) **`V1.00.14.00.T`**, built 16/08/2025; SN `TSTSERIAL0000001`, DevID `0A0B0C0D`, MAC `02:00:5E:10:00:01` - from its label and its System Info screen (photos SHA-256 `2f873a693b6355d2...` and `bed79a8b0388affb...`; these are WhatsApp copies, which strip the time taken - the originals are to be hashed). A CP Plus NVR is Dahua-built, which agrees with the DHFS 4.1 on this drive. Whether this unit wrote the drive: its serial, DevID or MAC on the platter is still to be searched (`identify-model` over the whole drive) |
+| Recorder unit (read 28 Sep) | CP Plus **`CP-UNR-104F1`**, a 4-channel NVR, hardware V1.0; firmware (System Version) **`V1.00.14.00.T`**, built 16/08/2025; SN `TSTSERIAL0000001`, DevID `0A0B0C0D`, MAC `02:00:5E:10:00:01` - from its label and its System Info screen (photos SHA-256 `2f873a693b6355d2...` and `bed79a8b0388affb...`; these are WhatsApp copies, which strip the time taken - the originals are to be hashed). A CP Plus NVR is Dahua-built, which agrees with the DHFS 4.1 on this drive. Recorded in the case with `record-device` on 29 Sep, from the values read off JP's photos (`--read-from other`: the photos are not on the examining machine; attach them with `--photo`). Whether this unit wrote the drive: **the disk does not say.** `identify-model` over the whole write-blocked drive (29 Sep, 12 worker processes, 42 MiB/s) searched all 9,814 non-video blocks, 76.67 GiB. It found none of the unit's serial, DevID or MAC (the MAC as text three ways and as its 6 raw bytes), and no model string. Its one candidate, `HRG745` at 0x6CFC3A4E2A, matches the Honeywell pattern by chance in binary data: the bytes around it are not text. The check's "differ" for it is therefore a false alarm (§10). Result `model.json` SHA-256 `c56b3f8a…0f54741`, in the case ledger |
 | Adapter | generic USB 2.0 SATA bridge, Super Top M6116 (`14cd:6116`), 480 Mbit/s, own power supply |
 | Image | first 20 GiB of the drive, SHA-256 `c4098d59cff3973de9d281ba5613005ba52165743c36edfcf56f61aad8f4e610` (23 Sep 2026) |
 
@@ -105,6 +105,7 @@ sector 0:
 | 24 Sep 23:53, before the udev rule existed | **came back writable** (`ro=0`) as `/dev/sdc`; re-applied by hand ~20 min later. Nothing mounted it (auto-mount and udisks off) |
 | 25 Sep 00:41, with the rule | `ro=1` automatically, before any process opened it |
 | 25 Sep 02:44 (after a manual replug) | `ro=1` automatically; the scan verified and resumed |
+| 29 Sep 18:00, drive 1 connected for `identify-model`, before the rule was re-installed (it lives in `/run`, cleared by a reboot) | **came up writable** (`ro=0`); set by hand minutes later, before any tool opened it, and the rule re-installed. Nothing mounted it. The kernel's own counters for the drive showed **0 writes completed** for the whole session, while 85.6 GB were read. Before reading, its first block and a block at 500 GB were hashed and matched the full scan's block map |
 
 The first row is why the rule exists. The rule matches on the drive's own
 serial (or on the evidence adapter's USB id); `udevadm test` confirms it
@@ -763,6 +764,78 @@ showed what tiling changes:
 | *Road View 1*, 17:00 | *person* 1 | *person* 1, *face* 7 | the same |
 | *Road View 2*, 17:00 | *person* 1 | *person* 2, *car* 1 | *person* 1, *car* 1 |
 | the other three | nothing | *suitcase* 1 (*Road View 2*, 22:00) | the same |
+
+### On our own drive, with the new detector (29 Sep, evening)
+
+The same 210 frames were scored again with the tool's new default:
+- YOLOX-S (`c5c2d13e…`) and YuNet (`ebafce4e…`);
+- 2 x 2 tiles;
+- people at 0.4, other objects at 0.5, faces at 0.7;
+- rotation `auto`.
+
+`analytics_eval sample --frames 35` over the same six recordings took **the same keyframes**. Every
+row's clip and position match, and all 210 frame JPEGs are byte-identical
+(`out/realchecks/drive1_recall_v3/`).
+
+The frames were scored against two label sets:
+- **Claude's** labels;
+- **reviewed**: the same labels with the person's 22-frame review applied
+  (`labels.reviewed.csv`). That changes 10 labels: 8 vehicles to *no*, frame 1's
+  person to *no*, and frame 48's face to *yes*. Frames outside the review keep
+  Claude's labels.
+
+As the tool reports:
+
+| Class | Labels | Old: SSD-MobileNet + UltraFace, 3 x 3 | New: YOLOX-S + YuNet, 2 x 2 |
+|---|---|---|---|
+| Person | Claude's | 0 of 3 found; 2 false alarms in 207 | **2 of 3** found; 3 false alarms in 207 |
+| Person | reviewed | 0 of 2; 2 in 208 | **2 of 2**; 3 in 208 |
+| Face | Claude's | none to find; **7 false alarms** in 210 | none to find; **0** false alarms |
+| Face | reviewed | 0 of 1; 7 in 209 | 0 of 1; **0** in 209 |
+| Vehicle | Claude's | 1 of 100 (wrong box); 0 in 110 | **0 of 100**; 0 in 110 |
+| Vehicle | reviewed | 1 of 92; 0 in 118 | **0 of 92**; 0 in 118 |
+
+Every false alarm and every miss, looked at by eye:
+
+- **People found: both walkers.** Frame 48 at 0.79 and frame 51 at 0.43;
+  the second is the one partly behind a tree. The ~14 px figure beside a
+  cow (frame 1: Claude *yes*, the person *no*) gets a box on it only at 0.20.
+- **The dog is still a person**: frame 59 at 0.71. **A new false alarm:**
+  the tree trunk in front of the parked red car on *Road View 2*, at
+  0.41-0.58, in frames 54 and 62 and as a second box in 48 and 59. The static
+  rule flags that trunk in 22 other frames; these four slip through, the same
+  gap as the grass patch below (`STATIC_SHARE`, and box sizes that vary).
+  The old detector's person in the corrupted frame 6 is gone.
+- **The grass-patch "face" is gone.** No face box lands on that patch at
+  any score from 0.5, and there are no face reports at 0.7. Between 0.5 and
+  0.7 YuNet gives 8 boxes in 7 frames, none on a face: five specks of ~3 px,
+  two on a brown sack of coir on *Road View 2*'s parapet (0.51, 0.60), and
+  one on the smear of the corrupted frame 6. The one face the person marked
+  (frame 48, a ~5 px head in shadow) gets no box.
+- **The parked car at night is still missed.** YOLOX boxes it in all 35
+  night frames, but at 0.25-0.47, under the 0.5 object threshold, so it is
+  never reported. At a lower threshold the static rule would remove it as
+  parked. The red car half-hidden behind a tree, and the small far car, get
+  no box at 0.5 either.
+
+The sweep, on the reviewed labels:
+- **Person:** 2 of 2 found at every threshold from 0.2 to 0.4, with 15, 4
+  and 3 false alarms; 1 of 2 at 0.5 and above.
+- **Vehicle, as the models said:** 42, 26 and 9 of 92 at 0.2, 0.3 and 0.4,
+  with 8, 4 and 1 false alarms (at 0.24 a stack of paving blocks reads as a
+  *truck*). After the rules, 15 of 92 at 0.2 and none above.
+- **Face:** 7 false-alarm frames at 0.5 and 2 at 0.6 (the boxes above); the
+  frame-48 face is found at no threshold.
+
+**In short, on these cameras** the new detector:
+- finds the people the old one missed;
+- ends the face false alarms;
+- still calls the dog a person, and adds a tree trunk;
+- reports no vehicle at all. The one that matters, a car parked in full view,
+  scores under its threshold.
+
+The set, detections and both label files are in `out/realchecks/`
+(`detections.json` SHA-256 `b8680a610497d004…`).
 
 ## 8b. Second drive: Hikvision footage under a Dahua-family format
 
@@ -1440,10 +1513,15 @@ tool's own parser reads, field by field.
 - A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
 - Recorder timezones, which are what keep the two drives on separate axes in §8d.
 - The CP Plus unit's own log for 23 Sep - and, better than photos of it, the log exported
-  to a USB stick from the recorder's menu (one file, hashed). Then `identify-model` over
-  the whole of drive 1 for the unit's serial, DevID and MAC.
+  to a USB stick from the recorder's menu (one file, hashed). ~~Then `identify-model` over
+  the whole of drive 1 for the unit's serial, DevID and MAC.~~ **Run 29 Sep: none of them
+  on the platter, and no model string** (drive 1 row, §2).
+- `identify-model` counts any match of a model pattern as a candidate, even one in binary
+  data: on drive 1, `HRG745` (6 characters, Honeywell's pattern) turned up by chance in
+  76.67 GiB and made the check say "differ". A candidate whose surrounding bytes are not
+  text should be reported as a likely chance match and kept out of the check.
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
 - ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** ~~Still to run on the real images.~~ **Run 29 Sep: agree on both drives' images and on five vendor-made files (§9a).**
 - ~~The ffmpeg cross-check on drive 1's own `.dav` files.~~ **Run 29 Sep (§8g):** 719,097 of 719,097 emitted frames identical. It found one thing to fix: after a frame-counter gap the DHAV date and millisecond counter can disagree by up to ~3 s (6 files, 227 frames). Frames after such a gap should carry that wider time uncertainty in the timeline and report; today they do not.
-- Analytics recall on our own cameras: 210 drive-1 frames sampled with tiling, labelled by Claude (an AI model), the 20 deciding frames checked by a person (§8a): person 0 of 2, face 0 of 1 with 7 false alarms, vehicle 0 of 35 as reported. Open: the static rule's 25% share lets an intermittent fixed false alarm through.
+- Analytics recall on our own cameras: 210 drive-1 frames, labelled by Claude, the 20 deciding frames checked by a person, scored with both detectors (§8a). New detector: people 2 of 2 (was 0), no face false alarms (was 7), but the dog is still a person, a tree trunk is a new one, and no vehicle is reported - the parked car scores 0.25-0.47 against a 0.5 threshold. Open: the static rule's 25% share lets an intermittent fixed false alarm through.
 - ~~Drive 2 `label-ps` re-run on the drive.~~ **Run 29 Sep (§8b):** 440 `stale_tail`, 55 `outside_index`; index unchanged since 26 Sep.
