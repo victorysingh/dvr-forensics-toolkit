@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PS26150 DVR Forensics</title>
+<script>
+  // Theme before first paint, so a dark console never flashes white.
+  // Wrapped because localStorage throws in a locked-down profile.
+  try {
+    const t = localStorage.getItem("ps26150-theme");
+    document.documentElement.classList.toggle("dark", t !== "light");
+  } catch (e) { /* keep the dark default */ }
+</script>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/main.jsx"></script>
+</body>
+</html>

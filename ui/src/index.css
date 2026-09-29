@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* Dark is the default and is driven by a class on <html>, set before first
+   paint in index.html and toggled by the shell. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------- theme
+   The status colours are not decoration: each one names how strong the
+   evidence behind a claim is, and the same colour means the same thing on
+   every screen.  --color-lead is reserved for anything a model produced.
+*/
+/* `static`: emit every variable, not only those a utility class uses - the
+   camera colours are read by inline styles (camColor), which Tailwind cannot
+   see, and without this the lanes and bars render with no colour at all. */
+@theme static {
+  --color-ink: #16202b;
+  --color-ink-dim: #5b6b7c;
+
+  --color-validated: #22c55e;
+  --color-spec: #3b82f6;
+  --color-synthetic: #f59e0b;
+  --color-detected: #94a3b8;
+  --color-lead: #a78bfa;
+  --color-danger: #ef4444;
+
+  --color-accent: #0d9488;
+  --color-accent-dark: #2dd4bf;
+
+  /* one hue per camera lane, stable across screens */
+  --color-cam-1: #2dd4bf;
+  --color-cam-2: #3b82f6;
+  --color-cam-3: #a78bfa;
+  --color-cam-4: #f59e0b;
+  --color-cam-5: #22c55e;
+  --color-cam-6: #f472b6;
+  --color-cam-7: #38bdf8;
+  --color-cam-8: #fb923c;
+
+  /* System stacks only - an air-gapped machine has no font CDN to ask. */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+}
+
+/* ---------------------------------------------------------------- base */
+@layer base {
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+
+  body {
+    @apply bg-slate-100 text-slate-900 font-sans antialiased;
+    /* counts, offsets and durations line up column to column */
+    font-variant-numeric: tabular-nums;
+  }
+  html.dark body { @apply bg-[#0b0f14] text-slate-100; }
+
+  :focus-visible { @apply outline-2 outline-offset-2 outline-teal-500 rounded; }
+
+  /* Sticky table headers need an opaque backdrop in both themes. */
+  th { @apply bg-slate-200; }
+  html.dark th { @apply bg-[#172030]; }
+}
+
+@layer utilities {
+  /* Surfaces used often enough that repeating the pair everywhere hurts. */
+  .panel { @apply bg-white border border-slate-300 rounded-xl; }
+  html.dark .panel { @apply bg-[#121821] border-[#1f2a37]; }
+
+  .panel-2 { @apply bg-slate-100; }
+  html.dark .panel-2 { @apply bg-[#172030]; }
+
+  .hairline { @apply border-slate-300; }
+  html.dark .hairline { @apply border-[#1f2a37]; }
+
+  .dim { @apply text-slate-500; }
+  html.dark .dim { @apply text-slate-400; }
+}
+
+/* Motion is a nicety; a viewer who asked for less gets none of it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

@@ -559,6 +559,39 @@ def test_dahua_parser(tmp: str) -> None:
           res.recordings[0].start_utc == "2026-09-03T04:30:00.000Z",
           str(res.recordings[0].start_utc))
 
+    # extract: several recordings after one parse - what a day of footage over USB needs
+    import argparse
+    import cli
+    ids = [r.id for r in res.recordings]
+
+    def ns(rec, out):
+        return argparse.Namespace(device=img, vendor="Dahua", recording=rec, out=out,
+                                  tz_offset=None)
+
+    def outputs(d):
+        got = {}
+        for fn in sorted(os.listdir(d)):
+            path = os.path.join(d, fn)
+            if fn.endswith(".manifest.json"):
+                with open(path, encoding="utf-8") as fh:
+                    m = json.load(fh)
+                m.pop("generated_utc", None)
+                got[fn] = m
+            else:
+                with open(path, "rb") as fh:
+                    got[fn] = hashlib.sha256(fh.read()).hexdigest()
+        return got
+    one, many, bad = (os.path.join(tmp, d) for d in ("x_one", "x_many", "x_bad"))
+    rcs = [cli.cmd_extract(ns(rid, one)) for rid in ids]
+    rc_many = cli.cmd_extract(ns(ids, many))
+    rc_bad = cli.cmd_extract(ns([ids[0], "dhfs-v9-c999999"], bad))
+    check("extract: three recordings after one parse give exactly what three calls give; "
+          "an unknown id among them is refused without stopping the rest",
+          rcs == [0, 0, 0] and rc_many == 0 and outputs(one) == outputs(many)
+          and len(outputs(many)) == 3 * len(ids) and rc_bad == 1
+          and os.path.exists(os.path.join(bad, ids[0] + ".dav")),
+          f"{rcs} {rc_many} {rc_bad} {sorted(outputs(many))[:4]}")
+
 
 class _BytesSink(_Sink):
     def __init__(self):
@@ -1260,6 +1293,10 @@ def test_inline_carve(tmp: str) -> None:
         from report.case import load_case as _lc
         rows = rep["streams"]
         out_sel = carver.streams_from_report(rep, label="outside_index")
+        bare = {"streams": [dict(rows[0], index_label=None)]}     # a source with no index
+        check("a stream no index labelled is selected as 'unlabelled', the name the scan "
+              "prints for it", len(carver.streams_from_report(bare, label="unlabelled")) == 1
+              and not carver.streams_from_report(bare, label="outside_index"))
         ex_dir = os.path.join(tmp, "inl-tap", "carve", "streams")
         man = os.path.join(tmp, "inl-tap", "carve", "extracted.json")
         with BlockDevice(img) as dev:
@@ -1785,6 +1822,52 @@ def test_timeline_recurring() -> None:
           len(r) == 1 and r[0]["start_local"] == "02:00" and len(r[0]["days"]) == 3, str(r))
 
 
+def test_case_view() -> None:
+    """What the case console shows, as load_case builds it for the screens."""
+    print("\n[case view]")
+    from report.case import _labelled_thumb, _with_local_span, vendor_matrix
+
+    def claim(source, when):
+        return {"source": source, "raw_value": f"0x0 = {when} recorder-local"}
+
+    rec = {"id": "r", "timestamps": [claim("index", "2026-09-03 12:53:53"),
+                                     claim("index", "2026-09-03 14:00:00"),
+                                     claim("container", "2026-09-03 12:53:52")]}
+    got = _with_local_span(rec)
+    check("a recording's span is its index start and end, as the timeline takes them",
+          (got["start_time_local"], got["end_time_local"])
+          == ("2026-09-03 12:53:53", "2026-09-03 14:00:00") and "start_time_local" not in rec,
+          str(got))
+    only_frames = {"id": "h", "timestamps": [claim("container", "2026-01-02 03:04:05"),
+                                             claim("container", "2026-01-02 03:09:05")]}
+    got = _with_local_span(only_frames)
+    undated = _with_local_span({"id": "u", "timestamps": [claim("index", "not a time")]})
+    check("with no index times the span is the first and last frame; with none it is empty",
+          (got["start_time_local"], got["end_time_local"])
+          == ("2026-01-02 03:04:05", "2026-01-02 03:09:05")
+          and undated["start_time_local"] is None and undated["end_time_local"] is None,
+          f"{got} {undated}")
+
+    clip = {"clip": "c.h265", "detections": [
+        {"t_s": 5.0, "detections": [
+            {"label": "person", "score": 0.59, "static": False, "implausible": False},
+            {"label": "face", "score": 0.91, "static": True, "implausible": False}]},
+        {"t_s": 10.0, "detections": [
+            {"label": "face", "score": 0.95, "static": False, "implausible": True}]}]}
+    shown = _labelled_thumb({"file": "a.jpg", "t_s": 5.0}, clip)
+    flagged = _labelled_thumb({"file": "b.jpg", "t_s": 10.0}, clip)
+    empty = _labelled_thumb({"file": "c.jpg", "t_s": 15.0}, clip)
+    check("a thumbnail is labelled by the counted boxes on its frame, never by flagged ones",
+          (shown["label"], shown["score"], shown["clip"]) == ("person", 0.59, "c.h265")
+          and (flagged["label"], flagged["score"]) == ("flagged, not counted", None)
+          and empty["label"] is None, f"{shown} {flagged} {empty}")
+
+    hik = next(r for r in vendor_matrix() if r["vendor"] == "Hikvision")
+    check("the vendor matrix says drive 2 was read, and claims no more than spec_only for it",
+          hik["parser_status"] == "spec_only" and "not yet read" not in hik["media"]
+          and "intact" in hik["basis"], str(hik))
+
+
 def test_timeline_recorder_log() -> None:
     """The recorder's own log set against the footage: a silence on every
     camera with a logged power-on is a power cut; one without is reported as
@@ -2063,7 +2146,7 @@ def test_analytics_tiles() -> None:
     in two tiles is kept once, and boxes kept at any score then filtered are
     the boxes kept at the threshold (what `sweep` relies on)."""
     print("\n[analytics: tiles]")
-    from analytics.tiles import merge, tiles, to_frame
+    from analytics.tiles import merge, tiles, to_frame, unrotate
     g = tiles(1920, 1080, 3, 0.2)
     xs, ys = sorted({t[0] for t in g}), sorted({t[1] for t in g})
     tw, th = g[0][2], g[0][3]
@@ -2093,6 +2176,103 @@ def test_analytics_tiles() -> None:
     check("boxes merged at any score and then filtered are the boxes merged at the threshold",
           all([d for d in merge(boxes) if d["score"] >= t] == merge([d for d in boxes if d["score"] >= t])
               for t in (0.2, 0.3, 0.4, 0.5, 0.6)))
+    # np.rot90's quarter turn (anticlockwise) moves a 0-1 box to this place:
+    turn = lambda b: [b[1], round(1 - b[2], 4), b[3], round(1 - b[0], 4)]
+    box, b, back = [0.1, 0.2, 0.4, 0.9], [0.1, 0.2, 0.4, 0.9], []
+    for k in (1, 2, 3):
+        b = turn(b)
+        back.append(unrotate(b, k))
+    check("a box found in the frame turned a quarter, a half or three quarters of a turn "
+          "maps back to where it is in the frame", back == [box, box, box], str(back))
+
+
+def test_analytics_models() -> None:
+    """The model sets: every model pinned, with a licence that allows use and a
+    source to fetch it from; each set's thresholds are ones the sweep scores."""
+    print("\n[analytics: model sets]")
+    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, threshold
+    from validate.analytics_eval import SWEEP
+    check("every model is pinned by SHA-256, with an https source and an MIT or Apache-2.0 licence",
+          all(len(m["sha256"]) == 64 and int(m["sha256"], 16) >= 0 and m["url"].startswith("https://")
+              and m["license"] in ("MIT", "Apache-2.0") and m["file"].endswith(".onnx")
+              for m in MODELS.values()))
+    check("each set names a pinned model for faces and one for objects, and a default tiling",
+          all(s["faces"] in MODELS and s["objects"] in MODELS and s["tiles"] >= 1
+              for s in MODEL_SETS.values()) and DEFAULT_SET == "yolox")
+    check("each set's thresholds are among the sweep's, so the sweep reports the tool's own row",
+          all(s["faces_min"] in SWEEP["face"] and s["objects_min"] in SWEEP["objects"]
+              and all(v in SWEEP["objects"] for v in s["class_min"].values())
+              for s in MODEL_SETS.values()))
+    check("a class threshold overrides the objects one for that class only: YOLOX people at 0.4, "
+          "vehicles and bags at 0.5, faces at 0.7; the classic set unchanged",
+          (threshold("yolox", "person"), threshold("yolox", "car"), threshold("yolox", "backpack"),
+           threshold("yolox", "face"), threshold("classic", "person"), threshold("classic", "face"))
+          == (0.4, 0.5, 0.5, 0.7, 0.5, 0.8))
+
+
+def test_parked_vehicles() -> None:
+    """A car that stays in one place is a parked vehicle, reported once per
+    place; a car box under the reporting threshold is kept only for that, and
+    is not counted as a vehicle."""
+    print("\n[analytics: parked vehicles]")
+    from analytics.models import keep_threshold, mark_weak, threshold
+    from analytics.static import counted, flag_static, parked_spots
+    car = lambda s, box, label="car": {"label": label, "score": s, "box": box}
+    spot = [0.10, 0.60, 0.30, 0.80]
+    hits = [{"t_s": float(t), "detections": [car(0.3 + 0.02 * t, spot, "truck" if t == 2 else "car"),
+                                             car(0.45, [0.5, 0.1, 0.6, 0.2], "bicycle"),
+                                             car(0.8, [0.05 * t, 0.2, 0.05 * t + 0.1, 0.3])]}
+            for t in range(6)]
+    for h in hits:                                  # the bicycle stays too, the third car moves
+        h["detections"][1]["box"] = [0.5, 0.1, 0.6, 0.2]
+    flag_static(hits, 6)
+    spots = parked_spots(hits)
+    check("a car seen in one place is one parked vehicle (the frame where it was once called a "
+          "truck is not: the static rule is per label); a moving car and a static bicycle are not "
+          "parked vehicles",
+          len(spots) == 1 and spots[0]["label"] == "car" and spots[0]["frames"] == 5
+          and spots[0]["first"] == 0.0 and spots[0]["last"] == 5.0 and spots[0]["best"] == 0.4,
+          str(spots))
+    check("a car box is kept from 0.3 for parked vehicles but counts as a vehicle only from 0.5; "
+          "people keep 0.4; the classic set keeps 0.5 for everything",
+          (keep_threshold("yolox", "car"), threshold("yolox", "car"), keep_threshold("yolox", "person"),
+           keep_threshold("yolox", "bicycle"), keep_threshold("classic", "truck")) == (0.3, 0.5, 0.4, 0.5, 0.5))
+    weak, strong = mark_weak("yolox", [car(0.35, spot), car(0.6, spot)])
+    check("a box under its reporting threshold is weak and not counted; one over it is",
+          weak["weak"] and not counted(weak) and not strong["weak"] and counted(strong))
+
+
+def test_caviar_eval(tmp: str) -> None:
+    """Scoring on CAVIAR: the ground truth read from its XML, a person found
+    by box overlap, a static box not counted, and boxes over nobody counted
+    apart."""
+    print("\n[analytics: CAVIAR scoring]")
+    from validate.caviar_eval import ground_truth, score
+    xml = os.path.join(tmp, "gt.xml")
+    with open(xml, "w", encoding="utf-8") as fh:
+        fh.write('<?xml version="1.0"?><dataset name="Walk1">'
+                 '<frame number="0"><objectlist/><grouplist/></frame>'
+                 '<frame number="25"><objectlist><object id="0"><orientation>90</orientation>'
+                 '<box h="96" w="48" xc="192" yc="144"/></object>'
+                 '<object id="1"><box h="20" w="10" xc="40" yc="40"/></object></objectlist>'
+                 '<grouplist/></frame></dataset>')
+    gt = ground_truth(xml)
+    big, tiny = gt[25]
+    check("CAVIAR ground truth: boxes in 0-1 of the 384 x 288 picture, with the height in pixels",
+          gt[0] == [] and big == [0.4375, 1 / 3, 0.5625, 2 / 3, 96.0] and tiny[4] == 20.0, str(gt))
+    person = lambda box, **k: dict({"label": "person", "score": 0.8, "box": box}, **k)
+    frames = [{"clip": "Walk1.mpg", "gt": gt[0], "detections": [person([0.1, 0.1, 0.2, 0.3], static=True)]},
+              {"clip": "Walk1.mpg", "gt": gt[25],
+               "detections": [person([0.44, 0.34, 0.56, 0.66]), person([0.8, 0.8, 0.9, 0.95])]}]
+    s = score(frames)
+    check("CAVIAR scoring: the tall person found, the small one missed, a static box not "
+          "counted, a box over nobody counted apart",
+          s["people_found"] == 1 and s["people_labelled"] == 2
+          and s["by_height"]["80 px and over"] == {"found": 1, "labelled": 1}
+          and s["by_height"]["under 40 px"] == {"found": 0, "labelled": 1}
+          and s["frames_without_person"] == {"reported": 0, "of": 1}
+          and s["frames_with_person"] == {"found": 1, "of": 1} and s["boxes_matching_no_label"] == 1,
+          json.dumps(s))
 
 
 def test_hikbtree(tmp: str) -> None:
@@ -2995,6 +3175,28 @@ def test_model(tmp: str) -> None:
           and v_none["verdict"] == "not determined" and "does not show" in v_none["detail"],
           f"{v_found} {v_stale} {v_none}")
 
+    # a short model-shaped string seen once is a possible chance match, not a reading
+    ms_c = M.ModelSearch()
+    blk = bytearray(4096)
+    blk[100:108] = b"?HRG745/"                           # as found on the CP Plus drive
+    for at in (1000, 2000):
+        blk[at:at + 16] = b" DS-7B08HUHI-K1 "
+    ms_c.feed(0, bytes(blk))
+    flags = {c["model"]: c["possible_chance_match"] for c in ms_c.result({})["candidates"]}
+
+    def platter_verdict(cands):
+        res = M.check([unit], {"searched": {"bytes": 82_323_397_632}, "candidates": cands}, dahua)
+        return next(c for c in res if c["check"].startswith("model strings on the platter"))
+    hrg = {"model": "HRG745", "vendor": "Honeywell", "family": "honeywell", "kind": "recorder",
+           "count": 1, "offsets": [1], "context": ""}
+    cpp = dict(hrg, model="CP-UNR-104F1", vendor="CP Plus", family="cpplus")
+    v_hrg, v_both = platter_verdict([hrg]), platter_verdict([cpp, hrg])
+    check("a short model string seen once is listed as a possible chance match and does not "
+          "make the check 'differ'; a real one still agrees beside it",
+          flags == {"HRG745": True, "DS-7B08HUHI-K1": False}
+          and v_hrg["verdict"] == "not determined" and "chance" in v_hrg["detail"]
+          and v_both["verdict"] == "agree", f"{flags} {v_hrg} {v_both}")
+
     # the same search over worker processes (search_blocks) - what a whole drive needs
     import random
     disk = bytearray(random.Random(26150).randbytes(64 * 4096))
@@ -3651,6 +3853,13 @@ def test_nist_export(tmp: str) -> None:
     except ValueError as exc:
         refused = "H.265" in str(exc)
     check("H.265 is refused, not re-encoded (Level 0 is H.264)", refused)
+    import argparse
+    import cli
+    rc = cli.cmd_export_nist(argparse.Namespace(es=os.path.join(tmp, "no_such_stream.h264"),
+                                                out=os.path.join(tmp, "nist_missing"),
+                                                start="2017-09-18 19:24:59", fps=15.0))
+    check("export-nist with no stream to read says so and exits 1 (the dress rehearsal "
+          "of 29 Sep found a traceback)", rc == 1)
 
     web3 = os.path.join(os.environ.get("VENDOR_SAMPLES", ""), "WEB3.mp4")
     if os.path.isfile(web3):
@@ -4133,10 +4342,14 @@ def main() -> int:
         test_timeline_clock_default()
         test_timeline_recurring()
         test_timeline_recorder_log()
+        test_case_view()
         test_ps_carver(tmp)
         test_static_detections()
         test_analytics_eval(tmp)
         test_analytics_tiles()
+        test_analytics_models()
+        test_caviar_eval(tmp)
+        test_parked_vehicles()
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)
