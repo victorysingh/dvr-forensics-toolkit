@@ -42,7 +42,7 @@ Two different things are validated here, and they must not be confused:
 | Workstation | Kali Linux, kernel 7.1.5, Python 3.14.6, booting from a USB SSD (Realtek RTL9210, `0bda:9210`) |
 | Tool | `dvr-forensics-toolkit`, commit `26fb542` or later (branch `shrestha/single-pass-recovery-report-ui`) |
 | Evidence | Seagate SkyHawk ST1000VX013, 1 TB, s/n `WWD4A3NX`, from a CP Plus recorder |
-| Recorder unit (read 28 Sep) | CP Plus **`CP-UNR-104F1`**, a 4-channel NVR, hardware V1.0; firmware (System Version) **`V1.00.14.00.T`**, built 16/08/2025; SN `WJQYRMDNPB06GIVC`, DevID `1155004A`, MAC `F8:20:97:10:12:B7` - from its label and its System Info screen (photos SHA-256 `2f873a693b6355d2...` and `bed79a8b0388affb...`; these are WhatsApp copies, which strip the time taken - the originals are to be hashed). A CP Plus NVR is Dahua-built, which agrees with the DHFS 4.1 on this drive. Recorded in the case with `record-device` on 29 Sep, from the values read off JP's photos (`--read-from other`: the photos are not on the examining machine; attach them with `--photo`). Whether this unit wrote the drive: **the disk does not say.** `identify-model` over the whole write-blocked drive (29 Sep, 12 worker processes, 42 MiB/s) searched all 9,814 non-video blocks, 76.67 GiB. It found none of the unit's serial, DevID or MAC (the MAC as text three ways and as its 6 raw bytes), and no model string. Its one candidate, `HRG745` at 0x6CFC3A4E2A, matches the Honeywell pattern by chance in binary data: the bytes around it are not text. The check's "differ" for it is therefore a false alarm (§10). Result `model.json` SHA-256 `c56b3f8a…0f54741`, in the case ledger |
+| Recorder unit (read 28 Sep) | CP Plus **`CP-UNR-104F1`**, a 4-channel NVR, hardware V1.0; firmware (System Version) **`V1.00.14.00.T`**, built 16/08/2025; SN `WJQYRMDNPB06GIVC`, DevID `1155004A`, MAC `F8:20:97:10:12:B7` - from its label and its System Info screen (photos SHA-256 `2f873a693b6355d2...` and `bed79a8b0388affb...`; these are WhatsApp copies, which strip the time taken - the originals are to be hashed). A CP Plus NVR is Dahua-built, which agrees with the DHFS 4.1 on this drive. Recorded in the case with `record-device` on 29 Sep, from the values read off JP's photos (`--read-from other`: the photos are not on the examining machine; attach them with `--photo`). Whether this unit wrote the drive: **the disk does not say.** `identify-model` over the whole write-blocked drive (29 Sep, 12 worker processes, 42 MiB/s) searched all 9,814 non-video blocks, 76.67 GiB. It found none of the unit's serial, DevID or MAC (the MAC as text three ways and as its 6 raw bytes), and no model string. Its one candidate, `HRG745` at 0x6CFC3A4E2A, matches the Honeywell pattern by chance in binary data: the bytes around it are not text. The check first said "differ" because of it; the tool now lists a candidate that is short (8 characters or fewer) and seen once as a possible chance match, and keeps it out of the check, which reads "not determined" (29 Sep, §10). Result `model.json` SHA-256 `c56b3f8a…0f54741`, in the case ledger |
 | Adapter | generic USB 2.0 SATA bridge, Super Top M6116 (`14cd:6116`), 480 Mbit/s, own power supply |
 | Image | first 20 GiB of the drive, SHA-256 `c4098d59cff3973de9d281ba5613005ba52165743c36edfcf56f61aad8f4e610` (23 Sep 2026) |
 
@@ -1540,10 +1540,14 @@ tool's own parser reads, field by field.
   to a USB stick from the recorder's menu (one file, hashed). ~~Then `identify-model` over
   the whole of drive 1 for the unit's serial, DevID and MAC.~~ **Run 29 Sep: none of them
   on the platter, and no model string** (drive 1 row, §2).
-- `identify-model` counts any match of a model pattern as a candidate, even one in binary
+- ~~`identify-model` counts any match of a model pattern as a candidate, even one in binary
   data: on drive 1, `HRG745` (6 characters, Honeywell's pattern) turned up by chance in
-  76.67 GiB and made the check say "differ". A candidate whose surrounding bytes are not
-  text should be reported as a likely chance match and kept out of the check.
+  76.67 GiB and made the check say "differ".~~ **Fixed 29 Sep:** a candidate seen once and
+  8 characters or fewer is listed as a possible chance match and kept out of the check.
+  "HRG" and three digits has about a 1-in-3e11 chance at any byte of random data, and the
+  search covered 8.2e10 bytes. Real recorder models are longer: `CP-UNR-104F1` has 12
+  characters and `DS-7B08HUHI-K1` 14. Drive 1's case report was regenerated and reads
+  "not determined".
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
 - ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** ~~Still to run on the real images.~~ **Run 29 Sep: agree on both drives' images and on five vendor-made files (§9a).**
 - ~~The ffmpeg cross-check on drive 1's own `.dav` files.~~ **Run 29 Sep (§8g):** 719,097 of 719,097 emitted frames identical. It found one thing to fix: after a frame-counter gap the DHAV date and millisecond counter can disagree by up to ~3 s (6 files, 227 frames). Frames after such a gap should carry that wider time uncertainty in the timeline and report; today they do not.

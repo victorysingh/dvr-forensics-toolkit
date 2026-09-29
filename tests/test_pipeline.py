@@ -3097,6 +3097,28 @@ def test_model(tmp: str) -> None:
           and v_none["verdict"] == "not determined" and "does not show" in v_none["detail"],
           f"{v_found} {v_stale} {v_none}")
 
+    # a short model-shaped string seen once is a possible chance match, not a reading
+    ms_c = M.ModelSearch()
+    blk = bytearray(4096)
+    blk[100:108] = b"?HRG745/"                           # as found on the CP Plus drive
+    for at in (1000, 2000):
+        blk[at:at + 16] = b" DS-7B08HUHI-K1 "
+    ms_c.feed(0, bytes(blk))
+    flags = {c["model"]: c["possible_chance_match"] for c in ms_c.result({})["candidates"]}
+
+    def platter_verdict(cands):
+        res = M.check([unit], {"searched": {"bytes": 82_323_397_632}, "candidates": cands}, dahua)
+        return next(c for c in res if c["check"].startswith("model strings on the platter"))
+    hrg = {"model": "HRG745", "vendor": "Honeywell", "family": "honeywell", "kind": "recorder",
+           "count": 1, "offsets": [1], "context": ""}
+    cpp = dict(hrg, model="CP-UNR-104F1", vendor="CP Plus", family="cpplus")
+    v_hrg, v_both = platter_verdict([hrg]), platter_verdict([cpp, hrg])
+    check("a short model string seen once is listed as a possible chance match and does not "
+          "make the check 'differ'; a real one still agrees beside it",
+          flags == {"HRG745": True, "DS-7B08HUHI-K1": False}
+          and v_hrg["verdict"] == "not determined" and "chance" in v_hrg["detail"]
+          and v_both["verdict"] == "agree", f"{flags} {v_hrg} {v_both}")
+
     # the same search over worker processes (search_blocks) - what a whole drive needs
     import random
     disk = bytearray(random.Random(26150).randbytes(64 * 4096))
