@@ -77,8 +77,32 @@ def _crop(band: tuple[float, float, float, float]) -> str:
     return (f"crop=iw*{x2 - x1:.4f}:ih*{y2 - y1:.4f}:iw*{x1:.4f}:ih*{y1:.4f}")
 
 
+# How a crop is prepared for Tesseract.  Which one reads is measured during
+# calibration, never assumed:
+#   normal   the crop as it is
+#   negated  inverted - Tesseract is trained on dark text on light paper, and
+#            DVR OSD is usually the other way round
+# A morphological top-hat (the crop minus its opening), meant for thin white
+# text on a bright wall or sky, was tried on synthetic frames on 29 Sep and
+# did not separate text from background better than these two (Otsu
+# balanced error 24.1% vs 23.3% on a bright sky, 21.8% vs 24.2% on a
+# textured wall): there the text is a few grey levels above the sky, and no
+# filter of this kind creates contrast that is not there.  Not added; the
+# case needs real frames (VALIDATION_REPORT 8c).
+MODES = ("normal", "negated")
+
+
+def filters(band: tuple[float, float, float, float], fps: float, mode: str) -> str:
+    """The ffmpeg filter graph for one band in one mode."""
+    vf = [_crop(band), f"fps={fps}", "format=gray",
+          f"scale=iw*{UPSCALE}:ih*{UPSCALE}:flags=lanczos"]
+    if mode == "negated":
+        vf.append("negate")
+    return ",".join(vf)
+
+
 def sample(clip: str, band: tuple[float, float, float, float], out_dir: str,
-           frames: int = FRAMES, window_s: int = WINDOW_S, negate: bool = False) -> list[str]:
+           frames: int = FRAMES, window_s: int = WINDOW_S, mode: str = "normal") -> list[str]:
     """Write up to `frames` upscaled greyscale crops of one band to `out_dir`.
 
     Decoding stops after `window_s` seconds of footage, so this reads the head
@@ -86,17 +110,9 @@ def sample(clip: str, band: tuple[float, float, float, float], out_dir: str,
     yields nothing and is not an error: on the CP Plus drive 221 outside-index
     streams have no keyframe at all (docs/VALIDATION_REPORT.md section 7)."""
     fps = max(frames / float(window_s), 0.01)
-    vf = [_crop(band), f"fps={fps}", "format=gray",
-          f"scale=iw*{UPSCALE}:ih*{UPSCALE}:flags=lanczos"]
-    if negate:
-        # Tesseract is trained on dark text on light paper; DVR OSD is the
-        # other way round, and inverting is sometimes the difference between
-        # a clean read and nothing at all.  Which polarity wins is measured
-        # during calibration, not assumed.
-        vf.append("negate")
     fmt = ["-f", codec_of(clip)] if codec_of(clip) else []
     cmd = ["ffmpeg", "-v", "quiet", "-t", str(window_s), *fmt, "-i", clip,
-           "-vf", ",".join(vf), "-frames:v", str(frames),
+           "-vf", filters(band, fps, mode), "-frames:v", str(frames),
            os.path.join(out_dir, "f%03d.pgm")]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     return sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir)
@@ -116,12 +132,18 @@ def ocr(image: str, chars: str) -> str:
     return (r.stdout or "").strip()
 
 
-def _read_band(clip: str, band_name: str, chars: str, frames: int, negate: bool,
+def _read_band(clip: str, band_name: str, chars: str, frames: int, mode: str,
                window_s: int = WINDOW_S) -> list[str]:
     with tempfile.TemporaryDirectory(prefix="osd_") as tmp:
         return [ocr(p, chars) for p in
                 sample(clip, BANDS[band_name], tmp, frames=frames,
-                       window_s=window_s, negate=negate)]
+                       window_s=window_s, mode=mode)]
+
+
+def layout_mode(layout: dict) -> str:
+    """The image mode a layout chose; a layout saved before modes existed
+    carries only `negate`."""
+    return layout.get("mode") or ("negated" if layout.get("negate") else "normal")
 
 
 def calibrate(clips: list[str], window_s: int = WINDOW_S, log=print) -> dict:
@@ -135,30 +157,40 @@ def calibrate(clips: list[str], window_s: int = WINDOW_S, log=print) -> dict:
     # One group of readings per stream per band: a band is scored on whether it
     # agrees with itself within a stream, never across streams (two streams are
     # two cameras with two different titles).
-    per_band: dict[str, list[list[str]]] = {b: [] for b in BANDS}
-    polarity: dict[str, list[str]] = {"normal": [], "negated": []}
+    # Scored per mode: a band that reads in one mode and not the other must
+    # not have its score diluted by the mode that failed (a band read only
+    # when inverted used to average exactly the 0.5 bar, and anything less
+    # than a perfect read in that mode fell below it and was rejected).
+    per_mode: dict[str, dict[str, list[list[str]]]] = {m: {b: [] for b in BANDS} for m in MODES}
     for clip in clips[:CALIBRATE_CLIPS]:
         for band in BANDS:
-            for neg in (False, True):
-                got = _read_band(clip, band, TITLE_CHARS + CLOCK_CHARS,
-                                 CALIBRATE_FRAMES, neg, window_s)
-                per_band[band].append(got)
-                polarity["negated" if neg else "normal"] += got
-    title = pick_band(per_band, "title")
-    clock = pick_band(per_band, "clock")
-    # Count readings that came out as *something* - a parseable clock or a
-    # plausible title.  (Not vote_title([r]): one reading can never reach the
-    # agreement threshold, so that would have scored titles at zero and decided
-    # polarity on the clock alone.)
+            for mode in MODES:
+                per_mode[mode][band].append(
+                    _read_band(clip, band, TITLE_CHARS + CLOCK_CHARS, CALIBRATE_FRAMES, mode,
+                               window_s))
+
+    def best(kind: str) -> Optional[dict]:
+        # the band and mode that read best; a tie keeps the simpler mode
+        picks = [(p, m) for m in MODES if (p := pick_band(per_mode[m], kind))]
+        if not picks:
+            return None
+        p, m = max(picks, key=lambda t: (t[0]["score"], -MODES.index(t[1])))
+        return dict(p, mode=m)
+
+    title, clock = best("title"), best("clock")
+    # Readings that came out as *something* - a parseable clock or a plausible
+    # title - per mode, for the audit trail.  (Not vote_title([r]): one reading
+    # can never reach the agreement threshold.)
     readable = lambda rs: sum(1 for r in rs if parse_osd_clock(r) or normalise_title(r))
-    neg_better = readable(polarity["negated"]) > readable(polarity["normal"])
+    counts = {m: sum(readable(g) for groups in per_mode[m].values() for g in groups)
+              for m in MODES}
+    mode = ((title or clock or {}).get("mode")
+            or max(MODES, key=lambda m: (counts[m], -MODES.index(m))))
     out = {"clips_used": clips[:CALIBRATE_CLIPS], "frames_per_band": CALIBRATE_FRAMES,
-           "title": title, "clock": clock, "negate": neg_better,
-           "readable_frames": {"normal": readable(polarity["normal"]),
-                               "negated": readable(polarity["negated"])}}
-    log(f"  calibration   title band: {title['band'] if title else 'none found'}"
-        f"   clock band: {clock['band'] if clock else 'none found'}"
-        f"   polarity: {'negated' if neg_better else 'normal'}")
+           "title": title, "clock": clock, "mode": mode, "negate": mode == "negated",
+           "readable_frames": counts}
+    log(f"  calibration   title: {title['band'] + ', ' + title['mode'] if title else 'none found'}"
+        f"   clock: {clock['band'] + ', ' + clock['mode'] if clock else 'none found'}")
     return out
 
 
@@ -172,16 +204,17 @@ def read_clip(clip: str, layout: dict, container_start: Optional[datetime],
     the frame's own offset into the stream."""
     out: dict = {"clip": os.path.basename(clip), "label": None,
                  "clock": {"verdict": "not compared", "detail": "no OSD reading"}}
-    neg = bool(layout.get("negate"))
+    mode = layout_mode(layout)
     if layout.get("title"):
-        readings = _read_band(clip, layout["title"]["band"], TITLE_CHARS, frames, neg,
-                              window_s)
+        readings = _read_band(clip, layout["title"]["band"], TITLE_CHARS, frames,
+                              layout["title"].get("mode", mode), window_s)
         out["title_readings"] = readings
         out["label"] = vote_title(readings)
     if not layout.get("clock"):
         return out
     band = layout["clock"]["band"]
-    readings = _read_band(clip, band, CLOCK_CHARS, frames, neg, window_s)
+    readings = _read_band(clip, band, CLOCK_CHARS, frames, layout["clock"].get("mode", mode),
+                          window_s)
     out["clock_readings"] = readings
     checks = []
     step = window_s / float(frames)

@@ -1868,6 +1868,33 @@ def test_osd_rules() -> None:
     check("a two-digit year is not read as the first century",
           R.parse_osd_clock("24-08-30 14:23:45") is None)
 
+    # The two clocks the first real run could not read (VALIDATION_REPORT 8c).
+    p = R.parse_osd_clock("28-07-2024 Sun 02:07:20")
+    check("a Hikvision clock with its weekday reads, and the weekday fits the date",
+          p is not None and p["readings"] == [datetime(2024, 7, 28, 2, 7, 20)]
+          and p["weekday"] == "Sun" and p["weekday_checked"] and not p["weekday_disagrees"], str(p))
+    p = R.parse_osd_clock("01/05/2026 01:20:26 PM")
+    check("a CP Plus 12-hour clock: PM makes it 13:20, and 01/05 stays two dates",
+          p is not None and p["twelve_hour"] == "PM" and p["ambiguous"]
+          and set(p["readings"]) == {datetime(2026, 5, 1, 13, 20, 26),
+                                     datetime(2026, 1, 5, 13, 20, 26)}, str(p))
+    p = R.parse_osd_clock("01/05/2026 Fri 01:20:26 PM")
+    check("the weekday the recorder painted chooses between the two dates",
+          p is not None and p["readings"] == [datetime(2026, 5, 1, 13, 20, 26)]
+          and not p["ambiguous"] and p["weekday_checked"], str(p))
+    p = R.parse_osd_clock("28-07-2024 Mon 02:07:20")
+    check("a weekday that fits no reading is reported, not trusted over the digits",
+          p is not None and p["weekday_disagrees"]
+          and p["readings"] == [datetime(2024, 7, 28, 2, 7, 20)], str(p))
+    check("12 AM is midnight, 12 PM is noon, and 13 PM is not a clock",
+          R.parse_osd_clock("2024-08-30 12:05:00 AM")["readings"] == [datetime(2024, 8, 30, 0, 5)]
+          and R.parse_osd_clock("2024-08-30 12:05:00 PM")["readings"]
+          == [datetime(2024, 8, 30, 12, 5)]
+          and R.parse_osd_clock("2024-08-30 13:05:00 PM") is None)
+    check("digit-shaped letters among the digits are repaired, a weekday's letters are not",
+          R.parse_osd_clock("2O24-O8-3O Fri 14:23:45")["readings"]
+          == [datetime(2024, 8, 30, 14, 23, 45)])
+
     c = R.clock_check(datetime(2024, 8, 30, 14, 23, 45), datetime(2024, 8, 30, 14, 23, 43))
     d = R.clock_check(datetime(2024, 8, 30, 14, 23, 45), datetime(2024, 8, 30, 14, 20, 43))
     check("the picture and the container agree within tolerance, and disagree outside it",
@@ -1890,7 +1917,7 @@ def test_osd_reader(tmp: str) -> None:
     start = datetime(2024, 8, 30, 14, 0, 0)
     painted = {"ps-00001": "Camera 01", "ps-00002": "Parking"}
 
-    def fake_sample(clip, band, out_dir, frames=6, window_s=30, negate=False):
+    def fake_sample(clip, band, out_dir, frames=6, window_s=30, mode="normal"):
         # The recorder puts the title bottom-left and the clock top-right; every
         # other band holds picture, which reads as nothing.
         sid = os.path.splitext(os.path.basename(clip))[0]
@@ -1971,6 +1998,33 @@ def test_osd_reader(tmp: str) -> None:
           r2["streams"][0]["clock"]["verdict"] == "disagrees"
           and r2["streams"][0]["clock"]["offset_s"] == 400.0,
           str(r2["streams"][0]["clock"]))
+
+    # A recorder whose text reads only inverted, and not in every frame: the
+    # band must not be rejected because the other mode read nothing.
+    def negated_only(clip, band, out_dir, frames=6, window_s=30, mode="normal"):
+        got = fake_sample(clip, band, out_dir, frames, window_s, mode)
+        for k, p in enumerate(got):
+            if mode != "negated" or k == 0:           # one frame in each stream misread
+                with open(p, "w", encoding="utf-8") as fh:
+                    fh.write("")
+        return got
+
+    O.sample, O.ocr, O.have_tools = negated_only, fake_ocr, lambda: None
+    try:
+        r3 = O.run(clips, case, frames=4, log=lambda *a: None)
+    finally:
+        O.sample, O.ocr, O.have_tools = real
+    by3 = {s["clip"]: s for s in r3["streams"]}
+    check("a band that reads only inverted is found - its score is not diluted by the mode "
+          "that read nothing", r3["layout"]["title"] is not None
+          and r3["layout"]["title"]["band"] == "bottom_left"
+          and r3["layout"]["title"]["mode"] == "negated"
+          and by3["ps-00002.ps"]["label"]["title"] == "Parking", str(r3["layout"]))
+    check("the filter graph: the crop in grey, upscaled; inverted only in the negated mode",
+          O.filters(O.BANDS["top_left"], 0.2, "negated").endswith("negate")
+          and not O.filters(O.BANDS["top_left"], 0.2, "normal").endswith("negate"))
+    check("a layout saved before modes existed still reads (negate -> negated)",
+          O.layout_mode({"negate": True}) == "negated" and O.layout_mode({}) == "normal")
 
 
 def _h26x_stream(rng, n: int, codec: str = "h265", gop: int = 25,

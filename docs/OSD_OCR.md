@@ -85,6 +85,14 @@ For each sampled frame the reader compares the clock in the picture with
 | `read, not compared` | the picture's clock was read; the container gave no date for this stream |
 | `not compared` | no clock was read |
 
+The clock is read with its letters: recorders paint a weekday (Hikvision
+`28-07-2024 Sun 02:07:20`) or AM/PM (CP Plus `01/05/2026 01:20:26 PM`). AM/PM
+gives the 24-hour time. The weekday is a second statement by the recorder about
+the same day, so of the dates the digits allow, only those falling on it are
+kept; a weekday that fits none is reported and the digits are kept. Only the
+container's date, or this weekday, may choose between two readings of an
+ambiguous date.
+
 This measures the two routes against each other. It does **not** measure the
 recorder against true time: only an examiner who read the unit's zone and
 compared its display with a trusted clock at seizure can do that
