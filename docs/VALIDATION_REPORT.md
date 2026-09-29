@@ -18,14 +18,14 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 547 pass, 0 fail: 524 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 548 pass, 0 fail: 525 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
-| Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles): a person in **32 of 57**, faces 12 of 27, vehicles 8 of 12; on CAVIAR **777 of 1,089** labelled people (the previous tiled models: 543). False alarms: 5 frames, all a hand holding a board up to the lens. A lead is worth reviewing; an empty list still proves nothing |
+| Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4): a person in **39 of 57**, faces 12 of 27, vehicles 8 of 12; on CAVIAR **810 of 1,089** labelled people (the previous tiled models: 543). False alarms: 5 frames, all a hand holding a board up to the lens. A lead is worth reviewing; an empty list still proves nothing |
 | OSD reader (optional) | rules and orchestration tested; **measured** on six recorders' own files, 36 painted clocks: the clock found on 3 of 6 recorders, 5 frames read exactly, 9 wrong, 22 unread; no title right (§8c). A clock reading is a lead to check, not a time source |
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
@@ -525,7 +525,8 @@ threshold 0.5. Each set-A cell gives frames found, then false alarms:
 |---|---|---|---|---|---|---|---|
 | Classic, untiled (28 Sep) | 0 · 0 | 3 · 0 | 4 · 0 | 341 | 0 / 134 / 207 | 1 of 11 | 0.05 s |
 | Classic, 3 x 3 tiles (above) | 24 · 1 | 11 · 0 | 5 · 0 | 543 | 19 / 297 / 227 | 4 of 11 | 0.40 s |
-| **YOLOX-S + YuNet, 2 x 2 tiles (new default)** | **32 · 5** | **12 · 0** | **8 · 0** | **777** | **74 / 465 / 238** | 2 of 11 | 0.62 s |
+| YOLOX-S + YuNet, 2 x 2 tiles, all objects at 0.5 | 32 · 5 | 12 · 0 | 8 · 0 | 777 | 74 / 465 / 238 | 2 of 11 | 0.62 s |
+| **The same, people at 0.4 (the default since 29 Sep evening)** | **39 · 5** | **12 · 0** | **8 · 0** | **810** | **83 / 487 / 240** | 2 of 11 | 0.62 s |
 | YOLOX-S + YuNet, whole frame (`--tiles 1`) | 10 · 4 | 12 · 0 | 8 · 0 | 752 | 68 / 446 / 238 | 0 of 11 | 0.24 s |
 
 (The height bins hold 297, 536 and 256 people.) The model times are from the
@@ -580,8 +581,21 @@ What the numbers say:
   0.2 to 0.5, the hand again. At 0.4 the tool would find 39 of 57 people on
   set A and 810 of 1,089 on CAVIAR, with no more frames falsely flagged on
   either.
-- Vehicles at 0.4 raise 5 false alarms on set A. **A per-class threshold
-  (people at 0.4) is the next step**, and both sets support it.
+- Vehicles at 0.4 raise 5 false alarms on set A, so the threshold is now
+  per class (`class_min` in `analytics/models.py`). **People are at 0.4**;
+  vehicles and bags stay at 0.5, faces at 0.7. Measured with the tool itself:
+  - Set A: people 39 of 57 (32 at 0.5), still the same 5 false alarms (the
+    hand). Faces and vehicles are unchanged.
+  - CAVIAR: 810 of 1,089 people (777), and 209 of 258 frames with a person
+    (202). A person is still reported in 2 of the 11 frames with nobody
+    labelled.
+  - 11 more CAVIAR boxes match no labelled person (51 against 40). Looked at
+    by eye, 6 are real people: two heads entering at the corridor's bottom
+    edge, a distant walker at its far end, and leg-only boxes of people who
+    are also boxed whole. The other 5 are the reception desk again, all in
+    frames that have a real person too.
+  - 0.4 was first seen on set A's sweep; CAVIAR, which played no part in
+    choosing, confirms it.
 
 **Reproducing.**
 - `python -m validate.analytics_eval sample ... --models yolox`, then

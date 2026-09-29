@@ -127,14 +127,13 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
     evenly to `frames` per clip."""
     from analytics import detect
     clips = [clips] if isinstance(clips, str) else list(clips)
-    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS
+    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, threshold, thresholds
     model_set = model_set or DEFAULT_SET
     models = detect.load_models(model_set)
     ms = MODEL_SETS[model_set]
     tiles = ms["tiles"] if tiles is None else tiles
     scale = detect.scale_for(model_set, tiles)
     w, h = detect.DECODE_W * scale, detect.DECODE_H * scale
-    tool = (ms["faces_min"], ms["objects_min"])
     low = (min(SWEEP["face"]), min(SWEEP["objects"]))
     os.makedirs(os.path.join(out, "frames"), exist_ok=True)
     rows, hits, per_clip, n = [], [], [], 0
@@ -164,7 +163,7 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
             # every box down to SWEEP's lowest; the tool's are a subset
             any_score = detect.detect_frame(models, rgb, big, tiles, low)
             dets = [dict(d) for d in any_score
-                    if d["score"] >= (tool[0] if d["label"] == "face" else tool[1])]
+                    if d["score"] >= threshold(model_set, d["label"])]
             x = {"frame": n, "clip": ci, "index": idx, "detections": dets, "any_score": any_score}
             hits.append(x)
             clip_hits.append(x)
@@ -197,7 +196,7 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
     res = {"clips": per_clip, "frames": n,
            "model_set": model_set,
            "models": {job: MODELS[ms[job]]["sha256"] for job in ("faces", "objects")},
-           "thresholds": {"faces": tool[0], "objects": tool[1]},
+           "thresholds": thresholds(model_set),
            "any_score_down_to": {"face": low[0], "objects": low[1]},
            "tiles": tiles, "decoded_at": f"{w} x {h}",
            "detections": hits}

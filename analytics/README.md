@@ -83,11 +83,13 @@ refused.
   to review in the footage itself.
 - **Not proof of absence.** Scored against 287 frames of real recorder
   footage labelled by eye (`docs/VALIDATION_REPORT.md` §8a), it reports a
-  person in 32 of the 57 frames that had one. The first version found
+  person in 39 of the 57 frames that had one. The first version found
   none.
-  - On CAVIAR CCTV footage, which played no part in choosing, it finds 777
+  - On CAVIAR CCTV footage, which played no part in choosing, it finds 810
     of 1,089 labelled people (`python -m validate.caviar_eval`).
   - It still misses distorted and distant people.
-  - The static rule can remove a person who sits still. Measure it on your own
+  - The static rule can remove a person who sits still.
+
+  Measure it on your own
   footage with `python -m validate.analytics_eval` (sample, label, score,
   sweep).
