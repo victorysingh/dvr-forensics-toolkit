@@ -72,8 +72,13 @@ VENDOR_MATRIX = {
                 "basis": "plugins/uniview.py, from the storage driver of Uniview firmware "
                          "NVR301-04LS3-W B3612.1.21.220408 (static disassembly); no Uniview "
                          "disk read by the team"},
-    "Matrix": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
-               "media": "none", "basis": "firmware string signature only"},
+    "Matrix": {"family": "Matrix SATATYA (a Linux file tree of .stm files; filesystem not "
+                         "documented)",
+               "parser": "Matrix", "parser_status": "spec_only", "media": "none",
+               "basis": "plugins/matrix.py, from Matrix's own documents (the CameraNN/date/hour "
+                        "tree and file naming); reads ext2/3/4, incl. one RAID 1 mirror; the "
+                        ".stm container is not published and is extracted as stored; no Matrix "
+                        "disk read by the team"},
 }
 
 

@@ -170,7 +170,8 @@ Full account: `VALIDATION_REPORT.md`.
   - Honeywell: `spec_only`.
   - Uniview: `spec_only`, from the storage driver in Uniview's own firmware.
   - TP-Link: `detected_not_parsed`; its index is read when plain (from the VIGI firmware), but no footage is placed.
-  - Godrej, Matrix: `detected_not_parsed`.
+  - Matrix: `spec_only`, from Matrix's own documents (its recording tree).
+  - Godrej: `detected_not_parsed`.
 - **The route to `validated`** is built (`validate-export`, USER_MANUAL
   §3.4d). The evidence drives must not go back into their recorders, so the
   export comes from a **reference disk**: a spare disk that the same recorder
@@ -248,11 +249,14 @@ Three findings go beyond the published work:
 | Honeywell | `spec_only` | drop-in plugin from Yoon & Hwang (DFRWS USA 2026); older units were Dahua-built until April 2022, so the Dahua parser may apply |
 | Uniview | `spec_only` | drop-in plugin from the storage driver in Uniview's own firmware (static disassembly); footage found with or without its index (VALIDATION_REPORT §8f) |
 | TP-Link | `detected_not_parsed` | drop-in plugin from the VIGI firmware: format sector and index detected, a plain index read (recordings, system log); footage not placed - `carve-annexb`; an encrypted index is reported as such |
-| Godrej, Matrix | `detected_not_parsed` | brand strings and model numbering; video recoverable with no parser by `carve-annexb`; sourced first answers in `OEM_COMPARISON.md` §5.1 |
+| Matrix | `spec_only` | drop-in plugin from Matrix's own documents: the CameraNN/date/hour tree of .stm files, read on ext2/3/4 (incl. one RAID 1 mirror); .stm extracted as stored (VALIDATION_REPORT §8h) |
+| Godrej | `detected_not_parsed` | brand strings and model numbering; video recoverable with no parser by `carve-annexb`; sourced first answers in `OEM_COMPARISON.md` §5.1 |
 
 **Four platforms are read from real media (three of the eight, plus
 HeimVision from a public NIST image), one more from published research, and
-one (Uniview, plus TP-Link's index) from the vendor's own firmware;
+one (Uniview, plus TP-Link's index) from the vendor's own firmware, and
+one (Matrix) from the vendor's own documents - seven of the eight parsed or
+their index read;
 all eight are detected; and footage can be recovered from any vendor that
 stores standard H.264/H.265.** That is our honest answer to "five to six".
 
@@ -305,8 +309,8 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
    and white text on bright backgrounds (VALIDATION_REPORT §8c).
 4. **Speed:** one regex pass, threaded hashes, and a process pool.
 5. **Any real disk** from Honeywell, Uniview or TP-Link: run the plugin
-   (`parse --vendor ...`) - the first real disk is its test. From Godrej or
-   Matrix: run `survey` and `carve-annexb`, then write a plugin.
+   (`parse --vendor ...`) - the first real disk is its test. The same for
+   Matrix. From Godrej: run `survey` and `carve-annexb`, then write a plugin.
 
 ## 12. Deliverables named in the PS
 
