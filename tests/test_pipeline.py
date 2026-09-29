@@ -2242,6 +2242,30 @@ def test_parked_vehicles() -> None:
           weak["weak"] and not counted(weak) and not strong["weak"] and counted(strong))
 
 
+def test_analytics_apply(tmp: str) -> None:
+    """`apply` scores a set sampled earlier under today's rules from its
+    stored boxes alone - no video, no frames."""
+    print("\n[analytics: apply today's rules to stored boxes]")
+    from validate import analytics_eval as E
+    out = os.path.join(tmp, "apply_set")
+    os.makedirs(out, exist_ok=True)
+    car = {"label": "car", "score": 0.35, "box": [0.1, 0.6, 0.3, 0.8]}          # parked, under 0.5
+    walker = lambda f: {"label": "person", "score": 0.45, "box": [0.1 * f, 0.1, 0.1 * f + 0.1, 0.4]}
+    stored = [{"frame": f, "clip": 0, "detections": [], "any_score": [dict(car), walker(f)]}
+              for f in range(6)]
+    json.dump({"model_set": "yolox", "clips": [{"clip": "a.dav"}], "detections": stored},
+              open(os.path.join(out, "detections.json"), "w", encoding="utf-8"))
+    E.apply(out, log=lambda *a: None)
+    det = json.load(open(os.path.join(out, "detections.json"), encoding="utf-8"))
+    first = det["detections"][0]["detections"]
+    check("apply: the parked car is kept as a weak, static box and reported once as a parked "
+          "vehicle; the moving person at 0.45 counts; the sampled original is kept",
+          len(det["clips"][0]["parked_vehicles"]) == 1 and det["clips"][0]["parked_vehicles"][0]["frames"] == 6
+          and any(d["label"] == "car" and d["weak"] and d["static"] for d in first)
+          and any(d["label"] == "person" and not d["weak"] and not d["static"] for d in first)
+          and os.path.exists(os.path.join(out, "detections.sampled.json")), json.dumps(first))
+
+
 def test_caviar_eval(tmp: str) -> None:
     """Scoring on CAVIAR: the ground truth read from its XML, a person found
     by box overlap, a static box not counted, and boxes over nobody counted
@@ -4350,6 +4374,7 @@ def main() -> int:
         test_analytics_models()
         test_caviar_eval(tmp)
         test_parked_vehicles()
+        test_analytics_apply(tmp)
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)
