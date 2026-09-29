@@ -304,18 +304,19 @@ The existing suite must still pass.
 
 ## 9. Demo data
 
-Case folders ready on JP's machine: `C:\Users\JAIPREET SINGH\150\demo\` (hard
-links to the rehearsal cases, so they take no extra disk):
+Case folders ready on JP's machine: `C:\Users\JAIPREET SINGH\150\demo\`,
+copies of the rehearsal cases. The large video files (R1's extracted
+`.h265`, R2's carved streams and MP4) are hard links to the rehearsal
+copies, to save disk: read them, never write to them.
 
 | Case | What it has | Screens it fills |
 |---|---|---|
 | **R1** (NIST HeimVision E01, 150 GB) | scan (triage, first 4 GiB), vendor HeimVision 99.5%, parse (806 files, 4 cameras), 24 h timeline, extraction (1.3 M frames, 615 MB), s.63 certificate draft, CASE/UCO export, 8 custody entries | dashboard, evidence, vendors, recordings, timeline, custody, exports |
-| **R2** (real Dahua `.dav`, 2017) | scan, DHAV carve (2,042 frames), extracted stream, **playable NIST MP4**, certificate | recovered + video player, exports |
+| **R2** (real Dahua `.dav`, 2017, a fisheye camera) | scan, DHAV carve (2,042 frames), extracted stream, **playable NIST MP4**, certificate, **AI detections** (YOLOX-S + YuNet, 29 Sep: a person in 9 of 48 frames, 6 thumbnails) | recovered + video player, AI leads, exports |
 | **SAMPLE** | a small sample case with a carve and a device record | empty states, a second case |
 
-**Not in any case yet:** AI detections, OSD and motion activity. To fill the
-AI screen for the demo, run the analytics on R2's carved stream (about 2
-minutes, tiled; needs the analytics layer from `analytics/README.md`):
+**Not in any case yet:** OSD titles and motion activity. The AI detections
+in R2 came from:
 
 ```bash
 python cli.py analyse-video --out "C:/Users/JAIPREET SINGH/150/demo/R2" --fps 1
