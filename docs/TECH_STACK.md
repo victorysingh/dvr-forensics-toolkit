@@ -159,7 +159,11 @@ but could not read a stream (`VALIDATION_REPORT.md` §9a).
 
 ## Packaging
 
-- **PyInstaller** one-file builds per platform; AppImage for Linux.
+- **PyInstaller** one-file builds per platform; AppImage for Linux. **Built:**
+  `packaging/ps26150.spec` → `ps26150-dvr.exe` (about 11 MB, no Python
+  needed), with drop-in plugins read from a `plugins\` folder next to it;
+  build steps and checks in `packaging/README.md`. The Linux build and the
+  AppImage are not made yet.
 - Vendor all wheels into the repo for air-gapped installation — a forensic
   workstation cannot `pip install`.
 - Code-signed builds, matching the offline/intel-agency profile.
