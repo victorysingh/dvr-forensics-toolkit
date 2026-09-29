@@ -412,6 +412,13 @@ def render(case: dict, examiner_notes: str = "") -> str:
                   [[h["clip"], h["t_s"], ", ".join(f"{d['label']} {d['score']:.2f}"
                                                   for d in h["detections"])]
                    for h in an["top"][:30]]))
+        if an.get("parked"):
+            add("<h3>Parked vehicles (a lead of their own)</h3><p>A car, bus or truck seen in "
+                "the same place through much of a clip: reported once per place, not counted "
+                "above as a moving vehicle.</p>")
+            add(table(["Clip", "Vehicle", "Best score", "Frames seen", "From (s)", "To (s)"],
+                      [[s["clip"], s["label"], f"{s['best']:.2f}", s["frames"], s["first"],
+                        s["last"]] for s in an["parked"][:30]]))
 
     osd = case.get("osd")
     if osd:

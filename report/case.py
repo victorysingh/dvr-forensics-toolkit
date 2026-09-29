@@ -316,7 +316,9 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
             "frames_analysed": sum(c["frames_analysed"] for c in an.get("clips", [])),
             "top": hits[:100],
             "thumbnails": [dict(t, clip=c["clip"]) for c in an.get("clips", [])
-                           for t in c.get("thumbnails", [])][:60]}
+                           for t in c.get("thumbnails", [])][:60],
+            "parked": [dict(s, clip=c["clip"]) for c in an.get("clips", [])
+                       for s in c.get("parked_vehicles", [])][:100]}
 
     osd = _load(j("analytics", "osd.json"))
     if osd:

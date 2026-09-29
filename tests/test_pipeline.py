@@ -2164,6 +2164,38 @@ def test_analytics_models() -> None:
           == (0.4, 0.5, 0.5, 0.7, 0.5, 0.8))
 
 
+def test_parked_vehicles() -> None:
+    """A car that stays in one place is a parked vehicle, reported once per
+    place; a car box under the reporting threshold is kept only for that, and
+    is not counted as a vehicle."""
+    print("\n[analytics: parked vehicles]")
+    from analytics.models import keep_threshold, mark_weak, threshold
+    from analytics.static import counted, flag_static, parked_spots
+    car = lambda s, box, label="car": {"label": label, "score": s, "box": box}
+    spot = [0.10, 0.60, 0.30, 0.80]
+    hits = [{"t_s": float(t), "detections": [car(0.3 + 0.02 * t, spot, "truck" if t == 2 else "car"),
+                                             car(0.45, [0.5, 0.1, 0.6, 0.2], "bicycle"),
+                                             car(0.8, [0.05 * t, 0.2, 0.05 * t + 0.1, 0.3])]}
+            for t in range(6)]
+    for h in hits:                                  # the bicycle stays too, the third car moves
+        h["detections"][1]["box"] = [0.5, 0.1, 0.6, 0.2]
+    flag_static(hits, 6)
+    spots = parked_spots(hits)
+    check("a car seen in one place is one parked vehicle (the frame where it was once called a "
+          "truck is not: the static rule is per label); a moving car and a static bicycle are not "
+          "parked vehicles",
+          len(spots) == 1 and spots[0]["label"] == "car" and spots[0]["frames"] == 5
+          and spots[0]["first"] == 0.0 and spots[0]["last"] == 5.0 and spots[0]["best"] == 0.4,
+          str(spots))
+    check("a car box is kept from 0.3 for parked vehicles but counts as a vehicle only from 0.5; "
+          "people keep 0.4; the classic set keeps 0.5 for everything",
+          (keep_threshold("yolox", "car"), threshold("yolox", "car"), keep_threshold("yolox", "person"),
+           keep_threshold("yolox", "bicycle"), keep_threshold("classic", "truck")) == (0.3, 0.5, 0.4, 0.5, 0.5))
+    weak, strong = mark_weak("yolox", [car(0.35, spot), car(0.6, spot)])
+    check("a box under its reporting threshold is weak and not counted; one over it is",
+          weak["weak"] and not counted(weak) and not strong["weak"] and counted(strong))
+
+
 def test_caviar_eval(tmp: str) -> None:
     """Scoring on CAVIAR: the ground truth read from its XML, a person found
     by box overlap, a static box not counted, and boxes over nobody counted
@@ -4270,6 +4302,7 @@ def main() -> int:
         test_analytics_tiles()
         test_analytics_models()
         test_caviar_eval(tmp)
+        test_parked_vehicles()
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)

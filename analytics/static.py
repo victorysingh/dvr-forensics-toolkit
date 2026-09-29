@@ -45,7 +45,42 @@ def flag_implausible(hits: list[dict]) -> None:
 
 
 def counted(d: dict) -> bool:
-    return not d.get("static") and not d.get("implausible")
+    return not d.get("static") and not d.get("implausible") and not d.get("weak")
+
+
+# A parked car is static by definition, so the rule above removes it: on our
+# own drive the car parked in view all night was seen and then removed.  A car,
+# bus or truck that stays in one place is instead reported once per place, as
+# a parked vehicle - a lead of its own, apart from the moving vehicles counted
+# frame by frame.  Its boxes are kept from a lower score (analytics/models.py
+# parked_min): a box that comes back at the same place frame after frame is
+# stronger evidence than one box at that score.
+PARKED_LABELS = ("car", "bus", "truck")
+PARKED_PLACE_IOU = 0.5          # boxes this close are the same place
+
+
+def parked_spots(hits: list[dict], key: str = "t_s") -> list[dict]:
+    """Places where a static car, bus or truck was seen, strongest first:
+    label (the most common), box (the strongest), best score, the number of
+    frames, and the first and last hit's `key`."""
+    spots: list[dict] = []
+    for h in hits:
+        for d in h["detections"]:
+            if d["label"] not in PARKED_LABELS or not d.get("static"):
+                continue
+            s = next((s for s in spots if _iou(s["box"], d["box"]) >= PARKED_PLACE_IOU), None)
+            if s is None:
+                s = {"box": d["box"], "best": 0.0, "labels": {}, "seen": []}
+                spots.append(s)
+            if d["score"] > s["best"]:
+                s["best"], s["box"] = d["score"], d["box"]
+            s["labels"][d["label"]] = s["labels"].get(d["label"], 0) + 1
+            if not s["seen"] or s["seen"][-1] != h.get(key):
+                s["seen"].append(h.get(key))
+    out = [{"label": max(s["labels"], key=s["labels"].get), "box": s["box"],
+            "best": round(s["best"], 3), "frames": len(s["seen"]),
+            "first": s["seen"][0], "last": s["seen"][-1]} for s in spots]
+    return sorted(out, key=lambda s: -s["best"])
 
 
 def recount(result: dict) -> dict:
@@ -65,7 +100,9 @@ def recount(result: dict) -> dict:
                 flagged[label] = flagged.get(label, 0) + 1
         for k, v in c["frames_with"].items():
             totals[k] = totals.get(k, 0) + v
+        c["parked_vehicles"] = parked_spots(hits)
     result["frames_with_totals"] = totals
+    result["parked_vehicle_spots"] = sum(len(c["parked_vehicles"]) for c in result["clips"])
     result["flagged_not_counted"] = flagged
     result["implausible_rule"] = f"face box wider or taller than {MAX_FACE_SIDE:.0%} of the frame"
     return result
