@@ -1410,8 +1410,65 @@ alias.
 - Estimating clocks from daylight is not new (Sundial, EWSN 2009); reading it
   from a DVR's infrared switches is the application here.
 
-**Not yet run on our drives.** It needs days of the CP Plus unit's outdoor
-cameras (*Parking*, *Road View*) and the site's latitude and longitude.
+**Run on drive 1 (29 Sep): no infrared switch, so no estimate.**
+
+What was run:
+- Site: Bengaluru, 12.97 N 77.59 E.
+- Footage: four whole days, 14-17 Sep 2026 (recorder clock), of all three
+  cameras, *Road View 1*, *Road View 2* and *Parking*: 301 hourly recordings.
+- Extracted from the write-blocked drive with one `extract` call (the disk
+  parsed once), each recording with its manifest.
+- Sampled every 120 s: 8,632 samples, one series per camera.
+- `switches()` sorts everything it is given into one timeline, so two cameras
+  in one series would make switches of their own. Each camera was estimated
+  separately.
+
+| Camera | Samples | At or below the infrared threshold (chroma 4.0) | Switches | `estimate` |
+|---|---|---|---|---|
+| *Road View 1* | 2,878 | 1: a single grey decode at 11:54 on a sunny noon, not infrared | 0 dusk, 0 dawn | refused: needs a dusk and a dawn |
+| *Road View 2* | 2,878 | 0 (lowest 6.2) | 0 | refused |
+| *Parking* | 2,876 | 0 (lowest 5.3) | 0 | refused |
+
+**Why.** The cameras do have infrared: on 3 Sep at 22:08 both road cameras
+turned black and white for about 14 minutes (the AI sample frames, §8a),
+when the lighting went off. But the scene is lit all night, so at dusk the
+light never falls to the camera's threshold. Night chroma sits around
+7-9 (*Road View*) and 16 (*Parking*); daylight is 18-22. This is the limit
+stated above: a street-lit scene gives no switch.
+
+**Exploratory, not the method: the colour crossing.** The picture's
+colourfulness still follows the daylight: it rises near 06:00 and falls near
+18:30. `out/realchecks/daylight/lightlevel.py` takes each camera's first
+sustained crossing of the level midway between its night and day chroma:
+- a dawn after 03:00;
+- a dusk after 15:00, before the evening lights lift the chroma again.
+
+The tool's own `estimate()` then fits the offset.
+
+Five of the 24 crossings were looked at in the frame and flagged:
+- on 14 Sep evening the sky is grey (overcast), so all three dusks came early
+  (17:33-18:23);
+- on *Road View 2* a light switched on at 03:57 on 16 Sep and at 05:31 on 17
+  Sep, well before dawn.
+
+| | Crossings | Offset | Against IST | Level reached at sun elevation | Per-crossing offsets |
+|---|---|---|---|---|---|
+| All 24, as found | 12 dusk, 12 dawn | UTC +317 min | -13 min | -4.2 deg (spread 6.6) | median +328, range +212 to +334 |
+| 19, the flagged 5 left out | 9 dusk, 10 dawn | **UTC +328 min** | **-2 min** | -4.0 deg (spread 0.85) | median +328, middle half +327 to +329, range +321 to +334 |
+| per camera, flagged left out | 7, 5, 7 | +329, +330, +325 | -1, 0, -5 | -4.1, -4.5, -3.4 | ranges 327-333, 326-332, 321-327 |
+
+**What it shows:** the recorder's clock keeps **IST**, and, read this way,
+is within a few minutes of it. It excludes a clock set to UTC or to any other
+zone.
+
+**What it does not:** a colour crossing is not the infrared switch the
+method rests on. Street lights, exposure and white balance move it, and 5
+crossings were left out after looking at their frames. So the clock error is
+**not measured**. Stating UTC to the minute still needs the unit's clock set
+beside network time (SOP 1.2).
+
+Series SHA-256: CH01 `ed6f260d2362cc7a…`, CH02 `25f255e37832853c…`, CH03 `7cc5c65313d09780…`
+(`out/realchecks/daylight/`).
 
 ## 8m. Other tools on the same data (research gap G5, 29 Sep)
 
@@ -1536,7 +1593,7 @@ tool's own parser reads, field by field.
 - ~~All of the checks that need only the case folders (`validate.realmedia`).~~ **Run on 28 Sep.** Drive 1 `identify-model` (head image, 4 GiB of non-video blocks): no model string. Drive 2: `DS-7B08HUHI-K1`, agreeing with the unit's label and serial (§8b). `decode-check`: 365,654 of 964,635 video frames do not decode — 245,538 before the first keyframe, 119,822 after a counter gap, 294 unexplained; **a missing frame explains 99.8% of the failures after a keyframe**, the same count as the independent measurement in §7. `carve-annexb`: the default first 2 GiB of drive 1 holds no footage, so the range now extends to the first known footage; over the first 8 GiB it covers **100%** of the DHAV carve's bytes plus 48.7 MiB it did not, as **one** stream — the three cameras share identical parameter sets and the carver cannot tell them apart. OCR: §8c.
 - OSD reader: weekday and AM/PM clocks now parse, but measured on six recorders (§8c) the OCR is weak: small, compressed text, white text on bright walls. Still to run on our drives' reference frames.
 - A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
-- Recorder timezones, which are what keep the two drives on separate axes in §8d.
+- Recorder timezones, which are what keep the two drives on separate axes in §8d. Daylight (§8l, 29 Sep): drive 1's cameras never switch to infrared (street-lit), so no estimate; the exploratory colour crossing says drive 1's clock keeps IST, within a few minutes - not a measured error.
 - The CP Plus unit's own log for 23 Sep - and, better than photos of it, the log exported
   to a USB stick from the recorder's menu (one file, hashed). ~~Then `identify-model` over
   the whole of drive 1 for the unit's serial, DevID and MAC.~~ **Run 29 Sep: none of them
