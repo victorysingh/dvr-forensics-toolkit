@@ -73,7 +73,7 @@ Measured on two real 1 TB surveillance drives the team acquired, and on NIST's p
 | Analysis time, 1 TB over USB 2 | **~11.3 h** one pass vs ~56.6 h one read per task vs ~21.9 h image-first (+ ~931 GiB free) |
 | Hostile input | **12,800** damaged disks, streams and E01 sets: no crash, no hang (after fixing the 144 crashes and 1 hang they found) |
 | People in real recorder frames | **44 of 57** labelled frames (first version: 0); **810 of 1,089** people on held-out CAVIAR footage |
-| Face search by photo | same person passes in **97.8%** of pairs (eyes ≥ 12 px); **no** pair of different people passes |
+| Face search by photo | on LFW faces made recorder-sized: same person passes in **97.8%** of pairs (eyes ≥ 12 px), **no** pair of different people passes; on real footage, **1** false candidate (an upside-down head at a fisheye's edge) |
 | Regression suite | **580 tests** (582 with ffmpeg), no hardware, on Linux and Windows CI |
 
 Nothing is `validated` yet: that needs a byte-match between recovered footage and the recorder's own export (`validate-export`), not yet run on a real export. Every number's source is in [`docs/VALIDATION_REPORT.md`](docs/VALIDATION_REPORT.md) and [`docs/STATUS.md`](docs/STATUS.md).
