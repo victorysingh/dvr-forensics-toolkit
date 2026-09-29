@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 586 pass, 0 fail: 563 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 591 pass, 0 fail: 568 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -32,7 +32,7 @@ Two different things are validated here, and they must not be confused:
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
-| Parsers against damaged or tampered disks | **9,600 corrupted disks** fed to all 8 vendor parsers (§8m). Before the fixes: 144 crashes and 1 hang in 3,200. After, in all 9,600: **no crash and no hang**. The few cases the safety net caught were fixed at the parser too. A parser can no longer end in a traceback |
+| Parsers against damaged or tampered disks | **9,600 corrupted disks** fed to all 8 vendor parsers (§8m). Before the fixes: 144 crashes and 1 hang in 3,200. After, in all 9,600: **no crash and no hang**. The few cases the safety net caught were fixed at the parser too. A parser can no longer end in a traceback. The 3 carvers and the E01 reader were fuzzed too: one bug (a damaged E01 set left its evidence file open), fixed |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
@@ -295,7 +295,7 @@ list of moments to watch and nothing more. These clips' on-screen clocks read
 **9 August 2026** — a month before anything the index describes — and the
 cameras' burned-in titles are *Parking*, *Road View 1* and *Road View 2*.
 
-**Full drive:** the 2,025 decodable outside-index streams sampled at one frame
+**Full drive, first detector (26 Sep):** the 2,025 decodable outside-index streams sampled at one frame
 every 5 s — 4,802 frames: a person in 51, a car in 63, faces in none (4 more
 car detections sat fixed in place through their clip — flagged static, e.g. a
 parked car, and not counted). The two
@@ -304,6 +304,23 @@ walking along the road (on-screen clock 13/08/2026 05:59 PM, *Road View 1*);
 **0.83** is a small shape by a distant fence, too small to confirm. Nearly
 equal scores, very different certainty — a score ranks what to watch first;
 it is not a measure of truth.
+
+**Full drive, current detector (30 Sep):** the same 2,025 streams and 4,802
+frames, re-run with YOLOX-S + YuNet (2 x 2 tiles; person 0.4, objects 0.5,
+faces 0.7, parked vehicles 0.3; `analyse-video --fps 0.2`, about 0.7 s a
+frame on the laptop's CPU). Frames with a person **191** (51 before), a car
+**289** (63), a motorcycle 65, a face 23 (none), a bicycle 14, a truck 3; **49
+parked-vehicle places**. Flagged static and not counted: car 756, truck 38,
+motorcycle 19, person 4. These counts are leads, not a measure - the labelled
+sample below gives the detector's rates. The strongest of three classes,
+looked at by Claude (not yet by a person): person **0.93** is plainly a man
+holding a hose (*Road View 2*); face **0.83** sits on the head of a rider
+coming towards the camera on a two-wheeler (*Road View 1*), too small to
+tell a face from a helmet; bicycle **0.81** is two small figures at the far
+end of *Road View 2*, too small to confirm the bicycle. The first report is
+kept in the case folder (`analytics_classic_26sep/`, SHA-256 `9afc450d…`, the
+hash the custody ledger recorded for it); the re-run is the ledger's 23rd entry
+(`1eef57d3…`), and the chain verifies.
 
 ### Measured against labels (29 Sep)
 
@@ -1685,7 +1702,33 @@ What they were:
   damaged recorder disks.
 - The damage is random, aimed at what the parser reads. It is not a proof
   that no input can crash a parser.
-- The carvers, the E01 reader and the scan engine were not fuzzed here.
+- The scan engine itself was not fuzzed here.
+
+### The carvers and the E01 reader, fuzzed the same way (30 Sep)
+
+The three carvers recover footage the recorder's index no longer lists:
+DHAV (Dahua family), MPEG-PS (Hikvision) and raw H.264/H.265 (any recorder).
+They read every byte, so their damage was aimed at what they recognise:
+- DHAV frame headers;
+- PS pack and stream-map headers;
+- Annex B start codes and the container around them.
+
+Each carve was followed by what the tool does with its result: report rows,
+recordings, and a stream written out. The E01 reader was given damaged
+segment files. Opening may refuse (a device error), and a damaged chunk may
+be refused on read (the reader's own error, which the scan records as
+unreadable). Anything else is a crash.
+
+**Found: one bug, in the E01 reader.** When `BlockDevice` refused a damaged
+E01 set, it left the set's first segment file open. On Windows that file (the
+evidence) stayed locked until Python happened to free it. The fuzzer found it
+because it could not delete the set afterwards (16 of the first 20 cases).
+Only the reader's own error became a clean device error; any other failure
+in a damaged set would have escaped as a raw exception. Fixed
+(`acquire/device.py`): the file is closed, and any failure to open a set is a
+device error that names it.
+
+**Result:** 3,200 damaged inputs (400 per target, two seeds), after the fix: no crash and no hang. The carvers handled all 2,400 cleanly. The damage did change what they recovered (for example 2-6 DHAV streams where the clean input gives 5), so it reached them; they split or dropped what was damaged, as designed. Of 800 damaged E01 sets, 605 were refused cleanly and 195 read. The test suite runs 8 damaged inputs per target on a fixed seed, and checks that a refused E01 set leaves no file open (that test fails on the old code).
 
 ## 9. Vendor format status
 
