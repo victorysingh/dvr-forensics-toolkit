@@ -20,12 +20,18 @@ format. We built a vendor-agnostic tool that:
   per-block Merkle map;
 - identifies the vendor by scored evidence and the recorder model from the
   disk and the unit;
-- parses Dahua/CP Plus and Hikvision structures, HeimVision's (read off a
-  public NIST image), and Honeywell's from published research;
+- has a plugin for all eight named OEMs: Dahua/CP Plus and Hikvision read off
+  real drives, HeimVision off a public NIST image, Honeywell from published
+  research, Uniview, TP-Link's index and Godrej from the vendors' own firmware,
+  and Matrix from its own documents;
 - recovers deleted footage without an index, including from a drive that
   another recorder had reformatted;
 - builds a timeline that refuses to invent a time zone;
-- keeps a hash-chained custody record of every action;
+- keeps a hash-chained custody record of every action, sealed with a key kept
+  outside the case folder, so an entry edited, removed or rewritten is caught;
+- survives damaged evidence: its parsers, carvers and E01 reader were fed
+  12,800 corrupted disks and files, and the 144 crashes and 1 hang that found
+  were fixed;
 - reports in HTML and JSON, with a draft BSA 2023 s.63 certificate.
 
 It was run on two real 1 TB surveillance drives:
@@ -367,7 +373,9 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   (62.1% decode). With error concealment 99.8% of one recording displays,
   with visible damage:
   a viewing aid, not intact evidence (`VALIDATION_REPORT.md` §7).
-- **No real disk has been read for** the Honeywell plugin, and the Hikvision
+- **No real disk has been read for** the Honeywell, Uniview, TP-Link, Matrix
+  and Godrej plugins (built from a paper, the vendors' firmware and documents),
+  and the Hikvision
   full-filesystem parser has not read an intact Hikvision disk (it is written on
   drive 2's observed layout, whose primary master a reformat had overwritten). The raw H.264/H.265 carver has run on one (the
   HeimVision image): it finds the video, but cannot separate cameras that
@@ -418,10 +426,12 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
    the Dahua-family recorder that reformatted the disk kept its own log, which
    records hard-drive formatting (Dragonas et al. 2024) - on that recorder's
    disk or flash, not this one.
-3. **Make the OCR read what the eye read:** clocks with a weekday or AM/PM
-   are now read (28 Sep) and need a re-run on the reference frames. White
-   text on bright backgrounds remains open: a top-hat filter was tried and
-   did not help (VALIDATION_REPORT §8c).
+3. **Make the OCR read what the eye read.** Clocks with a weekday or AM/PM
+   now parse, and the reader was re-run on our reference frames (29 Sep): it
+   read "Camera 01" on drive 2 and found no title or clock band on drive 1,
+   where thin white text sits on bright road, sky and wall. A top-hat filter
+   did not help (VALIDATION_REPORT §8c); the next step is a stronger OCR
+   model for small, low-contrast video text.
 4. **Speed:** done in the main - the taps run in a process pool, and the NAL
    searches are one pass; threaded hashes did not matter (PERFORMANCE.md §5).
    What is left, folding the signature search into that pass, is small.
