@@ -217,10 +217,17 @@ def build(parse_report: Optional[dict], carve_report: Optional[dict],
 
     for rec in (parse_report or {}).get("recordings", []):
         idx = _claims(rec, "index")
+        cont = _claims(rec, "container")
         if len(idx) < 2:
+            # A filesystem that dates its recordings only in the files' own
+            # headers (HeimVision): the recording is still one the recorder's
+            # filesystem lists, dated by the container clock.
+            if len(cont) >= 2:
+                event(rec, "indexed", cont[0], cont[-1], "container",
+                      {"note": "a recording the filesystem lists, dated by its own file "
+                               "headers"})
             continue
         e = event(rec, "indexed", idx[0], idx[1], "index")
-        cont = _claims(rec, "container")
         if cont:
             # The index says when the file started; the first frame says when
             # the camera's own stream says it started.  They share one clock,

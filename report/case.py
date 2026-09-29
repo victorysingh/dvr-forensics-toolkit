@@ -21,6 +21,21 @@ from acquire.ledger import CustodyLedger
 from core.hashing import sha256_file
 from detect.signatures import PS_VENDORS
 
+PARSE_BUILTIN = ("parse_dahua.json", "parse_hikvision.json")
+
+
+def parse_report_names(case_dir: str) -> list[str]:
+    """The case's parse reports: the built-in vendors first, then any plugin's
+    `parse_<vendor>.json` as `parse --out` writes it (HeimVision, Honeywell)."""
+    names = [n for n in PARSE_BUILTIN if os.path.isfile(os.path.join(case_dir, n))]
+    try:
+        listing = sorted(os.listdir(case_dir))
+    except OSError:
+        return names
+    return names + [n for n in listing if n.startswith("parse_") and n.endswith(".json")
+                    and n not in PARSE_BUILTIN and os.path.isfile(os.path.join(case_dir, n))]
+
+
 # What we can honestly say about each OEM the PS names.  `media` is real
 # media the team holds; `parser` is the plugin that reads the platter.  The
 # parser's status is the weakest evidence behind it - never better.
@@ -135,7 +150,7 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                              "merkle_root": manifest["acquisition_merkle_root"],
                              "verify": v, "manifest_sha256": _hashed(j("preserved", "manifest.json"))}
 
-    for name in ("parse_dahua.json", "parse_hikvision.json"):
+    for name in parse_report_names(case_dir):
         p = _load(j(name))
         if not p:
             continue
@@ -338,8 +353,7 @@ def list_cases(root: str) -> list[dict]:
                     or ident.get("size_bytes", 0),
                     "complete": bool(scan),
                     "progress": done / ident["size_bytes"] if ident.get("size_bytes") else 0,
-                    "has_parse": any(os.path.exists(os.path.join(d, f)) for f in
-                                     ("parse_dahua.json", "parse_hikvision.json")),
+                    "has_parse": bool(parse_report_names(d)),
                     "has_carve": os.path.exists(os.path.join(d, "carve", "carve_report.json")),
                     "has_timeline": os.path.exists(os.path.join(d, "timeline.json"))})
     return out
