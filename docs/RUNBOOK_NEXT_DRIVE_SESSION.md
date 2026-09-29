@@ -87,6 +87,10 @@ again, because its stored boxes are enough. Pull `staging`, then:
 Check that the car parked in *Parking* at night shows up as one, in how many
 of the 35 night frames, and that no parked vehicle is something else.
 
+**Done 30 Sep from the two text files:** the night car is a parked vehicle
+in 26 of 35 frames, with no false one (VALIDATION_REPORT §8a). Re-run only if
+the rules change again.
+
 **Or send the two text files instead:** `detections.json` and `labels.csv`
 from that folder. They hold boxes, scores and labels, no picture of the site.
 `apply` and `score` then run anywhere, and give the same result as a fresh
