@@ -179,6 +179,13 @@ goes beyond.
   log answers that from the device: drive 2's log records 188 power cuts,
   and the CP Plus unit's log (read on its screen) matched drive 1's
   recorder-wide gap at 18:59 to the minute (`VALIDATION_REPORT.md` §8).
+- **UTC without the unit, from daylight** (`VALIDATION_REPORT.md` §8l). An
+  outdoor camera's infrared switches happen at one sun elevation, so the
+  recorder offset that puts every dusk and dawn switch at the same elevation
+  is its zone plus its clock error. It is measured from the footage, needs
+  no camera threshold, and is ruled against the 12-hour alias by the sun's
+  direction. Estimating a clock from daylight is prior art (Sundial, EWSN
+  2009); reading it from a DVR's infrared switches is the application here.
 
 ### D8. Vendor *and* model, with the disk's history as a finding
 

@@ -811,6 +811,14 @@ def test_heimvision(tmp: str) -> None:
           found and v["files"] == 4 and v["files_written"] == 3 and v["ident"] == "ok1ormated"
           and res.validation_status == "spec_only"
           and all(f["source"] == "observed_real_media" for f in res.field_provenance), str(v))
+    from detect.engine import SignatureScanner
+    sc = SignatureScanner()
+    sc.scan_block(0, open(img, "rb").read(), 0, "")
+    dets = {d.vendor: d for d in sc.detections()}
+    check("a scan names the recorder from its own structures (the disk carries no brand "
+          "string), with its parser available",
+          "HeimVision" in dets and dets["HeimVision"].parser_available
+          and dets["HeimVision"].confidence > 0.8, str({k: d.confidence for k, d in dets.items()}))
     check("the recorder's zone setting measured: display clock UTC+8 against its own "
           "system clock (FAT times), on every file",
           v["recorder_zone_minutes"] == 480 and v["recorder_zone_agreement"] == "3/3 files")
@@ -968,6 +976,15 @@ def test_heimvision(tmp: str) -> None:
               rep["identical"] and rep["fat"]["in_both"] == 17154
               and rep["fat"]["written_per_ftk"] == 808 and len(rep["ext3"]["compared"]) == 4
               and rep["zone_setting_minutes_from_ftk_times"] == 480, str(rep["fat"]))
+    sc = SignatureScanner()
+    with BlockDevice(path) as dev:
+        for k in range(2):
+            sc.scan_block(k << 23, dev.read_at(k << 23, 8 << 20), k, "")
+    dets = {d.vendor: d for d in sc.detections()}
+    check("real image: the first 16 MiB are enough for a scan to name HeimVision - its "
+          "system partition's mount point and its log and index schemas - parser available",
+          "HeimVision" in dets and dets["HeimVision"].confidence > 0.9
+          and dets["HeimVision"].parser_available, str({k: d.confidence for k, d in dets.items()}))
 
 
 def test_godrej(tmp: str) -> None:
@@ -1018,6 +1035,67 @@ def test_godrej(tmp: str) -> None:
     check("a QVEX head failing the firmware's own bounds check is not taken; on the QVFS disk "
           "no other plugin claims it, and Godrej claims no other vendor's disk",
           not badq_det and claimed == ["Godrej"] and not other, str(claimed))
+
+
+def test_daylight(tmp: str) -> None:
+    """The recorder's offset from UTC from its cameras' infrared switches: at
+    the right offset every dusk and dawn switch sits at one sun elevation."""
+    print("\n[daylight: the recorder's clock from its cameras' infrared switches]")
+    import random
+    import shutil as _sh
+    from datetime import datetime, timedelta
+    from analyse import daylight as DL
+
+    lat, lon = 12.97, 77.59                                   # Bengaluru
+    sunset = DL.solar_elevation(datetime(2026, 9, 23, 12, 46), lat, lon)   # 18:16 IST
+    noon = DL.solar_elevation(datetime(2026, 9, 23, 6, 40), lat, lon)
+    check("the sun, by NOAA's equations: Bengaluru's 18:16 IST sunset on 23 Sep sits at the "
+          "horizon, and its noon sun is high", -1.5 < sunset < 1.0 and 75 < noon < 79,
+          f"{sunset:.2f} {noon:.1f}")
+
+    rng = random.Random(3)
+    truth, h_switch = 337, -2.0                     # IST + a clock 7 min fast; the camera's threshold
+    series, jit, t = [], {}, datetime(2026, 9, 1)
+    while t < datetime(2026, 9, 11):
+        utc = t - timedelta(minutes=truth)
+        j = jit.setdefault((utc.date(), utc.hour < 12), rng.uniform(-0.6, 0.6))   # weather
+        h = DL.solar_elevation(utc, lat, lon)
+        c = 25 + rng.uniform(-5, 5) if h > h_switch + j else 1 + rng.uniform(0, 1)
+        if h < -10 and rng.random() < 0.01:
+            c = 30                                                  # a headlight at night
+        series.append((t, c))
+        t += timedelta(minutes=2)
+    ev = DL.switches(series)
+    res = DL.estimate(ev, lat, lon, zone=330)
+    check("ten days of footage: 10 dusk and 10 dawn switches, headlight flashes ignored",
+          (res["dusk"], res["dawn"]) == (10, 10), str((res["dusk"], res["dawn"])))
+    check("the offset found without the unit or the camera's threshold: UTC+337 min, i.e. IST "
+          "and a clock 7 min fast; the switch elevation recovered; per-switch offsets agree",
+          abs(res["offset_min"] - truth) <= 3 and abs(res["clock_error_min"] - 7) <= 3
+          and abs(res["switch_elevation_deg"] - h_switch) < 0.5
+          and res["per_switch_offset_min"]["range"][1] - res["per_switch_offset_min"]["range"][0] <= 10,
+          res["reading"])
+    one_kind = DL.estimate([e for e in ev if e["kind"] == "dusk"], lat, lon)
+    check("dusks alone are refused - every offset fits them equally - and the 12-hour alias "
+          "is ruled out by the sun's direction",
+          one_kind["offset_min"] is None and abs(res["offset_min"] - truth) < 60)
+
+    ffmpeg = os.environ.get("FFMPEG") or _sh.which("ffmpeg")
+    folder = os.environ.get("VENDOR_SAMPLES")
+    if not (ffmpeg and folder):
+        print("  [real footage] skipped - needs ffmpeg and VENDOR_SAMPLES")
+        return
+    night = [c for _, c in DL.sample(os.path.join(folder, "imkh_00000001541000000.mp4"), 3,
+                                     ffmpeg=ffmpeg)]
+    day = [c for _, c in DL.sample(os.path.join(folder, "ffmpeg_t4182_20150327215559_ch01.mp4"),
+                                   3, ffmpeg=ffmpeg)]
+    dav = DL.sample(os.path.join(folder, "ffmpeg_t6144_19.25.00-19.25.50[R].dav"), 3,
+                    ffmpeg=ffmpeg)
+    check("real recorder footage: a Hikvision infrared night picture measures as infrared and "
+          "a daylight one as colour, far apart; a .dav's samples carry the recorder's own times",
+          max(night) <= DL.MONO_MAX and min(day) > 4 * DL.MONO_MAX
+          and dav[0][0] == datetime(2017, 9, 18, 19, 25, 0),
+          f"night {max(night)} day {min(day)} dav {dav[0][0]}")
 
 
 def test_dahua_real_media() -> None:
@@ -1901,7 +1979,8 @@ def test_static_detections() -> None:
 def test_analytics_eval(tmp: str) -> None:
     """Scoring the detectors against labels: a static detection counts against
     the models but not the tool, an unlabelled frame is left out, and a class
-    no frame contains gets a false-alarm rate but no recall."""
+    no frame contains gets a false-alarm rate but no recall.  The threshold
+    sweep applies the rules per clip, at each threshold afresh."""
     print("\n[analytics: evaluation against labels]")
     from validate import analytics_eval as E
     out = os.path.join(tmp, "analytics_eval")
@@ -1929,6 +2008,91 @@ def test_analytics_eval(tmp: str) -> None:
     face = res["classes"]["face"]["as reported"]
     check("a class no frame contains: false-alarm rate, no recall",
           face["recall"] is None and face["false_alarm_rate"] == 0.0 and face["frames_without"] == 4)
+
+    # The threshold sweep, from boxes kept at any score.  Clip 0 (frames 0-4):
+    # a shrub boxed as a person at one spot, and an oversized "face".  Clip 1
+    # (frames 5-6): a real person at the same spot, scored 0.3, then missed.
+    shrub = lambda s: {"label": "person", "score": s, "box": [0.1, 0.1, 0.3, 0.6]}
+    big_face = {"label": "face", "score": 0.9, "box": [0.3, 0.2, 0.7, 0.8]}
+    everything = [[shrub(0.55), big_face], [shrub(0.55)], [shrub(0.55)], [shrub(0.65)], [],
+                  [shrub(0.3)], []]
+    clip_of = [0, 0, 0, 0, 0, 1, 1]
+    labels = {f: {"person": "y" if f >= 5 else "n", "face": "n", "vehicle": "n"}
+              for f in range(7)}
+    sw = E.rescore(everything, clip_of, labels)
+    person = {r["threshold"]: r for r in sw["person"]}
+    check("sweep: a lower threshold finds the person the tool's misses; the rules run per "
+          "clip, so a box static in one clip still counts in another",
+          person[0.2]["as reported"]["tp"] == 1 and person[0.5]["as reported"]["tp"] == 0
+          and person[0.2]["as the models said"]["fp"] == 4)
+    check("sweep: a higher threshold can raise reported false alarms - a box too rare to "
+          "be static is counted",
+          person[0.5]["as reported"]["fp"] == 0 and person[0.6]["as reported"]["fp"] == 1)
+    faces = {r["threshold"]: r for r in sw["face"]}
+    check("sweep: an implausible face box is not counted, though the model said it",
+          faces[0.9]["as reported"]["fp"] == 0 and faces[0.9]["as the models said"]["fp"] == 1)
+
+    # The sweep command scores the boxes `sample` kept at low scores; no model runs.
+    sw_dir = os.path.join(tmp, "analytics_sweep")
+    os.makedirs(sw_dir, exist_ok=True)
+    stored = [{"frame": f, "clip": c, "detections": [], "any_score": e}
+              for f, (c, e) in enumerate(zip(clip_of, everything))]
+    with open(os.path.join(sw_dir, "labels.csv"), "w", newline="", encoding="utf-8") as fh:
+        fh.write("frame,person,face,vehicle\n"
+                 + "".join(f"{f},{'y' if f >= 5 else 'n'},n,n\n" for f in range(7)))
+    dump = lambda: json.dump({"thresholds": {"face": 0.8, "objects": 0.5}, "tiles": 3,
+                              "detections": stored},
+                             open(os.path.join(sw_dir, "detections.json"), "w", encoding="utf-8"))
+    dump()
+    check("sweep command: scores the stored low-score boxes, with nothing run again",
+          E.sweep(sw_dir, log=lambda *a: None)["classes"] == sw)
+    for x in stored:
+        del x["any_score"]
+    dump()
+    try:
+        E.sweep(sw_dir, log=lambda *a: None)
+        refused = False
+    except SystemExit:
+        refused = True
+    check("sweep command: refuses a sample that kept no low-score boxes", refused)
+
+
+def test_analytics_tiles() -> None:
+    """Tiling for small people: the grid spans the frame with overlapping
+    tiles, a tile's box maps back to the whole frame, the same object boxed
+    in two tiles is kept once, and boxes kept at any score then filtered are
+    the boxes kept at the threshold (what `sweep` relies on)."""
+    print("\n[analytics: tiles]")
+    from analytics.tiles import merge, tiles, to_frame
+    g = tiles(1920, 1080, 3, 0.2)
+    xs, ys = sorted({t[0] for t in g}), sorted({t[1] for t in g})
+    tw, th = g[0][2], g[0][3]
+    check("a 3 x 3 grid spans the frame edge to edge",
+          len(g) == 9 and xs[0] == ys[0] == 0 and xs[-1] + tw == 1920 and ys[-1] + th == 1080,
+          str(g))
+    check("neighbouring tiles overlap by a fifth of a tile",
+          all(abs(xs[i] + tw - xs[i + 1] - 0.2 * tw) <= 2 for i in range(2))
+          and all(abs(ys[i] + th - ys[i + 1] - 0.2 * th) <= 2 for i in range(2)), str(g))
+    check("a 1 x 1 grid is the whole frame", tiles(640, 360, 1) == [(0, 0, 640, 360)])
+    corner = g[-1]
+    check("a box found in a tile maps back to the whole frame",
+          to_frame([0.0, 0.0, 1.0, 1.0], corner, 1920, 1080)
+          == [round(corner[0] / 1920, 4), round(corner[1] / 1080, 4), 1.0, 1.0]
+          and to_frame([0.5, 0.2, 1.0, 0.6], (960, 540, 960, 540), 1920, 1080)
+          == [0.75, 0.6, 1.0, 0.8])
+    person = lambda s, box: {"label": "person", "score": s, "box": box}
+    whole = person(0.55, [0.40, 0.40, 0.50, 0.70])       # small, in the whole frame
+    tile = person(0.81, [0.41, 0.40, 0.50, 0.69])        # the same person, in a tile
+    other = person(0.60, [0.70, 0.40, 0.80, 0.70])
+    face = {"label": "face", "score": 0.9, "box": [0.42, 0.41, 0.47, 0.47]}
+    check("the same person boxed in the whole frame and in a tile is kept once, the "
+          "stronger box; another person, and a face on the first, are kept",
+          [d["score"] for d in merge([whole, tile, other, face])] == [0.9, 0.81, 0.6])
+    boxes = [person(s, [0.1 + (i % 4) * 0.05, 0.1, 0.3 + (i % 4) * 0.05, 0.5])
+             for i, s in enumerate((0.25, 0.9, 0.45, 0.6, 0.35, 0.52, 0.3, 0.41))]
+    check("boxes merged at any score and then filtered are the boxes merged at the threshold",
+          all([d for d in merge(boxes) if d["score"] >= t] == merge([d for d in boxes if d["score"] >= t])
+              for t in (0.2, 0.3, 0.4, 0.5, 0.6)))
 
 
 def test_hikbtree(tmp: str) -> None:
@@ -3586,6 +3750,28 @@ def test_s63_certificate(tmp: str) -> None:
           and led.verify()["valid"])
 
 
+def test_s63_footage_folders(tmp: str) -> None:
+    """Footage extracted into a subfolder (USER_MANUAL 3.4: `extract --out clips/`)
+    is still certified; footage from another device is not."""
+    print("\n[s.63 certificate: where the footage was extracted to]")
+    from report import s63
+    case = os.path.join(tmp, "s63_case")                    # made by test_s63_certificate
+    with open(os.path.join(case, "scan_report.json"), encoding="utf-8") as fh:
+        device = json.load(fh)["device"]["path"]
+    for folder, src, sha in (("clips", device, "11" * 32), ("other", "/dev/sdz", "22" * 32)):
+        os.makedirs(os.path.join(case, folder), exist_ok=True)
+        with open(os.path.join(case, folder, f"{folder}.manifest.json"), "w", encoding="utf-8") as fh:
+            json.dump({"source_device": src, "output": {"file": f"{folder}.h265", "bytes": 10,
+                                                        "sha256": sha}}, fh)
+    cert = s63.build(case, "B", records="footage")
+    vals = {v["record"]: v["value"] for v in cert["fields"]["hash_values"]}
+    check("footage extracted into a subfolder of the case is certified with its path; footage "
+          "whose manifest names another device is left out, and the draft says why",
+          vals.get("clips/clips.h265") == "11" * 32 and "other/other.h265" not in vals
+          and any("other/other.manifest.json" in n and "not certified" in n
+                  for n in cert.get("notes", [])), str(sorted(vals))[:300])
+
+
 def test_real_media_tools(tmp: str) -> None:
     """The pieces of the real-media run: the decode check's classes, the
     head-image model search, and the carver coverage score."""
@@ -3917,6 +4103,7 @@ def main() -> int:
         test_ps_carver(tmp)
         test_static_detections()
         test_analytics_eval(tmp)
+        test_analytics_tiles()
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)
@@ -3932,12 +4119,14 @@ def main() -> int:
         test_matrix(tmp)
         test_nist_export(tmp)
         test_s63_certificate(tmp)
+        test_s63_footage_folders(tmp)
         test_real_media_tools(tmp)
         test_ewf(tmp)
         test_parallel_taps(tmp)
         test_case_export(tmp)
         test_heimvision(tmp)
         test_godrej(tmp)
+        test_daylight(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
