@@ -33,17 +33,22 @@ from collections import Counter
 from datetime import datetime
 from typing import Optional
 
-OSD_RULE = "osd.tesseract_title_clock.v1"
+OSD_RULE = "osd.tesseract_title_clock.v2"
 
 # Candidate bands for burned-in text, as (x1, y1, x2, y2) fractions of the
-# frame.  A DVR paints the OSD in a corner; which corner is the recorder's
-# choice, so all four are tried during calibration and the one that reads
-# consistently is used for the rest of the case.
+# frame.  A DVR paints the OSD near an edge; where is the recorder's choice,
+# so every band is tried during calibration and the one that reads
+# consistently is used for the rest of the case.  The corners come first; the
+# full-width strips were added after real recorders' files (VALIDATION_REPORT
+# 8c): a Swann DVR paints its clock top-centre, across both top corners, and a
+# 2015 Hikvision clock with a weekday runs past the middle of the picture.
 BANDS = {
     "top_left": (0.00, 0.00, 0.55, 0.12),
     "top_right": (0.45, 0.00, 1.00, 0.12),
     "bottom_left": (0.00, 0.88, 0.55, 1.00),
     "bottom_right": (0.45, 0.88, 1.00, 1.00),
+    "top": (0.00, 0.00, 1.00, 0.12),
+    "bottom": (0.00, 0.88, 1.00, 1.00),
 }
 
 # Tesseract character whitelists.  The clock one is the reason Tesseract was
@@ -182,7 +187,8 @@ _CLOCK_FORMATS = [
 # A DVR's clock reads in this range or the reading is OCR noise.  It also
 # rejects a two-digit year being taken for a year in the first century.
 YEAR_MIN, YEAR_MAX = 2000, 2100
-_CLOCK_RE = re.compile(r"(\d{1,4})\D(\d{1,2})\D(\d{1,4})\D+(\d{1,2})\D(\d{2})\D(\d{2})")
+# a separator may be followed by spaces: Swann paints "08/ 14/ 2021 07: 11: 22 PM"
+_CLOCK_RE = re.compile(r"(\d{1,4})\D\s*(\d{1,2})\D\s*(\d{1,4})\D+(\d{1,2})\D\s*(\d{2})\D\s*(\d{2})")
 _AMPM_RE = re.compile(r"(?<![a-z])([ap])\.?\s?m\b", re.IGNORECASE)
 _WEEKDAY_RE = re.compile(r"(?<![a-z])(mon|tue|wed|thu|fri|sat|sun)[a-z]*", re.IGNORECASE)
 # a run of digits and digit-shaped letters: "2O24" -> "2024", but a letter

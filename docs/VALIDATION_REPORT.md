@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 544 pass, 0 fail: 521 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 547 pass, 0 fail: 524 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -26,7 +26,7 @@ Two different things are validated here, and they must not be confused:
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
 | Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles): a person in **32 of 57**, faces 12 of 27, vehicles 8 of 12; on CAVIAR **777 of 1,089** labelled people (the previous tiled models: 543). False alarms: 5 frames, all a hand holding a board up to the lens. A lead is worth reviewing; an empty list still proves nothing |
-| OSD reader (optional) | rules and orchestration tested (§8c); **OCR accuracy not measured** — never yet run on a rendered frame |
+| OSD reader (optional) | rules and orchestration tested; **measured** on six recorders' own files, 36 painted clocks: the clock found on 3 of 6 recorders, 5 frames read exactly, 9 wrong, 22 unread; no title right (§8c). A clock reading is a lead to check, not a time source |
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
@@ -918,7 +918,7 @@ clock, via the plugin's frame times or a start time and frame rate. The MISB
 status bit 7 is set ("lock unknown"), because a recorder's clock is not
 known to be locked to true time.
 
-## 8c. OSD reader (optional layer — first real run 28 Sep: 1 of 5 reference titles, no clock)
+## 8c. OSD reader (optional layer — on six real recorders' files: clock found on 3 of 6, 5 of 36 clock frames exact, no title right)
 
 `cli.py read-osd` reads the burned-in channel title and clock, which is the
 only camera attribution available for the 2,246 (drive 1) and 495 (drive 2)
@@ -931,7 +931,10 @@ streams no index accounts for.
 | OCR accuracy, first real run (28 Sep, Tesseract 5.5.0, `validate.realmedia`) | Drive 2 `ps-00321` (CH01): **"Camera 01" — matches the eye.** Drive 2 `ps-03023` (CH03): no title read (white text on a light wall). Drive 1, 40 unlabelled streams: calibration found no title or clock band, though the frames carry *Parking* bottom-left and the clock top-right, inside the bands — thin white text on a bright wall and sky. **No clock read on either drive:** both recorders' clocks carry letters — Hikvision `28-07-2024 Sun 02:07:20` (weekday), CP Plus `01/05/2026 01:20:26 PM` (12-hour) — and `CLOCK_CHARS` holds digits and separators only |
 | Found by the first run | the runbook picked drive 2's reference stream by time alone; eight cameras record at once, so it took CH07 (`ps-00257`, picture says "Camera 07") for "Camera 01" and called a near-correct reading ("Camera OF") a mismatch. Now chosen by time and the camera the title names |
 | Fixed after the first run (29 Sep) | **the clocks:** the whitelist now allows the weekday and AM/PM letters; AM/PM turns the hour to 24-hour time; the weekday the recorder painted is checked against the date and, where `01/05/2026` is two dates, keeps only the one that falls on it (a weekday that fits neither is reported, not trusted). `28-07-2024 Sun 02:07:20` and `01/05/2026 Fri 01:20:26 PM` now parse. **Calibration:** a corner was scored across both polarities together, so text readable only inverted scored at most 0.5 - one misread frame put it under the bar and the corner was discarded; it is now scored per polarity (a test shows the old code finding no corner where the new one finds it). **Not fixed:** thin white text a few grey levels above a bright wall or sky. A morphological top-hat was tried on synthetic frames and did not separate text better (Otsu balanced error 24.1% vs 23.3% on a bright sky), so it was not added |
-| Status | `synthetic_only` — run on real frames, but 1 of 5 reference titles and no clock is short of `spec_only`; the clock fix is to be re-run on the same reference frames |
+| Measured on six recorders' own files (29 Sep, Tesseract 5.5.3, `python -m validate.osd_eval`) | The six public clips of §8a (Intelbras/Dahua, Amcrest, Swann, Lorex, two Hikvision), each calibrated on its own as `read-osd` calibrates a case, 6 frames each; every painted clock and title read by eye on the same frames. **Clock found on 3 of 6 recorders; of 36 frames with a clock, 5 read exactly, 9 wrong, 22 unread. Titles: 0 of 5 right** ("amelek.net" read "ame leknet") |
+| Why, clip by clip | Intelbras: 5 of 6 exact, one year read 2071. Hikvision 2018: the year read **2016** on all 6 frames (a pixel font's 8 as 6) and two seconds wrong. Swann: the clock is top-centre, across both top corners, and its "PM" is lost, so 7 PM reads 07:11 (2 frames). Hikvision 2015: the date reads, a Chinese weekday comes out as junk, and the time runs past the corner band. Amcrest: white text on a bright wall. Lorex: text about 8 px high. The wrong readings are years or 12 h off, which the comparison with a container's own date reports as a disagreement; a stream with no container date (an AVI export) has no such check |
+| Changed after the measurement | `08/ 14/ 2021 07: 11: 22 PM` (a space after each separator) now parses; full-width top and bottom strips are tried beside the four corners (the Swann clock is found; exact reads did not rise); the reader opens containers (`.dav`, `.mp4`, `.avi`) as well as extracted streams. Rule `osd.tesseract_title_clock.v2`. The limit is Tesseract on small, compressed video text, not the rules |
+| Status | `synthetic_only` — measured on real frames and short of `spec_only`: a clock is a lead to be checked against the container and the eye, and a title is not reliable |
 
 **To reach `spec_only`:** run it over the same streams whose frames were
 already read by eye in §8a and §8b and compare — *Parking*, *Road View 1*,
@@ -1165,6 +1168,49 @@ alias.
 **Not yet run on our drives.** It needs days of the CP Plus unit's outdoor
 cameras (*Parking*, *Road View*) and the site's latitude and longitude.
 
+## 8m. Other tools on the same data (research gap G5, 29 Sep)
+
+Five free tools were run beside ours, read-only, on the same inputs. Two
+more are other SIH26150 teams' tools; for those, their own published
+results on the NIST image are set beside ours. Each tool is named at the
+commit that was run.
+
+| Tool (commit) | Input | Their result | Ours |
+|---|---|---|---|
+| OpenDHFS (`af5b6d0`, Aug 2026), DHAV carving | the real Dahua `.dav` of §8g (FFmpeg #6144) | 2,042 DHAV candidates | 2,042 frames (Kaitai agrees, §9a) |
+| OpenDHFS | the real Dahua `.dav` cut to 2 MB (HandBrake #1935) | 191 candidates | 190 complete frames; the extra one is most likely the frame the cut truncated |
+| OpenDHFS | a generated DHFS 4.1 disk with known contents: 3 cameras recording at once (462, 459 and 457 frames surviving) over an older recording | 6,601 candidates; the recording under test is **one group of 1,379**, "camera/channel assertion: No" | 6,597 frames; the recording under test is **three streams of 462, 459 and 457**, one per camera, as written |
+| dhfs_extractor (`166bd56`, IFRN, DHFS 4.1) | the same generated disk | **does not finish**: its partition-table loop reads 64-byte entries until it meets `AA 55 AA 55`, with no bound, and our disk has no such marker there | 3 recordings, cameras 0-2, 12 s each |
+| hikextractor (`d73755a`) | a generated disk in drive 2's observed Hikvision layout (8 recordings on 4 cameras, one deleted) | reads the master sector (signature, capacity, block size); lists no recordings | 8 recordings |
+| hikvision-nvr-recovery (A22Z4, `813eeab`) | the same disk | reads the master sector; one empty index page. **Every stored time is converted in the examiner's computer's own zone** (`datetime.fromtimestamp`): the same field reads 05:30 on an IST laptop and 00:00 under UTC | recorder times stay recorder-local; UTC only from a stated zone and clock error |
+| Trace (`Hardik-droid/sih_x`, their `docs/real-corpus-validation.md`) | the NIST HeimVision E01 | hashes equal NIST's; **3 of the 806 recording files sampled**, 12 excerpts, 13,186 frames (881 s); the 24 h labelled **UTC** | all 806 files, 24 h on each of 4 cameras (1,296,105 frames on camera 2 alone); times labelled recorder-local, the zone setting measured as UTC+8 (§8e) |
+| CCTVault (`VinayBU14`, their README and status report) | the NIST HeimVision E01 | parses the `luo` header's epoch times "into UTC ISO-8601 strings" | as above: those times are the recorder's display time, not UTC |
+| DVRExtractor (`41581c2`) | - | not run: a Windows GUI that bundles Dahua's closed `dhplay.dll`; nothing to script | - |
+
+What this does and does not show:
+
+- **On real Dahua files, OpenDHFS and our parser find the same frames.**
+  That is independent agreement on the DHAV format, from a second
+  implementation.
+- **Separating cameras is where the tools differ.** OpenDHFS declines to do
+  it, by design. We separate the cameras by stream continuity and match the
+  written ground truth exactly (USP claim 5, `FINAL_REPORT.md` §8).
+- **The generated disks carry our reading of each format.** On the Hikvision
+  disk, and where dhfs_extractor stalls, the difference may be the disk's
+  and not the tool's. Neither disk proves a rival wrong: the Hikvision tools
+  follow the 2015 paper's older layout (`HIK.2011.03.08`); dhfs_extractor was
+  built on Brazilian recorders' disks, and our notes on drive 1 never
+  recorded the bytes after the last partition entry, which it relies on. A
+  fair head-to-head needs the real images: `dhfs41.DHFS41().load_image()` on
+  drive 1's head image, and the two Hikvision tools on drive 2.
+- **Two findings stand on their own.** A loop with no bound turns a disk
+  without the expected marker into a hang, not an error. And a tool that
+  converts recorder times in the host's zone gives different answers on
+  different examiners' machines.
+- **The SIH comparison is on the same public image.** It uses the other
+  teams' own published figures. They were not re-run here, because both need
+  the 150 GB E01 streamed through their own readers.
+
 ## 9. Vendor format status
 
 | Vendor | Status | Why not better |
@@ -1236,20 +1282,21 @@ tool's own parser reads, field by field.
 | `dahua_dhfs41.ksy` against `parsers/dahua.py` | synthetic DHFS disk | superblock; the volume's extent and cluster size; all 64 cluster records, every field (the channel as the byte stored); 328 DHAV frames (type, number, length, date, ms, extension length, trailer) - all equal |
 | The check itself | the same disk, a `.ksy` with `next` and `prev` swapped | 18 records flagged: the check is not vacuous |
 | A test-fixture fault it found | the MPEG-PS test streams | their HK descriptor declared 14 bytes (0x0E, the value the carver matches on real footage) but held 13. The carver reads fixed offsets and never noticed; the compiled `.ksy` did. Fixed to 14; every MPEG-PS test passes |
+| Vendor-made files (29 Sep) | 5 | **agree on every record**: every DHAV frame of the two Dahua `.dav` files of §8g (2,042 + 190 frames: type, number, length, date, ms, extension, trailer) and all 946 packs of the three Hikvision player files (packs, stream maps, video and audio packets, first and last `HK` time): `python -m validate.ksy_check --ps FILE --dav FILE` |
 | Real media (29 Sep, kaitaistruct 0.11) | drive 1's 20 GiB head image; drive 2's 4 GiB head image, region 0x4C5E000 + 1 GiB (the data area's first block) | **agree, no mismatches.** Dahua: superblock 4.1, 4 volumes, 119,229 cluster records and 3,000 DHAV frames, field for field (volumes 2-4 lie beyond the image). Hikvision MPEG-PS: 2 streams carved, 115,004 packs read identically by the `.ksy` and the carver. Result `out/realchecks/ksy_check.json`, SHA-256 `4562b05d…6eef66a4` |
 
 ## 10. Open items
 
 - ~~Why 2,087 frames after a keyframe still do not decode.~~ **Answered on 28 Sep (§7):** a reference frame missing from the disk. Streams with a complete frame counter lose 0.13% of their frames after the keyframe, streams with a gap 22.2%; 90% of the missing frames sit on a 2 MiB cluster boundary, and most have no intact copy anywhere on the disk. Still to run: `decode-check`, which makes the same test frame by frame (it is in `validate.realmedia`).
 - ~~All of the checks that need only the case folders (`validate.realmedia`).~~ **Run on 28 Sep.** Drive 1 `identify-model` (head image, 4 GiB of non-video blocks): no model string. Drive 2: `DS-7B08HUHI-K1`, agreeing with the unit's label and serial (§8b). `decode-check`: 365,654 of 964,635 video frames do not decode — 245,538 before the first keyframe, 119,822 after a counter gap, 294 unexplained; **a missing frame explains 99.8% of the failures after a keyframe**, the same count as the independent measurement in §7. `carve-annexb`: the default first 2 GiB of drive 1 holds no footage, so the range now extends to the first known footage; over the first 8 GiB it covers **100%** of the DHAV carve's bytes plus 48.7 MiB it did not, as **one** stream — the three cameras share identical parameter sets and the carver cannot tell them apart. OCR: §8c.
-- OSD reader: read clocks that carry a weekday or AM/PM (both of our recorders), and white text on bright backgrounds (§8c).
+- OSD reader: weekday and AM/PM clocks now parse, but measured on six recorders (§8c) the OCR is weak: small, compressed text, white text on bright walls. Still to run on our drives' reference frames.
 - A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
 - Recorder timezones, which are what keep the two drives on separate axes in §8d.
 - The CP Plus unit's own log for 23 Sep - and, better than photos of it, the log exported
   to a USB stick from the recorder's menu (one file, hashed). Then `identify-model` over
   the whole of drive 1 for the unit's serial, DevID and MAC.
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
-- ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** ~~Still to run on the real images.~~ **Run 29 Sep: agree on both drives' images (§9a).**
+- ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** ~~Still to run on the real images.~~ **Run 29 Sep: agree on both drives' images and on five vendor-made files (§9a).**
 - ~~The ffmpeg cross-check on drive 1's own `.dav` files.~~ **Run 29 Sep (§8g):** 719,097 of 719,097 emitted frames identical. It found one thing to fix: after a frame-counter gap the DHAV date and millisecond counter can disagree by up to ~3 s (6 files, 227 frames). Frames after such a gap should carry that wider time uncertainty in the timeline and report; today they do not.
 - Analytics recall on our own cameras: 210 drive-1 frames sampled (§8a), to be re-sampled with tiling, then labelled and scored.
 - ~~Drive 2 `label-ps` re-run on the drive.~~ **Run 29 Sep (§8b):** 440 `stale_tail`, 55 `outside_index`; index unchanged since 26 Sep.
