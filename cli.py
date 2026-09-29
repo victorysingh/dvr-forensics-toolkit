@@ -1445,8 +1445,10 @@ def cmd_analyse_video(args) -> int:
     out_dir = os.path.join(args.out, "analytics")
     print(f"{BANNER} - video analytics (lead, not evidence)\n")
     print(f"  clips         {len(clips)} from {src}, sampled at {args.fps} fps")
+    print("  tiles         " + (f"{args.tiles} x {args.tiles} and the whole frame"
+                              if args.tiles > 1 else "none (whole frame only)"))
     try:
-        r = run(clips, out_dir, fps=args.fps, log=print)
+        r = run(clips, out_dir, fps=args.fps, log=print, tiles_n=args.tiles)
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"[!] {exc}")
         return 1
@@ -1474,6 +1476,7 @@ def cmd_analyse_video(args) -> int:
         ledger.case_id = ledger.entries[0].get("case_id", "")
         ledger.append("video_analytics_run", {
             "report": "analytics/analytics.json", "clips": len(clips), "fps": args.fps,
+            "tiles": args.tiles, "rule": r["rule"],
             "models": {k: v["sha256"] for k, v in r["models"].items()},
             "frames_with": tot, "status": "lead, not evidence"},
             data_hash=sha256_file(path))
@@ -2347,6 +2350,9 @@ def main() -> int:
     p.add_argument("--out", required=True, help="case directory")
     p.add_argument("--fps", type=float, default=1.0, help="frames analysed per second of video")
     p.add_argument("--ids", default="", help="comma-separated clip ids (default: all extracted)")
+    p.add_argument("--tiles", type=int, default=3,
+                   help="also run the models on each tile of an n x n grid, which finds small "
+                        "people (default 3, about 10x slower; 1 = whole frame only)")
     p.add_argument("--recount", action="store_true",
                    help="re-apply the static/implausible rules to stored results, no decoding")
     p.set_defaults(func=cmd_analyse_video)
@@ -2447,4 +2453,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # A packaged build (packaging/) starts the scan's parallel workers
+    # (acquire/parallel.py, spawn) by re-running this executable; this hands
+    # those runs to multiprocessing instead of the command-line parser.  A no-op
+    # when run from source.
+    import multiprocessing
+    multiprocessing.freeze_support()
     raise SystemExit(main())

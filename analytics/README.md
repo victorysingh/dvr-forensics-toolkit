@@ -25,6 +25,11 @@ python cli.py extract-carved --device /dev/sdX --out out/CASE     # clips first
 .venv/bin/python cli.py analyse-video --out out/CASE --fps 1
 ```
 
+Each model runs on the whole frame and on each tile of a 3 x 3 grid of
+overlapping tiles (`--tiles 3`, the default), which finds people too small
+for the models otherwise. This takes about 9 times as long; `--tiles 1` is
+the faster untiled run, for triage of long footage.
+
 Writes `out/CASE/analytics/analytics.json` and thumbnails with boxes drawn,
 records the model hashes in the custody ledger, and adds a section to the
 report and the viewer.
@@ -70,3 +75,10 @@ refused.
   detection is right. Small, distant, dark or blurred subjects are missed;
   shapes are sometimes taken for people or vehicles. Every result is a moment
   to review in the footage itself.
+- **Not proof of absence.** Scored against 287 frames of real recorder
+  footage labelled by eye (`docs/VALIDATION_REPORT.md` §8a). Untiled, it
+  reported a person in none of the 57 frames that had one; tiled, in 24 of
+  57, with 1 false alarm in 230 frames. It still misses distorted and
+  distant people, and the static rule removes a person who sits still. Measure it on your own
+  footage with `python -m validate.analytics_eval` (sample, label, score,
+  sweep).
