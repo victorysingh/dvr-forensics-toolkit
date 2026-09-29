@@ -295,7 +295,7 @@ list of moments to watch and nothing more. These clips' on-screen clocks read
 **9 August 2026** — a month before anything the index describes — and the
 cameras' burned-in titles are *Parking*, *Road View 1* and *Road View 2*.
 
-**Full drive:** the 2,025 decodable outside-index streams sampled at one frame
+**Full drive, first detector (26 Sep):** the 2,025 decodable outside-index streams sampled at one frame
 every 5 s — 4,802 frames: a person in 51, a car in 63, faces in none (4 more
 car detections sat fixed in place through their clip — flagged static, e.g. a
 parked car, and not counted). The two
@@ -304,6 +304,23 @@ walking along the road (on-screen clock 13/08/2026 05:59 PM, *Road View 1*);
 **0.83** is a small shape by a distant fence, too small to confirm. Nearly
 equal scores, very different certainty — a score ranks what to watch first;
 it is not a measure of truth.
+
+**Full drive, current detector (30 Sep):** the same 2,025 streams and 4,802
+frames, re-run with YOLOX-S + YuNet (2 x 2 tiles; person 0.4, objects 0.5,
+faces 0.7, parked vehicles 0.3; `analyse-video --fps 0.2`, about 0.7 s a
+frame on the laptop's CPU). Frames with a person **191** (51 before), a car
+**289** (63), a motorcycle 65, a face 23 (none), a bicycle 14, a truck 3; **49
+parked-vehicle places**. Flagged static and not counted: car 756, truck 38,
+motorcycle 19, person 4. These counts are leads, not a measure - the labelled
+sample below gives the detector's rates. The strongest of three classes,
+looked at by Claude (not yet by a person): person **0.93** is plainly a man
+holding a hose (*Road View 2*); face **0.83** sits on the head of a rider
+coming towards the camera on a two-wheeler (*Road View 1*), too small to
+tell a face from a helmet; bicycle **0.81** is two small figures at the far
+end of *Road View 2*, too small to confirm the bicycle. The first report is
+kept in the case folder (`analytics_classic_26sep/`, SHA-256 `9afc450d…`, the
+hash the custody ledger recorded for it); the re-run is the ledger's 23rd entry
+(`1eef57d3…`), and the chain verifies.
 
 ### Measured against labels (29 Sep)
 
