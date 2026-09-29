@@ -3534,9 +3534,26 @@ def test_s63_certificate(tmp: str) -> None:
         es = {v["sha256"] for v in json.load(fh)["streams"].values()}
     vals = cb["fields"]["hash_values"]
     check("the Schedule's wording, Part B for the expert, marked a draft",
-          rc_b == 0 and "[See section 63(4)(c)]" in hb and "(To be filled by the Expert)" in hb
-          and "do hereby solemnly affirm and sincerely state and submit as follows:-" in hb
+          rc_b == 0 and "section 63(<i>4</i>)(<i>c</i>)" in hb and "(To be filled by the Expert)" in hb
+          and "do hereby solemnly affirm and sincerely state and submit as follows:—" in hb
           and "(Hash report to be enclosed with the certificate)" in hb and "DRAFT" in hb)
+    # Word for word against the Gazette: the Schedule as printed in the Gazette
+    # of India Extraordinary, Part II Sec. 1, No. 55, 25 Dec 2023, pp. 46-47,
+    # transcribed in tests/fixtures/bsa_schedule_gazette.txt.
+    from report import s63 as S
+    gz_a, gz_b = open(os.path.join(os.path.dirname(__file__), "fixtures", "bsa_schedule_gazette.txt"),
+                      encoding="utf-8").read().split("=== PART B")
+    empty = os.path.join(tmp, "s63_empty")
+    os.makedirs(empty, exist_ok=True)
+    form_a = S.form_words(S.render(S.build(empty, part="A")))
+    form_b = S.form_words(S.render(S.build(empty, part="B")))
+    head = S.form_words("THE SCHEDULE [See section 63(4)(c)] CERTIFICATE")
+    check("Part A, word for word, as printed in the Gazette (2023, No. 55, p. 46)",
+          form_a == S.form_words(gz_a),
+          f"{[w for w in form_a if w not in S.form_words(gz_a)][:8]}")
+    check("Part B, word for word, as printed in the Gazette (p. 47)",
+          form_b[len(head):] == S.form_words(gz_b) and form_b[:len(head)] == head,
+          f"{[w for w in form_b if w not in S.form_words(gz_b)][:8]}")
     check("hash values are the case's own: whole-drive SHA-256 and MD5, and every extracted file",
           {v["value"] for v in vals if v["record"] == "whole drive"} == set(drive.values())
           and {v["value"] for v in vals if v["record"] != "whole drive"} == es

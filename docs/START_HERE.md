@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 495 tests (497 with ffmpeg on PATH), all should pass
+python tests/test_pipeline.py     # 497 tests (499 with ffmpeg on PATH), all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
@@ -114,7 +114,7 @@ If those pass, the engine below is intact:
 | Motion activity from frame sizes (no decode; lead, not evidence) | `analyse/activity.py` | working |
 | Burned-in OSD: camera titles and the clock, for footage no index names | `analytics/osd.py`, `analytics/osd_rules.py`, `cli.py read-osd` | rules and orchestration tested, `synthetic_only` — **never run on a rendered frame**; see `docs/OSD_OCR.md` §6 |
 | Video decode (MP4), face/object detection | — | not started (optional layer: ffmpeg, ONNX Runtime — see TECH_STACK) |
-| BSA s.63 certificate (draft, Part A/B, from the case's own hashes) | `report/s63.py`, `cli.py certificate` | working; wording to be checked against the Gazette |
+| BSA s.63 certificate (draft, Part A/B, from the case's own hashes) | `report/s63.py`, `cli.py certificate` | working; wording matches the Gazette word for word (a test checks it) |
 | CASE/UCO export: drive, recorder, ledger actions, every file with its hash and byte ranges | `report/case_uco.py`, `cli.py case-export` | working; a sample validates under `case_validate` 0.18.0 |
 
 **Real media:** two DVR drives are held. The CP Plus unit's SkyHawk
@@ -226,9 +226,11 @@ The PS text in `docs/PROBLEM_STATEMENT.md` is the official portal text.
 Earlier planning used third-party listings, so if anything in older team docs
 contradicts that file, the file wins.
 
-Two things remain unverified and should not be stated as fact in any report
-or slide until someone confirms them:
+Two things that were unverified are now settled (29 Sep 2026):
 
-- the exact BSA 2023 Section 63 certificate wording against the Gazette text
-  (`certificate` follows a bare-act reproduction checked 28 Sep 2026)
-- the CFReDS Heimvision `.E01` download link and licence terms
+- the BSA 2023 Section 63 certificate wording: it matches the Schedule word
+  for word as printed in the Gazette of India Extraordinary, Part II Sec. 1, No. 55, 25 Dec 2023, pp. 46-47 (CG-DL-E-25122023-250882); `tests/test_pipeline.py` compares every word
+- the CFReDS HeimVision `.E01`: downloaded, and FTK's own MD5 and SHA-1
+  reproduced (VALIDATION_REPORT §8e). Licence: CC BY-ND 4.0, as stated on the
+  creator's (Marshall University) archive.org upload
+  (`docs/research/datasets_deep.md`); the CFReDS page states none
