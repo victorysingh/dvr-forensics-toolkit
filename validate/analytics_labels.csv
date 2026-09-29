@@ -1,0 +1,288 @@
+frame,file,clip,sheet,row,col,position,person,face,vehicle,notes
+0,frames/000.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,0,0,0.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+1,frames/001.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,0,1,0.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+2,frames/002.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,0,2,1.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+3,frames/003.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,0,3,1.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+4,frames/004.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,1,0,2.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+5,frames/005.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,1,1,2.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+6,frames/006.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,1,2,3.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+7,frames/007.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,1,3,3.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+8,frames/008.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,2,0,4.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+9,frames/009.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,2,1,4.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+10,frames/010.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,2,2,5.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+11,frames/011.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,2,3,5.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+12,frames/012.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,3,0,6.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+13,frames/013.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,3,1,6.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+14,frames/014.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,3,2,7.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+15,frames/015.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,0,3,3,7.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+16,frames/016.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,0,0,8.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+17,frames/017.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,0,1,8.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+18,frames/018.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,0,2,9.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+19,frames/019.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,0,3,9.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+20,frames/020.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,1,0,10.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+21,frames/021.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,1,1,10.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+22,frames/022.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,1,2,11.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+23,frames/023.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,1,3,11.5 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+24,frames/024.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,2,0,12.0 s,y,n,n,"people on the floor below, small and distorted by the fisheye"
+25,frames/025.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,2,1,12.5 s,n,n,n,"a hand only, at the top edge"
+26,frames/026.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,2,2,13.0 s,y,y,n,installer close to the lens; face upside down and blurred
+27,frames/027.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,2,3,13.5 s,y,n,n,installer's head seen from above
+28,frames/028.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,3,0,14.0 s,y,n,n,a head at the top edge
+29,frames/029.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,3,1,14.5 s,n,n,n,"dark shape at the top edge, possibly a hand"
+30,frames/030.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,3,2,15.0 s,n,n,n,
+31,frames/031.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,1,3,3,15.5 s,n,n,n,
+32,frames/032.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,0,0,16.0 s,n,n,n,
+33,frames/033.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,0,1,16.5 s,n,n,n,
+34,frames/034.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,0,2,17.0 s,n,n,n,
+35,frames/035.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,0,3,17.5 s,n,n,n,
+36,frames/036.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,1,0,18.0 s,n,n,n,
+37,frames/037.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,1,1,18.5 s,n,n,n,
+38,frames/038.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,1,2,19.0 s,n,n,n,
+39,frames/039.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,1,3,19.5 s,n,n,n,
+40,frames/040.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,2,0,20.0 s,n,n,n,
+41,frames/041.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,2,1,20.5 s,n,n,n,
+42,frames/042.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,2,2,21.0 s,n,n,n,
+43,frames/043.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,2,3,21.5 s,n,n,n,
+44,frames/044.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,3,0,22.0 s,n,n,n,
+45,frames/045.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,3,1,22.5 s,n,n,n,
+46,frames/046.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,3,2,23.0 s,n,n,n,
+47,frames/047.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,2,3,3,23.5 s,n,n,n,
+48,frames/048.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,0,0,24.0 s,n,n,n,
+49,frames/049.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,0,1,24.5 s,n,n,n,
+50,frames/050.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,0,2,25.0 s,n,n,n,
+51,frames/051.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,0,3,25.5 s,n,n,n,
+52,frames/052.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,1,0,26.0 s,n,n,n,
+53,frames/053.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,1,1,26.5 s,n,n,n,
+54,frames/054.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,1,2,27.0 s,n,n,n,
+55,frames/055.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,1,3,27.5 s,n,n,n,
+56,frames/056.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,2,0,28.0 s,n,n,n,
+57,frames/057.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,2,1,28.5 s,n,n,n,
+58,frames/058.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,2,2,29.0 s,n,n,n,
+59,frames/059.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,2,3,29.5 s,n,n,n,
+60,frames/060.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,3,0,30.0 s,n,n,n,
+61,frames/061.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,3,1,30.5 s,n,n,n,
+62,frames/062.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,3,2,31.0 s,n,n,n,
+63,frames/063.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,3,3,3,31.5 s,n,n,n,
+64,frames/064.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,0,0,32.0 s,n,n,n,
+65,frames/065.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,0,1,32.5 s,n,n,n,
+66,frames/066.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,0,2,33.0 s,n,n,n,
+67,frames/067.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,0,3,33.5 s,n,n,n,
+68,frames/068.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,1,0,34.0 s,n,n,n,
+69,frames/069.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,1,1,34.5 s,n,n,n,
+70,frames/070.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,1,2,35.0 s,n,n,n,
+71,frames/071.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,1,3,35.5 s,n,n,n,
+72,frames/072.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,2,0,36.0 s,n,n,n,
+73,frames/073.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,2,1,36.5 s,n,n,n,
+74,frames/074.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,2,2,37.0 s,n,n,n,
+75,frames/075.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,2,3,37.5 s,n,n,n,
+76,frames/076.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,3,0,38.0 s,n,n,n,
+77,frames/077.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,3,1,38.5 s,n,n,n,
+78,frames/078.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,3,2,39.0 s,n,n,n,
+79,frames/079.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,4,3,3,39.5 s,n,n,n,
+80,frames/080.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,0,0,40.0 s,n,n,n,
+81,frames/081.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,0,1,40.5 s,n,n,n,
+82,frames/082.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,0,2,41.0 s,n,n,n,
+83,frames/083.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,0,3,41.5 s,y,y,n,a head appears at the left edge
+84,frames/084.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,1,0,42.0 s,y,y,n,man looking up at the camera
+85,frames/085.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,1,1,42.5 s,y,y,n,man looking up at the camera
+86,frames/086.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,1,2,43.0 s,y,y,n,man looking up at the camera
+87,frames/087.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,1,3,43.5 s,y,y,n,man looking up at the camera
+88,frames/088.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,2,0,44.0 s,y,y,n,man looking up at the camera
+89,frames/089.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,2,1,44.5 s,y,y,n,man looking up at the camera
+90,frames/090.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,2,2,45.0 s,y,y,n,man looking up at the camera
+91,frames/091.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,2,3,45.5 s,y,y,n,man looking up at the camera
+92,frames/092.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,3,0,46.0 s,y,y,n,man looking up at the camera
+93,frames/093.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,3,1,46.5 s,y,y,n,man looking up at the camera
+94,frames/094.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,3,2,47.0 s,n,n,n,"dark shape at the left edge, not recognisable"
+95,frames/095.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,5,3,3,47.5 s,n,n,n,
+96,frames/096.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,6,0,0,48.0 s,n,n,n,
+97,frames/097.jpg,ffmpeg_t6144_19.25.00-19.25.50[R].dav,6,0,1,48.5 s,n,n,n,
+98,frames/098.jpg,dav-sample.dav,6,0,2,0.0 s,y,y,n,two people seated at a desk
+99,frames/099.jpg,dav-sample.dav,6,0,3,0.2 s,y,y,n,two people seated at a desk
+100,frames/100.jpg,dav-sample.dav,6,1,0,0.5 s,y,y,n,two people seated at a desk
+101,frames/101.jpg,dav-sample.dav,6,1,1,0.8 s,y,y,n,two people seated at a desk
+102,frames/102.jpg,dav-sample.dav,6,1,2,1.0 s,y,y,n,two people seated at a desk
+103,frames/103.jpg,dav-sample.dav,6,1,3,1.2 s,y,y,n,two people seated at a desk
+104,frames/104.jpg,dav-sample.dav,6,2,0,1.5 s,y,y,n,two people seated at a desk
+105,frames/105.jpg,dav-sample.dav,6,2,1,1.8 s,y,y,n,two people seated at a desk
+106,frames/106.jpg,dav-sample.dav,6,2,2,2.0 s,y,y,n,two people seated at a desk
+107,frames/107.jpg,dav-sample.dav,6,2,3,2.2 s,y,y,n,two people seated at a desk
+108,frames/108.jpg,dav-sample.dav,6,3,0,2.5 s,y,y,n,two people seated at a desk
+109,frames/109.jpg,dav-sample.dav,6,3,1,2.8 s,y,y,n,two people seated at a desk
+110,frames/110.jpg,dav-sample.dav,6,3,2,3.0 s,y,y,n,two people seated at a desk
+111,frames/111.jpg,dav-sample.dav,6,3,3,3.2 s,y,y,n,two people seated at a desk
+112,frames/112.jpg,dav-sample.dav,7,0,0,3.5 s,y,y,n,two people seated at a desk
+113,frames/113.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,0,1,0.0 s,n,n,n,
+114,frames/114.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,0,2,0.2 s,n,n,n,
+115,frames/115.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,0,3,0.5 s,n,n,n,
+116,frames/116.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,1,0,0.8 s,n,n,n,
+117,frames/117.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,1,1,1.0 s,n,n,n,
+118,frames/118.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,1,2,1.2 s,n,n,n,
+119,frames/119.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,1,3,1.5 s,n,n,n,
+120,frames/120.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,2,0,1.8 s,n,n,n,
+121,frames/121.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,2,1,2.0 s,n,n,n,
+122,frames/122.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,2,2,2.2 s,n,n,n,
+123,frames/123.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,2,3,2.5 s,n,n,n,"a whiteboard held up to the lens, no hand visible"
+124,frames/124.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,3,0,2.8 s,n,n,n,"a whiteboard held up to the lens, no hand visible"
+125,frames/125.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,3,1,3.0 s,n,n,n,"a whiteboard held up to the lens, no hand visible"
+126,frames/126.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,3,2,3.2 s,n,n,n,"a whiteboard held up to the lens, no hand visible"
+127,frames/127.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,7,3,3,3.5 s,n,n,n,a hand holding a whiteboard
+128,frames/128.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,0,0,3.8 s,n,n,n,a hand holding a whiteboard
+129,frames/129.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,0,1,4.0 s,n,n,n,a hand holding a whiteboard
+130,frames/130.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,0,2,4.2 s,n,n,n,a hand holding a whiteboard
+131,frames/131.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,0,3,4.5 s,n,n,n,a hand holding a whiteboard
+132,frames/132.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,1,0,4.8 s,n,n,n,a hand holding a whiteboard
+133,frames/133.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,1,1,5.0 s,n,n,n,a hand holding a whiteboard
+134,frames/134.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,1,2,5.2 s,n,n,n,a hand at the right edge
+135,frames/135.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,1,3,5.5 s,n,n,n,
+136,frames/136.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,2,0,5.8 s,n,n,n,
+137,frames/137.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,2,1,6.0 s,n,n,n,
+138,frames/138.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,2,2,6.2 s,n,n,n,
+139,frames/139.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,2,3,6.5 s,n,n,n,
+140,frames/140.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,3,0,6.8 s,n,n,n,
+141,frames/141.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,3,1,7.0 s,n,n,n,
+142,frames/142.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,3,2,7.2 s,n,n,n,
+143,frames/143.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,8,3,3,7.5 s,n,n,n,
+144,frames/144.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,0,0,7.8 s,n,n,n,
+145,frames/145.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,0,1,8.0 s,n,n,n,
+146,frames/146.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,0,2,8.2 s,n,n,n,
+147,frames/147.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,0,3,8.5 s,n,n,n,
+148,frames/148.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,1,0,8.8 s,n,n,n,
+149,frames/149.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,1,1,9.0 s,n,n,n,
+150,frames/150.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,1,2,9.2 s,n,n,n,
+151,frames/151.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,1,3,9.5 s,n,n,n,
+152,frames/152.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,2,0,9.8 s,n,n,n,
+153,frames/153.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,2,1,10.0 s,n,n,n,
+154,frames/154.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,2,2,10.2 s,n,n,n,
+155,frames/155.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,2,3,10.5 s,n,n,n,
+156,frames/156.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,3,0,10.8 s,n,n,n,
+157,frames/157.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,3,1,11.0 s,n,n,n,
+158,frames/158.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,3,2,11.2 s,n,n,n,
+159,frames/159.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,9,3,3,11.5 s,n,n,n,
+160,frames/160.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,0,0,11.8 s,n,n,n,
+161,frames/161.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,0,1,12.0 s,n,n,n,
+162,frames/162.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,0,2,12.2 s,n,n,n,
+163,frames/163.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,0,3,12.5 s,n,n,n,
+164,frames/164.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,1,0,12.8 s,n,n,n,
+165,frames/165.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,1,1,13.0 s,n,n,n,
+166,frames/166.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,1,2,13.2 s,n,n,n,
+167,frames/167.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,1,3,13.5 s,n,n,n,
+168,frames/168.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,2,0,13.8 s,n,n,n,
+169,frames/169.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,2,1,14.0 s,n,n,n,
+170,frames/170.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,2,2,14.2 s,n,n,n,
+171,frames/171.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,2,3,14.5 s,n,n,n,
+172,frames/172.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,3,0,14.8 s,n,n,n,
+173,frames/173.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,3,1,15.0 s,n,n,n,
+174,frames/174.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,3,2,15.2 s,n,n,n,
+175,frames/175.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,10,3,3,15.5 s,n,n,n,
+176,frames/176.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,0,0,15.8 s,n,n,n,
+177,frames/177.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,0,1,16.0 s,n,n,n,
+178,frames/178.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,0,2,16.2 s,n,n,n,
+179,frames/179.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,0,3,16.5 s,n,n,n,
+180,frames/180.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,1,0,16.8 s,n,n,n,
+181,frames/181.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,1,1,17.0 s,n,n,n,
+182,frames/182.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,1,2,17.2 s,n,n,n,
+183,frames/183.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,1,3,17.5 s,n,n,n,
+184,frames/184.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,2,0,17.8 s,n,n,n,
+185,frames/185.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,2,1,18.0 s,n,n,n,
+186,frames/186.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,2,2,18.2 s,n,n,n,
+187,frames/187.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,2,3,18.5 s,n,n,n,
+188,frames/188.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,3,0,18.8 s,n,n,n,
+189,frames/189.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,3,1,19.0 s,n,n,n,
+190,frames/190.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,3,2,19.2 s,n,n,n,
+191,frames/191.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,11,3,3,19.5 s,n,n,n,
+192,frames/192.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,0,0,19.8 s,n,n,n,
+193,frames/193.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,0,1,20.0 s,n,n,n,
+194,frames/194.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,0,2,20.2 s,n,n,n,
+195,frames/195.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,0,3,20.5 s,n,n,n,
+196,frames/196.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,1,0,20.8 s,n,n,n,
+197,frames/197.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,1,1,21.0 s,n,n,n,
+198,frames/198.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,1,2,21.2 s,n,n,n,
+199,frames/199.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,1,3,21.5 s,n,n,n,
+200,frames/200.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,2,0,21.8 s,n,n,n,
+201,frames/201.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,2,1,22.0 s,n,n,n,
+202,frames/202.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,2,2,22.2 s,n,n,n,
+203,frames/203.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,2,3,22.5 s,n,n,n,
+204,frames/204.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,3,0,22.8 s,n,n,n,
+205,frames/205.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,3,1,23.0 s,n,n,n,
+206,frames/206.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,3,2,23.2 s,n,n,n,
+207,frames/207.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,12,3,3,23.5 s,n,n,n,
+208,frames/208.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,0,0,23.8 s,n,n,n,
+209,frames/209.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,0,1,24.0 s,n,n,n,
+210,frames/210.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,0,2,24.2 s,n,n,n,
+211,frames/211.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,0,3,24.5 s,n,n,n,
+212,frames/212.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,1,0,24.8 s,n,n,n,
+213,frames/213.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,1,1,25.0 s,n,n,n,
+214,frames/214.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,1,2,25.2 s,n,n,n,
+215,frames/215.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,1,3,25.5 s,n,n,n,
+216,frames/216.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,2,0,25.8 s,n,n,n,
+217,frames/217.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,2,1,26.0 s,n,n,n,
+218,frames/218.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,2,2,26.2 s,n,n,n,
+219,frames/219.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,2,3,26.5 s,n,n,n,
+220,frames/220.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,3,0,26.8 s,n,n,n,
+221,frames/221.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,3,1,27.0 s,n,n,n,
+222,frames/222.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,3,2,27.2 s,n,n,n,
+223,frames/223.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,13,3,3,27.5 s,n,n,n,
+224,frames/224.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,0,0,27.8 s,n,n,n,
+225,frames/225.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,0,1,28.0 s,n,n,n,
+226,frames/226.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,0,2,28.2 s,n,n,n,
+227,frames/227.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,0,3,28.5 s,n,n,n,
+228,frames/228.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,1,0,28.8 s,n,n,n,
+229,frames/229.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,1,1,29.0 s,n,n,n,
+230,frames/230.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,1,2,29.2 s,n,n,n,
+231,frames/231.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,1,3,29.5 s,n,n,n,
+232,frames/232.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,2,0,29.8 s,n,n,n,
+233,frames/233.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,2,1,30.0 s,n,n,n,
+234,frames/234.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,2,2,30.2 s,n,n,n,
+235,frames/235.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,2,3,30.5 s,n,n,n,
+236,frames/236.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,3,0,30.8 s,n,n,n,
+237,frames/237.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,3,1,31.0 s,n,n,n,
+238,frames/238.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,3,2,31.2 s,n,n,n,
+239,frames/239.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,14,3,3,31.5 s,n,n,n,
+240,frames/240.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,0,0,31.8 s,n,n,n,
+241,frames/241.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,0,1,32.0 s,n,n,n,
+242,frames/242.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,0,2,32.2 s,n,n,n,
+243,frames/243.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,0,3,32.5 s,n,n,n,
+244,frames/244.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,1,0,32.8 s,n,n,n,
+245,frames/245.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,1,1,33.0 s,n,n,n,
+246,frames/246.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,1,2,33.2 s,n,n,n,
+247,frames/247.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,1,3,33.5 s,n,n,n,
+248,frames/248.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,2,0,33.8 s,n,n,n,
+249,frames/249.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,2,1,34.0 s,n,n,n,
+250,frames/250.jpg,forespeed_T1P3-Swan-CH01-20210814-191120-191154-103000000000.avi,15,2,2,34.2 s,n,n,n,
+251,frames/251.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,15,2,3,0.0 s,n,n,n,
+252,frames/252.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,15,3,0,0.1 s,n,n,n,
+253,frames/253.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,15,3,1,0.2 s,n,n,n,
+254,frames/254.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,15,3,2,0.3 s,n,n,n,
+255,frames/255.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,15,3,3,0.4 s,n,n,n,
+256,frames/256.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,16,0,0,0.5 s,n,n,n,
+257,frames/257.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,16,0,1,0.6 s,n,n,n,
+258,frames/258.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,16,0,2,0.7 s,n,n,y,truck front entering at the right edge
+259,frames/259.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,16,0,3,0.8 s,n,n,y,
+260,frames/260.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,16,1,0,0.9 s,n,n,y,driver hidden by windscreen glare
+261,frames/261.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,16,1,1,1.0 s,y,n,y,driver seen through the side window
+262,frames/262.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,16,1,2,1.1 s,y,n,y,driver seen through the side window
+263,frames/263.jpg,forespeed_T1P4-Lorex-D862A8_ch1_main_20210814191228_20210814191230.mp4,16,1,3,1.2 s,y,n,y,driver seen through the side window
+264,frames/264.jpg,imkh_00000001541000000.mp4,16,2,0,0.0 s,n,n,y,"parked cars, night, infrared"
+265,frames/265.jpg,imkh_00000001541000000.mp4,16,2,1,3.3 s,n,n,y,"parked cars, night, infrared"
+266,frames/266.jpg,imkh_00000001541000000.mp4,16,2,2,6.7 s,n,n,y,"parked cars, night, infrared"
+267,frames/267.jpg,imkh_00000001541000000.mp4,16,2,3,10.0 s,n,n,y,"parked cars, night, infrared"
+268,frames/268.jpg,imkh_00000001541000000.mp4,16,3,0,13.3 s,n,n,y,"parked cars, night, infrared"
+269,frames/269.jpg,imkh_00000001541000000.mp4,16,3,1,16.7 s,n,n,y,"parked cars, night, infrared"
+270,frames/270.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,16,3,2,0.0 s,n,n,n,
+271,frames/271.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,16,3,3,0.5 s,n,n,n,
+272,frames/272.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,0,0,1.0 s,n,n,n,
+273,frames/273.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,0,1,1.5 s,n,n,n,
+274,frames/274.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,0,2,2.0 s,n,n,n,
+275,frames/275.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,0,3,2.5 s,n,n,n,
+276,frames/276.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,1,0,3.0 s,n,n,n,
+277,frames/277.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,1,1,3.5 s,n,n,n,
+278,frames/278.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,1,2,4.0 s,n,n,n,
+279,frames/279.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,1,3,4.5 s,n,n,n,
+280,frames/280.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,2,0,5.0 s,n,n,n,
+281,frames/281.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,2,1,5.5 s,n,n,n,
+282,frames/282.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,2,2,6.0 s,n,n,n,
+283,frames/283.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,2,3,6.5 s,n,n,n,
+284,frames/284.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,3,0,7.0 s,n,n,n,
+285,frames/285.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,3,1,7.5 s,n,n,n,
+286,frames/286.jpg,ffmpeg_t4182_20150327215559_ch01.mp4,17,3,2,8.0 s,n,n,n,

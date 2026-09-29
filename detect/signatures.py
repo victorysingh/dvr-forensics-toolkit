@@ -197,7 +197,7 @@ OTHER_OEMS = [
     ),
     Signature(
         id="heimvision.brand",
-        vendor="Heimvision",
+        vendor="HeimVision",
         pattern=b"HEIMVISION",
         description="Heimvision string - the NIST CFReDS reference DVR image",
         source="NIST CFReDS DVR dataset",
