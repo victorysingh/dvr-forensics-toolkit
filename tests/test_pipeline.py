@@ -2017,6 +2017,57 @@ def test_analytics_tiles() -> None:
               for t in (0.2, 0.3, 0.4, 0.5, 0.6)))
 
 
+def test_analytics_models() -> None:
+    """The model sets: every model pinned, with a licence that allows use and a
+    source to fetch it from; each set's thresholds are ones the sweep scores."""
+    print("\n[analytics: model sets]")
+    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS
+    from validate.analytics_eval import SWEEP
+    check("every model is pinned by SHA-256, with an https source and an MIT or Apache-2.0 licence",
+          all(len(m["sha256"]) == 64 and int(m["sha256"], 16) >= 0 and m["url"].startswith("https://")
+              and m["license"] in ("MIT", "Apache-2.0") and m["file"].endswith(".onnx")
+              for m in MODELS.values()))
+    check("each set names a pinned model for faces and one for objects, and a default tiling",
+          all(s["faces"] in MODELS and s["objects"] in MODELS and s["tiles"] >= 1
+              for s in MODEL_SETS.values()) and DEFAULT_SET == "yolox")
+    check("each set's thresholds are among the sweep's, so the sweep reports the tool's own row",
+          all(s["faces_min"] in SWEEP["face"] and s["objects_min"] in SWEEP["objects"]
+              for s in MODEL_SETS.values()))
+
+
+def test_caviar_eval(tmp: str) -> None:
+    """Scoring on CAVIAR: the ground truth read from its XML, a person found
+    by box overlap, a static box not counted, and boxes over nobody counted
+    apart."""
+    print("\n[analytics: CAVIAR scoring]")
+    from validate.caviar_eval import ground_truth, score
+    xml = os.path.join(tmp, "gt.xml")
+    with open(xml, "w", encoding="utf-8") as fh:
+        fh.write('<?xml version="1.0"?><dataset name="Walk1">'
+                 '<frame number="0"><objectlist/><grouplist/></frame>'
+                 '<frame number="25"><objectlist><object id="0"><orientation>90</orientation>'
+                 '<box h="96" w="48" xc="192" yc="144"/></object>'
+                 '<object id="1"><box h="20" w="10" xc="40" yc="40"/></object></objectlist>'
+                 '<grouplist/></frame></dataset>')
+    gt = ground_truth(xml)
+    big, tiny = gt[25]
+    check("CAVIAR ground truth: boxes in 0-1 of the 384 x 288 picture, with the height in pixels",
+          gt[0] == [] and big == [0.4375, 1 / 3, 0.5625, 2 / 3, 96.0] and tiny[4] == 20.0, str(gt))
+    person = lambda box, **k: dict({"label": "person", "score": 0.8, "box": box}, **k)
+    frames = [{"clip": "Walk1.mpg", "gt": gt[0], "detections": [person([0.1, 0.1, 0.2, 0.3], static=True)]},
+              {"clip": "Walk1.mpg", "gt": gt[25],
+               "detections": [person([0.44, 0.34, 0.56, 0.66]), person([0.8, 0.8, 0.9, 0.95])]}]
+    s = score(frames)
+    check("CAVIAR scoring: the tall person found, the small one missed, a static box not "
+          "counted, a box over nobody counted apart",
+          s["people_found"] == 1 and s["people_labelled"] == 2
+          and s["by_height"]["80 px and over"] == {"found": 1, "labelled": 1}
+          and s["by_height"]["under 40 px"] == {"found": 0, "labelled": 1}
+          and s["frames_without_person"] == {"reported": 0, "of": 1}
+          and s["frames_with_person"] == {"found": 1, "of": 1} and s["boxes_matching_no_label"] == 1,
+          json.dumps(s))
+
+
 def test_hikbtree(tmp: str) -> None:
     """HIKBTREE records as observed on real media: found by shape, the data
     base found as the common residue, copies de-duplicated, and a carved
@@ -4004,6 +4055,8 @@ def main() -> int:
         test_static_detections()
         test_analytics_eval(tmp)
         test_analytics_tiles()
+        test_analytics_models()
+        test_caviar_eval(tmp)
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)
