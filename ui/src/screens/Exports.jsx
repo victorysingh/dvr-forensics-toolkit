@@ -1,8 +1,7 @@
 // Reports and exports (UI_PLAN 6.9).
 //
-// The full artefact list with sizes and hashes needs load_case's `artifacts`
-// key, which is P2 server work.  Until then this shows what the case view
-// already carries: the rendered report, and the hashes of what was written.
+// Shows what the case view carries: the rendered report, and the hashes of
+// what the pipeline wrote.  Court exports are written by their own commands.
 import { Section, Card, DL, Hash, Code, Empty } from "../components/index.jsx";
 import { api } from "../lib/api.js";
 
@@ -107,9 +106,8 @@ export default function Exports({ c }) {
         <Card>
           <p className="dim text-[12.5px] mb-2.5">
             The s.63 certificate, CASE/UCO JSON-LD and NIST CCTV export are written into
-            the case folder by their own commands. Listing them here with their sizes and
-            hashes needs the <Code>artifacts</Code> key from <Code>load_case</Code> &mdash;
-            that is P2 server work in the plan, not yet built.
+            the case folder by their own commands, each recorded in the custody ledger
+            with its hash.
           </p>
           <DL rows={[
             ["s.63 certificate", <Code>{`cli.py certificate --out ${c.id} --part B`}</Code>],

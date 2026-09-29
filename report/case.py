@@ -41,10 +41,13 @@ def parse_report_names(case_dir: str) -> list[str]:
 # parser's status is the weakest evidence behind it - never better.
 VENDOR_MATRIX = {
     "Hikvision": {
-        "family": "Hikvision (HIKBTREE)", "parser": "Hikvision", "parser_status": "synthetic_only",
-        "media": "second drive held - not yet read",
-        "basis": "HIKBTREE layout from published analyses; field offsets corroborated only by "
-                 "the synthetic fixture until the team's own drive is read"},
+        "family": "Hikvision (HIKBTREE)", "parser": "Hikvision", "parser_status": "spec_only",
+        "media": "drive 2 (Z9C2632A) read: Hikvision DS-7B08HUHI-K1 footage under a "
+                 "Dahua-family reformat",
+        "basis": "parsers/hikvision.py rewritten on the layout observed on drive 2 (master "
+                 "sector, HIKBTREE copies, 48-byte index records) and tested on a disk built "
+                 "to that layout; not yet run on an intact Hikvision disk, and not "
+                 "byte-matched to a recorder export"},
     "Dahua": {
         "family": "Dahua DHFS 4.1", "parser": "Dahua", "parser_status": "spec_only",
         "media": "CP Plus drive held (Dahua-family, DHFS 4.1)",
@@ -131,6 +134,41 @@ def plugins_view() -> dict:
             "plugin_dir": parsers.DROP_IN_DIR or parsers.PLUGIN_DIR}
 
 
+def _with_local_span(rec: dict) -> dict:
+    """A recording with `start_time_local`/`end_time_local` for display.
+
+    The contract holds no local-time field: `start_utc` stays empty until the
+    zone is known, and the recorder's own times live in `timestamps` as the
+    decoder wrote them.  The span is picked by the timeline's rule - the first
+    two index claims, else the first and last container claims - so the
+    Recordings screen and the timeline can never disagree."""
+    from analyse.timeline import fmt, parse_local
+
+    def claims(source: str) -> list:
+        return [d for d in (parse_local(c.get("raw_value", "")) for c in rec.get("timestamps", [])
+                            if c.get("source") == source) if d]
+
+    idx, cont = claims("index"), claims("container")
+    span = (idx[0], idx[1]) if len(idx) >= 2 else (cont[0], cont[-1]) if len(cont) >= 2 else None
+    return dict(rec, start_time_local=fmt(span[0]) if span else None,
+                end_time_local=fmt(span[1]) if span else None)
+
+
+def _labelled_thumb(thumb: dict, clip: dict) -> dict:
+    """A thumbnail with the labels and top score of the boxes drawn on it.
+
+    analytics.json stores a thumbnail as a file and a time; what was detected
+    on that frame is the detection entry at the same time in the same clip."""
+    boxes = [d for h in clip.get("detections", []) if h.get("t_s") == thumb.get("t_s")
+             for d in h.get("detections", [])]
+    # a static or implausible box is flagged, not counted - it names nothing
+    counted = [d for d in boxes if not d.get("static") and not d.get("implausible")]
+    labels = sorted({d["label"] for d in counted})
+    return dict(thumb, clip=clip["clip"],
+                label=", ".join(labels) or ("flagged, not counted" if boxes else None),
+                score=max((d["score"] for d in counted), default=None))
+
+
 def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
     j = lambda *p: os.path.join(case_dir, *p)
     scan = _load(j("scan_report.json"))
@@ -186,7 +224,7 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                          "summary": p.get("volume", {}).get("summary", []),
                          "volume_vendor": p.get("volume", {}).get("vendor"),
                          "recordings_total": len(recs), "per_camera": per_cam,
-                         "recordings": recs[:recordings_limit],
+                         "recordings": [_with_local_span(r) for r in recs[:recordings_limit]],
                          "remnants_total": len(p.get("remnants", [])),
                          "remnants": p.get("remnants", [])[:recordings_limit],
                          "field_provenance": p.get("field_provenance", []),
@@ -315,7 +353,7 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
             "clips": len(an.get("clips", [])),
             "frames_analysed": sum(c["frames_analysed"] for c in an.get("clips", [])),
             "top": hits[:100],
-            "thumbnails": [dict(t, clip=c["clip"]) for c in an.get("clips", [])
+            "thumbnails": [_labelled_thumb(t, c) for c in an.get("clips", [])
                            for t in c.get("thumbnails", [])][:60]}
 
     osd = _load(j("analytics", "osd.json"))
