@@ -23,7 +23,7 @@ they are evidence).
 | Decode proprietary formats | **done on real media** — Dahua DHAV → H.265; Hikvision MPEG-PS + `HK` descriptors → H.264/H.265; ffmpeg decodes both. Second implementation: ffmpeg's own `dhav` reader and ours agree on all 719,097 video frames it emits from drive 1's 2,246 carved streams (29 Sep) | `recover/carver.py`, `recover/pscarve.py` |
 | Extract video and metadata | **done** — `.dav`/`.h265` and `.ps`, per-file SHA-256; the Hikvision recorder's own system log (43,108 events on drive 2: power cycles, a local `admin` session, disk events) | `extract-carved`, `extract`, `hik-log` |
 | Recover deleted footage | **done on real media** — Dahua: 2,246 streams outside every index; Hikvision: a whole reformatted drive, 2,516 streams | carvers |
-| Attribute recovered footage to a camera | **done where an index survived** — 2,021 of 2,516 Hikvision streams from HIKBTREE records; of the other 495, 440 are stale tails (an older cycle past the write pointer, ~1 month older, camera unknown) and 55 lie in blocks with no record (29 Sep). For the 2,741 streams no index covers, `read-osd` reads the title the recorder painted into the picture; built and tested, OCR accuracy not yet measured | `parsers/hikbtree.py`, `analytics/osd.py` |
+| Attribute recovered footage to a camera | **done where an index survived** — 2,021 of 2,516 Hikvision streams from HIKBTREE records; of the other 495, 440 are stale tails (an older cycle past the write pointer, ~1 month older, camera unknown) and 55 lie in blocks with no record (29 Sep). For the 2,741 streams no index covers, `read-osd` reads the title the recorder painted into the picture; built and tested; measured on six recorders' files, the OCR is weak (5 of 36 clocks exact, no title right; `VALIDATION_REPORT.md` §8c) | `parsers/hikbtree.py`, `analytics/osd.py` |
 | Normalize timestamps | **partly** — recorder clock decoded and cross-checked against burned-in clocks on both vendors (by eye on three frames; `read-osd` now does it per stream, untested against real pixels); conversion to UTC needs the recorder's zone and clock error, which we have not read from the units - or, with no unit, the daylight route (`analyse/daylight.py`: the offset from the cameras' infrared switches at dusk and dawn, VALIDATION_REPORT §8l), not yet run on our drives | `analyse/timeline.py`, `analytics/osd.py` |
 | Correlate events across cameras | **done** — gaps per camera, recorder-wide gaps, recurring patterns, multi-camera activity peaks; on drive 2, **16 of 17 silences on every camera explained by power cuts in the recorder's own log** | `analyse/timeline.py`, `analyse/activity.py` |
 | Chain of custody | **done** — hash-chained ledger; every action recorded with the hash of what it produced | `acquire/ledger.py` |
@@ -107,7 +107,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 514 tests, no hardware, ~1 minute (516 with ffmpeg on PATH).
+`python tests/test_pipeline.py` — 517 tests, no hardware, ~1 minute (519 with ffmpeg on PATH).
 
 ## 4. Things learned the hard way
 
@@ -169,10 +169,10 @@ real media; the rest is open, and there is new work that fits it.
    and cross-checks the OSD clock against the date decoded from the container.
    It is wired into the report (section 6c), the viewer and the ledger.
 
-   **It has never been run on a rendered frame** — neither ffmpeg nor Tesseract
-   was installed where it was written, so the OCR accuracy is untested and the
-   status is `synthetic_only`. The next step is small and is the whole of the
-   remaining work: on a machine with `ffmpeg` and `tesseract-ocr`, run it over
+   **Measured (29 Sep) on six real recorders' files** with
+   `python -m validate.osd_eval`: the clock found on 3 of 6, 5 of 36 painted
+   clocks read exactly, 9 wrong, no title right (`VALIDATION_REPORT.md` §8c).
+   The OCR engine, not the rules, is the limit. Still to do: run it over
    the streams whose frames §8a and §8b of `VALIDATION_REPORT.md` already
    record being read by eye (*Parking*, *Road View 1/2*; *Camera 01*,
    *Camera 03*) and compare. Matching what the eye read, on two vendors, makes

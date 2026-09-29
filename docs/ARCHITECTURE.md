@@ -231,5 +231,5 @@ FastAPI + React product UI.
 
 Built since this section was written, and listed here only to say what is still
 missing from them: AI analytics and the on-screen clock/title OCR both exist as
-the optional `analytics/` layer, but the OCR has never been run on a rendered
-frame (`docs/OSD_OCR.md` §6), and neither has a measured accuracy.
+the optional `analytics/` layer, and both are now measured on real recorders'
+footage (`VALIDATION_REPORT.md` §8a, §8c): both are leads, and the OCR is weak.
