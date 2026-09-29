@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 523 pass, 0 fail: 501 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 7 on vendor-made files: 5 from other recorders (§8g) and 2 on NIST's reference export (§8i) |
+| Automated tests | 528 pass, 0 fail: 505 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -790,6 +790,41 @@ The whole workflow, run as an examiner would run it: from `ps26150-dvr.exe`
   §3.4 extracts to `--out clips/`, and the certificate looked only at the
   case folder's top level. It now looks one folder down, and it leaves out
   (and says so) any footage whose manifest names another device.
+
+## 8l. The recorder's clock from daylight (`analyse/daylight.py`)
+
+Converting recorder time to UTC needs the recorder's zone and its clock
+error, normally read at the unit (SOP 1.2). With the unit out of reach, an
+outdoor camera holds a clock nobody can set: most CCTV cameras switch to a
+black-and-white infrared picture at dusk and back to colour at dawn, at a
+fixed light level - to first order, a fixed sun elevation.
+
+The tool finds each switch in footage sampled over days, stamped with the
+recorder's clock, and searches for the offset T (recorder = UTC + T) at
+which every dusk and every dawn switch sits at the same sun elevation (NOAA's
+solar equations). A wrong T moves dusk elevations one way and dawn ones the
+other, so only the right one makes them agree. The camera's threshold is
+not needed, and it comes out of the fit. The sun must be setting at every
+dusk switch and rising at every dawn one, which also rules out the 12-hour
+alias.
+
+| Check | Result |
+|---|---|
+| The sun | Bengaluru's 18:16 IST sunset on 23 Sep 2026 at the horizon (-0.8 deg); noon 76.9 deg |
+| 10 days of generated footage: IST, a clock 7 min fast, switch at -2 deg, +-0.6 deg of weather per switch, headlight flashes | 10 dusk + 10 dawn switches; **UTC +337 min = IST + 7 min**, found exactly; per-switch offsets 334-340; switch elevation -2.0 deg recovered |
+| Only dusks | refused: every offset fits them equally |
+| Real recorder footage (§8g samples) | a Hikvision infrared night picture measures chroma 0.0, a daylight one 49.5, evening Dahua colour 5.8-17.7 (threshold 4.0); a `.dav`'s samples carry the recorder's own frame times |
+
+**Limits, stated with each result:**
+- Weather moves the light threshold, and the spread of the per-switch offsets
+  shows by how much.
+- A street-lit scene or a camera without infrared has no switch.
+- The result settles a zone and a clock error of minutes, not seconds.
+- Estimating clocks from daylight is not new (Sundial, EWSN 2009); reading it
+  from a DVR's infrared switches is the application here.
+
+**Not yet run on our drives.** It needs days of the CP Plus unit's outdoor
+cameras (*Parking*, *Road View*) and the site's latitude and longitude.
 
 ## 9. Vendor format status
 

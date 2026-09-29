@@ -147,9 +147,9 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 523 in all: 501 on generated data with known ground
+- **Automated tests:** 528 in all: 505 on generated data with known ground
   truth, 15 on real media (9 on the CP Plus drive's image, 6 on the
-  HeimVision E01 and its FTK listing), and 7 on vendor-made files: 5 from
+  HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
   They cover the Merkle tree, the custody chain, bad sectors, device loss,
   every parser and carver, the timeline, the model check, the export
@@ -318,7 +318,10 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
 - **Nothing is `validated`.** It needs a native export and a reference disk.
 - **No UTC.** The time zone and clock error of neither recorder have been
   read, so every time is the recorder's own clock. The combined two-recorder
-  view says "not aligned" for this reason.
+  view says "not aligned" for this reason. A route that needs no unit is
+  built: the offset from the cameras' infrared switches at dusk and dawn
+  (`VALIDATION_REPORT.md` §8l). It is tested on generated days and real
+  night and day footage, and not yet run on our drives' outdoor cameras.
 - **The OCR reads 1 of 5 reference titles and no clock on real frames.**
   It read "Camera 01" on drive 2 correctly, but no title on drive 1, where
   thin white text sits on a bright wall, and no clock on either drive: both
