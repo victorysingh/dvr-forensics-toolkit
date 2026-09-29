@@ -49,6 +49,19 @@ goes beyond.
   data. We report confidence as a score that saturates below 100%
   (`detect/engine.py`), and we treat `validated` as something only a
   recorder's own export can grant.
+- **Checked without an export.** Where no reference export exists, the
+  testing standards accept a second method: comparison testing "may be the
+  best available testing" (SWGDE 18-Q-001 v2.1, App. A); "Use of Second
+  Method" (SWGDE 12-Q-001 §5.8); "uses of multiple tools" to mitigate
+  uncertainty (UK FSR-G-218 §7.3.4); comparison with other validated methods
+  (ISO/IEC 17025:2017 cl. 7.2.2.1). We apply them on vendor-made files from
+  other recorders (`VALIDATION_REPORT.md` §8g): ffmpeg's `dhav` demuxer and
+  ours agree frame for frame on two real Dahua recordings, and Hikvision's
+  `HK` times agree with the painted clock or the recorder's own file name on
+  three Hikvision-made files. None of this raises a status: it is shown next
+  to it. Why it matters: in DFPulse 2024, 30% of practitioners (52% in the
+  UK, where ISO 17025 applies) said missing validation stops them using
+  open-source tools.
 
 ### D2. Measured on real drives, failures included
 
@@ -106,7 +119,10 @@ goes beyond.
   interleaved DHAV streams from *analog* Dahua DVRs using the **channel
   identifiers embedded in the frames** plus temporal coherence. That works
   where the identifier is set. On the IP-camera unit we hold it is not, and
-  continuity is what remains.
+  continuity is what remains. Park & Lee (2014), the most-cited DVR fragment
+  paper, reassemble DVR video fragments in unallocated space by continuity;
+  the principle is theirs, and the measurement on real field drives, with a
+  stated split-not-guess rule, is what we add.
 
 ### D5. One pass, provable afterwards
 
@@ -148,6 +164,21 @@ goes beyond.
   misread timestamps, and their checklist asks to record the device clock
   against true time at seizure. Our SOP step 1.2 does exactly that, and the
   tool will not convert without it.
+- **Independent clocks, checked against each other** (`VALIDATION_REPORT.md`
+  §8e, §8g). On NIST's HeimVision image the painted clock, the frame headers
+  and the system clock are reconciled: the frame times *are* the painted
+  clock, and the system clock runs 8 h behind (zone setting UTC+8). Another
+  SIH team's published timeline for the same image disagrees with the
+  painted clock by about 11 h 20 min; the cause is not established. On three
+  Hikvision-made files the `HK` time equals the painted clock (0 s, 5/5),
+  trails it by a constant 1 s (10/10), or equals the recorder's file-name
+  start. Dstl (2022) puts it plainly: a hash shows a file was not altered,
+  not that its clock was right - that is a question of authenticity.
+- **"Working properly", from the device itself.** BSA s.63(2) asks whether
+  the device was working properly during the period. The recorder's own
+  log answers that from the device: drive 2's log records 188 power cuts,
+  and the CP Plus unit's log (read on its screen) matched drive 1's
+  recorder-wide gap at 18:59 to the minute (`VALIDATION_REPORT.md` §8).
 
 ### D8. Vendor *and* model, with the disk's history as a finding
 
@@ -211,6 +242,29 @@ goes beyond.
   the custody ledger, and drafts the certificate from the case
   (`cli.py certificate`, PR #14), recording the draft in the ledger. Its
   wording must be checked against the Schedule by Hriday before use.
+- *Pune Bar Association v. Union of India* (SC, 22 May 2026) upheld s.63(4)
+  and its Schedule, called the hash value "an electronic fingerprint", and
+  lets the Part B certificate come from a s.79A Examiner of Electronic
+  Evidence or, "on the basis of unimpeachable material", from another
+  skilled person. The tool is built to give that expert the material: the
+  hash (Part A), a hash-chained record of every step, and a per-format
+  status with its evidence. It is not admissible in itself; no tool is.
+- *Randeep Singh @ Rana v. State of Haryana* (SC, 2024 INSC 887) held CCTV
+  footage on a CD inadmissible. Nobody who copied it had seen it, nothing
+  tied the CD to the recorder, it carried no hash or marking, and no
+  certificate was produced. Each gap has an answer here: a hash per
+  artefact bound to the drive's Merkle root; byte offsets and the recorder
+  unit read off the platter; a ledger of who did what; and the recorder's
+  own index and log checked against the recovered footage.
+- Puducherry's G.O.Ms.No.27 (Home Dept, 6 May 2025) names the DVR/NVR itself
+  as primary evidence and asks for the hash at seizure. Kerala Police's CCTV
+  seizure SOP asks for make and model, a time check against a reference
+  clock, and native export - the steps `record-device`, `identify-model`,
+  SOP 1.2 and `validate-export` turn into recorded, hashed steps.
+- MeitY's s.79A Examiner scheme (v2.0, Nov 2025) now lists "CCTV Forensics";
+  labs must run ISO/IEC 17025 and list every tool, free or commercial, with
+  its version - which is what the per-format status and validation records
+  are for.
 
 ### D12. Tested on a public image that anyone can re-check
 
@@ -278,6 +332,10 @@ goes beyond.
     PR #28). Over the first 8 GiB it covers 100% of the bytes the DHAV
     carver recovered, plus 48.7 MiB more, but as **one** stream: the three
     cameras share identical encoder settings.
+  - That limit is **this tool's**, not the field's: CARVE (Giri, Yoon &
+    Hwang, DFRWS APAC 2026) separates identically configured Honeywell
+    cameras by OCR of the painted camera label, or by PRNU sensor noise where
+    there is none. Neither route is in our stdlib-only carver.
 - **Beyond what.** Garfinkel (2007) makes structural validation the test for
   accepting a carved candidate. We apply it, then **measure** the result
   against ground truth on real media and publish what the carver cannot do.
@@ -360,16 +418,28 @@ goes beyond.
 
 ## 5. For the slides (five lines)
 
+Stress-tested against the literature and 30+ rival repositories (29 Sep,
+`docs/research/`):
+
 - Recovered **6,300 hours** of Hikvision footage from under **another vendor's
-  format**: 99.6% of what the surviving index says was recorded.
-- **One read** of a 1 TB drive: hashes, Merkle map, detection, both carvers;
-  any clip provable later without re-reading.
+  reformat**: 99.6% of what the drive's own surviving index says was
+  recorded. No paper or rival tests a cross-vendor reformat.
+- **Times checked, not trusted:** the recorder's log matched a video gap to
+  the minute; on NIST's public image the painted, frame and system clocks are
+  reconciled (zone setting UTC+8), where another team's timeline is ~11 h off
+  the painted clock.
 - **Nothing is called `validated`** until it byte-matches the recorder's own
-  export; the tool to do that is built.
+  export; meanwhile every format shows the checks it passed - second
+  implementation, vendor-made files - as SWGDE and ISO 17025 allow.
+- **Real media from three recorder families** (Dahua/CP Plus, Hikvision,
+  HeimVision), failures published. No paper or rival has more than two.
 - Cameras separated **even where the frames carry no camera number**; split,
   never guessed.
-- **Two real drives, two real bugs** found and fixed, each with a regression
-  test.
+
+Not unique, so not pitched as such: hashes, the Merkle map, the custody
+ledger, the s.63 draft, "AI as a lead", offline use, testing on the NIST
+image, and reading the model off the platter (Yoon & Hwang did it for
+Honeywell). They are the engineering under the five lines above.
 
 ---
 
@@ -398,5 +468,18 @@ goes beyond.
 21. J. Brunty, R. Mock (Marshall University). *Heimvision DVR .E01 Forensic Image*, 2021. NIST Computer Forensic Reference Data Sets (CFReDS) — [cfreds.nist.gov](https://cfreds.nist.gov/). Media MD5 `4895ea6d10b08c29fb1bb03591adc7b2`.
 22. J. Metz (libyal). *Expert Witness Compression Format (EWF)* — [libewf documentation](https://github.com/libyal/libewf/tree/main/documentation).
 
-Items 15–17 and 20 are standard references not re-fetched on 28 Sep; the rest
-were checked on that date.
+23. J. Park, S. Lee. *Data fragment forensics for embedded DVR systems.* Digital Investigation 11(3):187–200, 2014. doi:10.1016/j.diin.2014.06.001 — [doi](https://doi.org/10.1016/j.diin.2014.06.001). Abstract only.
+24. S. Giri, J. Yoon, S. Hwang. *CARVE: Recovering and Reconstructing Deleted H.264/H.265 Video from Honeywell Surveillance Systems.* DFRWS APAC 2026 — [dfrws.org](https://dfrws.org/presentation/carve-recovering-and-reconstructing-deleted-h-264-h-265-video-from-honeywell-surveillance-systems/). Abstract.
+25. *Pune Bar Association v. Union of India*, W.P.(C) No. 599 of 2026, Supreme Court of India, 22 May 2026, 2026 LiveLaw (SC) 551 — [judgment](https://www.livelaw.in/pdf_upload/2026/05/27/pune-bar-association-v-union-of-india-676590.pdf). Read in full.
+26. *Randeep Singh @ Rana v. State of Haryana*, 2024 INSC 887, Supreme Court of India, 22 Nov 2024 — [judgment](https://api.sci.gov.in/supremecourt/2023/51279/51279_2023_5_1502_57415_Judgement_22-Nov-2024.pdf). CCTV passages read.
+27. Government of Puducherry, Home Dept, G.O.Ms.No.27, 6 May 2025, *Comprehensive Guidelines for the admissibility of digital and electronic records under the BSA, 2023* — [PDF](https://police.py.gov.in/GO.Ms.No.27%20-%20Comprehensive%20Guidelines%20on%20Digital%20and%20electronic%20records%20-%20Home%20Order%20dst%2006.05.25.pdf). Read in full.
+28. Kerala Police. *SOP: Digital Evidence Related to Crimes against Women and Children*, ch. 4 "Seizing CCTV" — [PDF](https://keralapolice.gov.in/storage/pages/custom/ckFiles/file/7GafuMCjLbFgjBNh8aXz8WhLv2Zqtfczvbi7Uv6m.pdf). Chapter read.
+29. MeitY. *Scheme for Notifying Examiner of Electronic Evidence* (s.79A IT Act), v2.0, Nov 2025 — [PDF](https://www.meity.gov.in/static/uploads/2025/11/67f1ee29ffea0e76a3e5b5fee9883711.pdf). Read in full.
+30. SWGDE 18-Q-001 v2.1 (2024), minimum requirements for tool testing, App. A; SWGDE 12-Q-001 v2.0 (2018), §5.8 "Use of Second Method" — [swgde.org](https://www.swgde.org/). Sections read.
+31. UK Forensic Science Regulator. *FSR-G-218 Issue 2, Method Validation in Digital Forensics* (2024) — [PDF](https://assets.publishing.service.gov.uk/media/5f6ca608d3bf7f7231ac65e0/218_Method_Validation_in_Digital_Forensics_Issue_2_New_Base_Final.pdf). Sections read. ISO/IEC 17025:2017 cl. 7.2.2.1 (secondary summary; the standard is paywalled).
+32. C. Hargreaves, F. Breitinger, L. Dowthwaite, H. Webb, M. Scanlon. *DFPulse: The 2024 digital forensic practitioner survey.* Forensic Science International: Digital Investigation 51:301844, 2024. doi:10.1016/j.fsidi.2024.301844. Read in full.
+33. Dstl. *Recovery and Acquisition of Video Evidence*, v3.0, 28 Feb 2022 — [gov.uk](https://www.gov.uk/government/publications/recovery-and-acquisition-of-video-evidence). Relevant passages read.
+
+Items 15–17 and 20 are standard references not re-fetched on 28 Sep; items
+1–14, 18–19 and 21–22 were checked on 28 Sep, and 23–33 on 29 Sep, as
+marked. Full notes: `docs/research/`.
