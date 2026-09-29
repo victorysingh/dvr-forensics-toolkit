@@ -123,17 +123,22 @@ UTC.
 `synthetic_only`, and weaker than that label normally implies. Being exact,
 because Rule 3 says the weakest piece of evidence sets the status:
 
-- **No rendered frame has ever been OCR'd by this code.** It was written on a
-  machine with neither `ffmpeg` nor `tesseract` installed. Tesseract's accuracy
-  on DVR OSD is therefore an assumption here, not a measurement.
+- **Measured on real frames (29 Sep), and weak.** It was written on a
+  machine with neither `ffmpeg` nor `tesseract` installed, then run on real
+  frames. On our drives it read *Camera 01* right and nothing on drive 1's
+  bright scenes. On six other recorders' own files
+  (`python -m validate.osd_eval`) it found the clock on 3 of 6 and read 5 of
+  36 painted clocks exactly, and no title right (`VALIDATION_REPORT.md` §8c).
+  Still to run: drive 1's own clips against the eye
+  (`docs/RUNBOOK_NEXT_DRIVE_SESSION.md` step 2).
 - What *is* tested (`tests/test_pipeline.py`, 22 checks): every rule — title
   normalisation, the vote and its thresholds, band choice and its
   per-stream scoring, ambiguous-date handling and resolution, the clock
   comparison and its tolerance — plus the whole reader end to end with
   `sample` and `ocr` replaced by a stubbed recorder that paints a known title
   in one corner and a known clock in another.
-- The ffmpeg filter chain and the Tesseract invocation are therefore **unrun
-  code paths**.
+- The ffmpeg filter chain and the Tesseract invocation have now run on real
+  frames (above).
 
 ### The route to a real status
 

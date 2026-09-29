@@ -34,10 +34,10 @@ from typing import Optional
 import numpy as np
 import onnxruntime as ort
 
-from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS
+from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, threshold, thresholds
 from analytics.static import (STATIC_IOU, STATIC_MIN_FRAMES, STATIC_SHARE, counted,
                               flag_implausible, flag_static)
-from analytics.tiles import TILE_OVERLAP, merge, tiles, to_frame
+from analytics.tiles import ROTATIONS, TILE_OVERLAP, merge, tiles, to_frame, unrotate
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # COCO ids that matter for surveillance: SSD-MobileNet emits 1-based ids of
@@ -247,24 +247,61 @@ def _tiled(detector, sess, rgb: np.ndarray, n: int, low: float) -> list[dict]:
     return out
 
 
+def round_picture(rgb: np.ndarray) -> bool:
+    """A fisheye picture: a lit disc with the four corners nearly all black
+    (burned-in text in a corner is allowed).  On the labelled clips: all 98
+    frames of the ceiling fisheye, and none of 458 frames from other cameras."""
+    h, w = rgb.shape[:2]
+    k = h // 8
+    y = rgb.mean(axis=2)
+    corners = (y[:k, :k], y[:k, -k:], y[-k:, :k], y[-k:, -k:])
+    return (min(float((c < 24).mean()) for c in corners) >= 0.7
+            and float(y[h // 3: 2 * h // 3, w // 3: 2 * w // 3].mean()) > 30)
+
+
+def rotates(models: dict, big: np.ndarray, rotate: str = "auto") -> bool:
+    """Whether this frame is also looked at turned round (analytics/tiles.py
+    ROTATIONS): "on" (the examiner knows the camera looks down), "off", or
+    "auto" - a round fisheye picture.  The YOLOX set only."""
+    if models["set"] == "classic" or rotate == "off":
+        return False
+    return rotate == "on" or round_picture(big)
+
+
 def detect_frame(models: dict, small: np.ndarray, big: Optional[np.ndarray] = None,
-                 n: Optional[int] = None, low: Optional[tuple] = None) -> list[dict]:
+                 n: Optional[int] = None, low: Optional[tuple] = None,
+                 rotate: str = "auto") -> list[dict]:
     """Faces and objects in one frame, as the set runs them (`small` is
     DECODE_W x DECODE_H, `big` the same frame larger, by default `small`),
     objects on an n x n grid of tiles as well as the whole frame, the same
-    object boxed in two overlapping tiles merged.  `low` = (faces, objects)
-    minimum scores, by default the set's thresholds.  With the classic set
-    and n = 1 this is the untiled tool of 28 Sep, exactly."""
+    object boxed in two overlapping tiles merged.  For a camera that looks
+    down (`rotate`, see rotates()) both models also look at the whole frame
+    turned a quarter, half and three-quarter turn; those boxes carry "rot".
+    `low` = (faces, objects) minimum scores; by default each detection must
+    reach its class's threshold in the set (analytics.models.threshold).
+    With the classic set and n = 1 this is the untiled tool of 28 Sep,
+    exactly."""
     s = MODEL_SETS[models["set"]]
     n = s["tiles"] if n is None else n
-    low_f, low_o = low or (s["faces_min"], s["objects_min"])
+    low_f, low_o = low or (s["faces_min"], min([s["objects_min"], *s["class_min"].values()]))
     big = small if big is None else big
     if models["set"] == "classic":
         found = (_tiled(ultraface, models["faces"], small, n, low_f)
                  + _tiled(ssd, models["objects"], big, n, low_o))
     else:
         found = yunet(models["faces"], big, low_f) + _tiled(yolox, models["objects"], big, n, low_o)
-    return found if n == 1 else merge(found)
+    turned = rotates(models, big, rotate)
+    if turned:
+        for k in ROTATIONS:
+            r = np.ascontiguousarray(np.rot90(big, k))
+            for d in yolox(models["objects"], r, low_o) + yunet(models["faces"], r, low_f):
+                d["box"] = unrotate(d["box"], k)
+                d["rot"] = 90 * k
+                found.append(d)
+    found = found if n == 1 and not turned else merge(found)
+    if low is None:          # per class; merging is per label, so the order does not matter
+        found = [d for d in found if d["score"] >= threshold(models["set"], d["label"])]
+    return found
 
 
 def _thumbnail(rgb: np.ndarray, dets: list[dict], path: str) -> None:
@@ -287,15 +324,18 @@ def _thumbnail(rgb: np.ndarray, dets: list[dict], path: str) -> None:
 
 
 def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
-                 max_thumbs: int = 6, codec: str = "hevc", tiles_n: Optional[int] = None) -> dict:
-    frames = 0
+                 max_thumbs: int = 6, codec: str = "hevc", tiles_n: Optional[int] = None,
+                 rotate: str = "auto") -> dict:
+    frames = turned = 0
     hits = []
     n = MODEL_SETS[models["set"]]["tiles"] if tiles_n is None else tiles_n
     scale = scale_for(models["set"], n)
     for t, rgb in decode(path, fps, codec, scale):
         frames += 1
         small = shrink(rgb, scale)
-        dets = detect_frame(models, small, rgb, n)
+        r = rotates(models, rgb, rotate)
+        turned += r
+        dets = detect_frame(models, small, rgb, n, rotate="on" if r else "off")
         if dets:
             hits.append({"t_s": round(t, 2), "detections": dets, "_rgb": small})
     flag_static(hits, frames)
@@ -323,13 +363,13 @@ def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
         h.pop("_rgb", None)
     hits.sort(key=lambda h: h["t_s"])
     return {"clip": os.path.basename(path), "clip_sha256": sha256_file(path),
-            "frames_analysed": frames, "sample_fps": fps,
+            "frames_analysed": frames, "frames_turned": turned, "sample_fps": fps,
             "frames_with": counts, "static_frames": static,
             "detections": hits, "thumbnails": thumbs}
 
 
 def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
-        tiles_n: Optional[int] = None, model_set: str = DEFAULT_SET) -> dict:
+        tiles_n: Optional[int] = None, model_set: str = DEFAULT_SET, rotate: str = "auto") -> dict:
     models = load_models(model_set)
     s = MODEL_SETS[model_set]
     n = s["tiles"] if tiles_n is None else tiles_n
@@ -337,7 +377,7 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
     results = []
     for i, c in enumerate(clips):
         codec = "h264" if c.endswith(".h264") else ("" if c.endswith(".ps") else "hevc")
-        r = analyse_clip(models, c, fps, thumbs, codec=codec, tiles_n=n)
+        r = analyse_clip(models, c, fps, thumbs, codec=codec, tiles_n=n, rotate=rotate)
         results.append(r)
         log(f"  [{i + 1}/{len(clips)}] {r['clip']}  {r['frames_analysed']} frames  "
             + (", ".join(f"{k} {v}" for k, v in sorted(r["frames_with"].items())) or "nothing"))
@@ -352,13 +392,17 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
         "rule": s["rule"], "status": "lead, not evidence", "model_set": model_set,
         "models": {job: {x: MODELS[s[job]][x] for x in ("name", "source", "license", "sha256")}
                    for job in ("faces", "objects")},
-        "thresholds": {"faces": s["faces_min"], "objects": s["objects_min"]},
+        "thresholds": thresholds(model_set),
         "tiling": {"grid": (f"{n} x {n} tiles and the whole frame" if n > 1
                             else "none, the whole frame only"),
                    "overlap": TILE_OVERLAP if n > 1 else None,
                    "decoded_at": f"{DECODE_W * scale_for(model_set, n)} x "
                                  f"{DECODE_H * scale_for(model_set, n)}",
                    "how": s["how"]},
+        "rotation": {"mode": rotate if model_set != "classic" else "off (classic set)",
+                     "rule": "a camera that looks down: the whole frame also turned 90, 180 "
+                             "and 270 degrees; 'auto' = a round fisheye picture",
+                     "frames_turned": sum(r["frames_turned"] for r in results)},
         "sample_fps": fps, "clips": results, "frames_with_totals": totals,
         "static_totals": static_totals,
         "static_rule": f"same label, box IoU >= {STATIC_IOU}, in >= {STATIC_MIN_FRAMES} frames "
@@ -373,9 +417,9 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
             "recorder timestamp.",
             "Every detection is a lead for an examiner to review in the footage itself.",
             "An empty result does not mean nobody was there. Scored against 287 frames of "
-            "real recorder footage labelled by eye, the tool reported a person in 32 of the "
-            "57 frames that had one; on CAVIAR footage it found 777 of 1,089 labelled "
-            "people (docs/VALIDATION_REPORT.md section 8a).",
+            "real recorder footage labelled by eye, the tool reported a person in 44 of the "
+            "57 frames that had one and a face in 22 of 27; on CAVIAR footage it found 810 "
+            "of 1,089 labelled people (docs/VALIDATION_REPORT.md section 8a).",
             "Detections that stay in the same place through most of a clip are flagged "
             "'static' and not counted: on real footage a steel pot was repeatedly detected "
             "as a face. Static means the box did not move - usually an object mistaken for "

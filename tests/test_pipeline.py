@@ -1260,6 +1260,10 @@ def test_inline_carve(tmp: str) -> None:
         from report.case import load_case as _lc
         rows = rep["streams"]
         out_sel = carver.streams_from_report(rep, label="outside_index")
+        bare = {"streams": [dict(rows[0], index_label=None)]}     # a source with no index
+        check("a stream no index labelled is selected as 'unlabelled', the name the scan "
+              "prints for it", len(carver.streams_from_report(bare, label="unlabelled")) == 1
+              and not carver.streams_from_report(bare, label="outside_index"))
         ex_dir = os.path.join(tmp, "inl-tap", "carve", "streams")
         man = os.path.join(tmp, "inl-tap", "carve", "extracted.json")
         with BlockDevice(img) as dev:
@@ -2063,7 +2067,7 @@ def test_analytics_tiles() -> None:
     in two tiles is kept once, and boxes kept at any score then filtered are
     the boxes kept at the threshold (what `sweep` relies on)."""
     print("\n[analytics: tiles]")
-    from analytics.tiles import merge, tiles, to_frame
+    from analytics.tiles import merge, tiles, to_frame, unrotate
     g = tiles(1920, 1080, 3, 0.2)
     xs, ys = sorted({t[0] for t in g}), sorted({t[1] for t in g})
     tw, th = g[0][2], g[0][3]
@@ -2093,13 +2097,21 @@ def test_analytics_tiles() -> None:
     check("boxes merged at any score and then filtered are the boxes merged at the threshold",
           all([d for d in merge(boxes) if d["score"] >= t] == merge([d for d in boxes if d["score"] >= t])
               for t in (0.2, 0.3, 0.4, 0.5, 0.6)))
+    # np.rot90's quarter turn (anticlockwise) moves a 0-1 box to this place:
+    turn = lambda b: [b[1], round(1 - b[2], 4), b[3], round(1 - b[0], 4)]
+    box, b, back = [0.1, 0.2, 0.4, 0.9], [0.1, 0.2, 0.4, 0.9], []
+    for k in (1, 2, 3):
+        b = turn(b)
+        back.append(unrotate(b, k))
+    check("a box found in the frame turned a quarter, a half or three quarters of a turn "
+          "maps back to where it is in the frame", back == [box, box, box], str(back))
 
 
 def test_analytics_models() -> None:
     """The model sets: every model pinned, with a licence that allows use and a
     source to fetch it from; each set's thresholds are ones the sweep scores."""
     print("\n[analytics: model sets]")
-    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS
+    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, threshold
     from validate.analytics_eval import SWEEP
     check("every model is pinned by SHA-256, with an https source and an MIT or Apache-2.0 licence",
           all(len(m["sha256"]) == 64 and int(m["sha256"], 16) >= 0 and m["url"].startswith("https://")
@@ -2110,7 +2122,13 @@ def test_analytics_models() -> None:
               for s in MODEL_SETS.values()) and DEFAULT_SET == "yolox")
     check("each set's thresholds are among the sweep's, so the sweep reports the tool's own row",
           all(s["faces_min"] in SWEEP["face"] and s["objects_min"] in SWEEP["objects"]
+              and all(v in SWEEP["objects"] for v in s["class_min"].values())
               for s in MODEL_SETS.values()))
+    check("a class threshold overrides the objects one for that class only: YOLOX people at 0.4, "
+          "vehicles and bags at 0.5, faces at 0.7; the classic set unchanged",
+          (threshold("yolox", "person"), threshold("yolox", "car"), threshold("yolox", "backpack"),
+           threshold("yolox", "face"), threshold("classic", "person"), threshold("classic", "face"))
+          == (0.4, 0.5, 0.5, 0.7, 0.5, 0.8))
 
 
 def test_caviar_eval(tmp: str) -> None:
@@ -2509,6 +2527,15 @@ def test_osd_rules() -> None:
     check("the weekday the recorder painted chooses between the two dates",
           p is not None and p["readings"] == [datetime(2026, 5, 1, 13, 20, 26)]
           and not p["ambiguous"] and p["weekday_checked"], str(p))
+    # Clocks from other recorders' own files (VALIDATION_REPORT 8c, 29 Sep).
+    p = R.parse_osd_clock("1080 265  08/ 14/ 2021  07: 11: 22  PM  Swann")
+    check("a Swann clock, spaces after its separators, reads amid the title and logo",
+          p is not None and p["readings"] == [datetime(2021, 8, 14, 19, 11, 22)], str(p))
+    p = R.parse_osd_clock("03-27-2015 SHAD 21:56:12")
+    check("a weekday the OCR cannot read (a Chinese one) does not stop the clock",
+          p is not None and p["readings"] == [datetime(2015, 3, 27, 21, 56, 12)], str(p))
+    check("the full-width strips are tried beside the four corners",
+          R.BANDS["top"] == (0.0, 0.0, 1.0, 0.12) and R.BANDS["bottom"] == (0.0, 0.88, 1.0, 1.0))
     p = R.parse_osd_clock("28-07-2024 Mon 02:07:20")
     check("a weekday that fits no reading is reported, not trusted over the digits",
           p is not None and p["weekday_disagrees"]
@@ -2608,7 +2635,7 @@ def test_osd_reader(tmp: str) -> None:
           str(r["summary"]))
     check("osd.json is written with the rule and the status it may claim",
           os.path.exists(os.path.join(case, "analytics", "osd.json"))
-          and r["rule"] == "osd.tesseract_title_clock.v1"
+          and r["rule"] == "osd.tesseract_title_clock.v2"
           and r["status"] == "lead, not evidence")
 
     # The same picture against a container date 400 s away: a recorder whose
@@ -3669,6 +3696,13 @@ def test_nist_export(tmp: str) -> None:
     except ValueError as exc:
         refused = "H.265" in str(exc)
     check("H.265 is refused, not re-encoded (Level 0 is H.264)", refused)
+    import argparse
+    import cli
+    rc = cli.cmd_export_nist(argparse.Namespace(es=os.path.join(tmp, "no_such_stream.h264"),
+                                                out=os.path.join(tmp, "nist_missing"),
+                                                start="2017-09-18 19:24:59", fps=15.0))
+    check("export-nist with no stream to read says so and exits 1 (the dress rehearsal "
+          "of 29 Sep found a traceback)", rc == 1)
 
     web3 = os.path.join(os.environ.get("VENDOR_SAMPLES", ""), "WEB3.mp4")
     if os.path.isfile(web3):

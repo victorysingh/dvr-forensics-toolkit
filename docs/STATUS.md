@@ -23,13 +23,13 @@ they are evidence).
 | Decode proprietary formats | **done on real media** — Dahua DHAV → H.265; Hikvision MPEG-PS + `HK` descriptors → H.264/H.265; ffmpeg decodes both. Second implementation: ffmpeg's own `dhav` reader and ours agree on all 719,097 video frames it emits from drive 1's 2,246 carved streams (29 Sep) | `recover/carver.py`, `recover/pscarve.py` |
 | Extract video and metadata | **done** — `.dav`/`.h265` and `.ps`, per-file SHA-256; the Hikvision recorder's own system log (43,108 events on drive 2: power cycles, a local `admin` session, disk events) | `extract-carved`, `extract`, `hik-log` |
 | Recover deleted footage | **done on real media** — Dahua: 2,246 streams outside every index; Hikvision: a whole reformatted drive, 2,516 streams | carvers |
-| Attribute recovered footage to a camera | **done where an index survived** — 2,021 of 2,516 Hikvision streams from HIKBTREE records; of the other 495, 440 are stale tails (an older cycle past the write pointer, ~1 month older, camera unknown) and 55 lie in blocks with no record (29 Sep). For the 2,741 streams no index covers, `read-osd` reads the title the recorder painted into the picture; built and tested, OCR accuracy not yet measured | `parsers/hikbtree.py`, `analytics/osd.py` |
+| Attribute recovered footage to a camera | **done where an index survived** — 2,021 of 2,516 Hikvision streams from HIKBTREE records; of the other 495, 440 are stale tails (an older cycle past the write pointer, ~1 month older, camera unknown) and 55 lie in blocks with no record (29 Sep). For the 2,741 streams no index covers, `read-osd` reads the title the recorder painted into the picture; built and tested; measured on six recorders' files, the OCR is weak (5 of 36 clocks exact, no title right; `VALIDATION_REPORT.md` §8c) | `parsers/hikbtree.py`, `analytics/osd.py` |
 | Normalize timestamps | **partly** — recorder clock decoded and cross-checked against burned-in clocks on both vendors (by eye on three frames; `read-osd` now does it per stream, untested against real pixels); conversion to UTC needs the recorder's zone and clock error, which we have not read from the units - or, with no unit, the daylight route (`analyse/daylight.py`: the offset from the cameras' infrared switches at dusk and dawn, VALIDATION_REPORT §8l), not yet run on our drives | `analyse/timeline.py`, `analytics/osd.py` |
 | Correlate events across cameras | **done** — gaps per camera, recorder-wide gaps, recurring patterns, multi-camera activity peaks; on drive 2, **16 of 17 silences on every camera explained by power cuts in the recorder's own log** | `analyse/timeline.py`, `analyse/activity.py` |
 | Chain of custody | **done** — hash-chained ledger; every action recorded with the hash of what it produced | `acquire/ledger.py` |
 | Reduce analysis time (a PS success criterion) | **measured** - one read of the drive instead of five: a 1 TB drive over the team's USB 2 bridge takes ~11.3 h in one pass, ~56.6 h one read per task, ~21.9 h imaging first (and ~931 GiB free). taps now run in a process each - 2.24x the serial pass in the same run, fast enough that a slow laptop is again limited by the USB 2 drive, not the CPU (PERFORMANCE.md §5) | `docs/PERFORMANCE.md`, `demo/bench_single_pass.py` |
 | Reports | **done** — HTML + JSON, hashed into the ledger; BSA 2023 s.63 certificate drafted from the case (Part A/B, hash report enclosed), wording matching the Gazette word for word (tested) | `report/`, `report/s63.py` |
-| AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence". **Measured** against 287 labelled real frames: the first version found a person in 0 of 57 frames that had one; now (YOLOX-S + YuNet, 2 x 2 tiles) 32 of 57, faces 12 of 27, vehicles 8 of 12. Checked on CAVIAR footage never used for choosing: 777 of 1,089 people (previous models: 543) (`VALIDATION_REPORT.md` §8a) - an empty list proves nothing | `analyse/activity.py`, `analytics/` |
+| AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence". **Measured** against 287 labelled real frames: the first version found a person in 0 of 57 frames that had one; now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4, fisheye pictures also turned round) 44 of 57, faces 22 of 27, vehicles 8 of 12. Checked on CAVIAR footage never used for choosing: 810 of 1,089 people (previous models: 543) (`VALIDATION_REPORT.md` §8a) - an empty list proves nothing | `analyse/activity.py`, `analytics/` |
 | Support 5–6 OEMs | **honest answer**: 3 of the eight decoded from real media (Dahua, CP Plus, Hikvision), plus **HeimVision** - an "other commonly used platform" - decoded from a real NIST image; **Honeywell parsed from published research** (Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) as a drop-in plugin, `spec_only`, no media; **Uniview parsed from its own firmware's storage driver** (`spec_only`, no media) and **TP-Link's index read** from its firmware (footage not placed; `detected_not_parsed`); **Matrix parsed from its own documents** (the recording tree; `spec_only`, no media); **Godrej parsed from Qualvision's firmware** (its SeeThru recorders run Qualvision's software; `spec_only`, no media) - so all eight have a plugin. For TP-Link, and any vendor without a plugin, the video can still be recovered with no parser: `carve-annexb` finds raw H.264/H.265 by its parameter sets (no dates or cameras; `synthetic_only`) | `plugins/`, `detect/survey.py`, `recover/annexb.py` |
 
 Named deliverables:
@@ -107,7 +107,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 519 tests, no hardware, ~1 minute (521 with ffmpeg on PATH).
+`python tests/test_pipeline.py` — 526 tests, no hardware, ~1 minute (528 with ffmpeg on PATH).
 
 ## 4. Things learned the hard way
 
@@ -169,10 +169,10 @@ real media; the rest is open, and there is new work that fits it.
    and cross-checks the OSD clock against the date decoded from the container.
    It is wired into the report (section 6c), the viewer and the ledger.
 
-   **It has never been run on a rendered frame** — neither ffmpeg nor Tesseract
-   was installed where it was written, so the OCR accuracy is untested and the
-   status is `synthetic_only`. The next step is small and is the whole of the
-   remaining work: on a machine with `ffmpeg` and `tesseract-ocr`, run it over
+   **Measured (29 Sep) on six real recorders' files** with
+   `python -m validate.osd_eval`: the clock found on 3 of 6, 5 of 36 painted
+   clocks read exactly, 9 wrong, no title right (`VALIDATION_REPORT.md` §8c).
+   The OCR engine, not the rules, is the limit. Still to do: run it over
    the streams whose frames §8a and §8b of `VALIDATION_REPORT.md` already
    record being read by eye (*Parking*, *Road View 1/2*; *Camera 01*,
    *Camera 03*) and compare. Matching what the eye read, on two vendors, makes

@@ -153,9 +153,9 @@ goes beyond.
   - Two independent routes to the recorder's clock: the date in the container
     (DHAV packed date, Hikvision `HK` descriptor) and the clock burned into
     the picture. They are cross-checked; three frames were checked by eye, all
-    within 2 s. The OCR route, run on real frames for the first time (28 Sep),
-    read 1 of 5 reference titles and no clock yet (`VALIDATION_REPORT.md`
-    §8c), so the by-eye checks are the evidence today.
+    within 2 s. The OCR route, measured on six real recorders' files
+    (29 Sep), read 5 of 36 painted clocks exactly and no title right
+    (`VALIDATION_REPORT.md` §8c), so the by-eye checks are the evidence today.
   - No UTC is asserted without a stated time zone and a measured clock error.
   - The combined view (PR #8) refuses to put two recorders on one axis unless
     both state a time zone.
@@ -207,13 +207,40 @@ goes beyond.
   manufacturer against the unit it was seized from, and we treat a mismatch
   as evidence.
 
-### D9. AI that knows it is a lead
+### D9. AI leads on recovered footage, with accuracy measured, not claimed
 
-- **What.** Motion activity from compressed frame sizes, with no decoding.
-  Faces and objects are an optional layer. Every output is labelled "lead,
-  not evidence". Detections fixed in place through a clip (a steel pot
-  scored as a face at 0.99) and face boxes spanning most of the frame are
-  flagged and not counted.
+- **What.** The AI runs on footage the tool recovered from the disk itself,
+  including footage the recorder's own index no longer lists. It needs no
+  recorder and no vendor software, and runs offline.
+  - Every model file is pinned by SHA-256 and recorded in the custody
+    ledger.
+  - Every output is labelled "lead, not evidence".
+  - Nobody is identified: the tool detects faces but does not recognise
+    them.
+  - Motion activity comes from compressed frame sizes, with no decoding.
+- **Measured, including what it gets wrong** (`VALIDATION_REPORT.md` §8a).
+  - On 287 frames of real recorder footage labelled by eye, the first
+    version found a person in 0 of 57 frames. The tool now finds 44 of 57,
+    faces in 22 of 27 and vehicles in 8 of 12.
+  - Every false alarm is listed: six hands in the picture, and one head at
+    a fisheye's edge.
+  - It is checked on CAVIAR footage that played no part in any choice: 810
+    of 1,089 labelled people (543 before the model change).
+  - `validate/analytics_eval.py` and `validate/caviar_eval.py` let anyone
+    re-measure it on their own footage.
+- **Built for CCTV.**
+  - Small, distant people: the frame is also searched in tiles.
+  - Ceiling fisheye cameras: the frame is also turned round, because people
+    seen from above lie at every angle.
+  - A detection fixed in place through a clip is flagged and not counted
+    (a steel pot scored as a face at 0.99), and so is a face box spanning
+    most of the frame.
+- **What is not new, and is credited.** The models are public: YOLOX
+  (Megvii) and YuNet (OpenCV Zoo). Tiling is SAHI (Akyon et al., ICIP 2022),
+  and rotation for overhead fisheye is RAPiD's idea (Duan et al., CVPR
+  Workshops 2020). What is ours is putting them on footage recovered from a
+  raw DVR disk, tied to the evidence chain, with the accuracy measured on
+  held-out footage and published.
 - **Beyond what.** Compressed-domain motion detection is established. Poppe et
   al. (2009) detect moving objects in H.264 surveillance video from the size
   of the coded data rather than from motion vectors. We use the coarsest form of

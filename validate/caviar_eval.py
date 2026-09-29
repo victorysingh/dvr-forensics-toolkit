@@ -2,6 +2,7 @@
 every person boxed by hand.
 
     python -m validate.caviar_eval DIR [--models yolox|classic] [--tiles N] [--every 25]
+                                       [--rotate auto|on|off] [--rotate-clips A.mpg,B.mpg]
 
 DIR holds CAVIAR clips (.mpg) and their ground-truth files (.xml), from the
 EC-funded CAVIAR project (IST 2001 37540, CC BY-SA),
@@ -86,7 +87,9 @@ def score(frames: list[dict]) -> dict:
 
 
 def run(folder: str, model_set: str | None = None, tiles: int | None = None,
-        every: int = 25, log=print) -> dict:
+        every: int = 25, log=print, rotate: str = "auto", rotate_clips: tuple = ()) -> dict:
+    """`rotate` for every clip, or "on" for just the clips in `rotate_clips`
+    (the cameras an examiner would know look down)."""
     import numpy as np
 
     from analytics import detect
@@ -116,7 +119,9 @@ def run(folder: str, model_set: str | None = None, tiles: int | None = None,
             while len(buf := p.stdout.read(w * h * 3)) == w * h * 3:
                 if k * every in gt:
                     big = np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-                    dets = detect.detect_frame(models, detect.shrink(big, scale), big, n)
+                    rot = "on" if clip in rotate_clips else rotate
+                    dets = detect.detect_frame(models, detect.shrink(big, scale), big, n,
+                                               rotate=rot)
                     mine.append({"clip": clip, "frame": k * every, "gt": gt[k * every],
                                  "detections": dets})
                 k += 1
@@ -125,7 +130,8 @@ def run(folder: str, model_set: str | None = None, tiles: int | None = None,
         flag_implausible(hits)
         frames += mine
         log(f"{clip}: {len(mine)} frames, {sum(len(f['gt']) for f in mine)} people labelled")
-    return {"model_set": model_set, "tiles": n, "every": every, "frames": len(frames),
+    return {"model_set": model_set, "tiles": n, "every": every, "rotate": rotate,
+            "rotate_clips": list(rotate_clips), "frames": len(frames),
             "score": score(frames), "per_frame": frames}
 
 
@@ -135,9 +141,13 @@ def main() -> int:
     ap.add_argument("--models", choices=("yolox", "classic"), default=None)
     ap.add_argument("--tiles", type=int, default=None)
     ap.add_argument("--every", type=int, default=25, help="every n-th frame (default 25: 1 a second)")
+    ap.add_argument("--rotate", default="auto", choices=("auto", "on", "off"))
+    ap.add_argument("--rotate-clips", default="",
+                    help="comma-separated clips to look at turned round (ceiling cameras)")
     ap.add_argument("--out", default=None, help="write the result as JSON here")
     a = ap.parse_args()
-    res = run(a.folder, a.models, a.tiles, a.every)
+    res = run(a.folder, a.models, a.tiles, a.every, rotate=a.rotate,
+              rotate_clips=tuple(x for x in a.rotate_clips.split(",") if x))
     s = res["score"]
     print(f"\n{res['model_set']}, tiles {res['tiles']}: {res['frames']} frames")
     print(f"  people found     {s['people_found']} of {s['people_labelled']}  ("

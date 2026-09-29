@@ -1,9 +1,10 @@
 # UI plan: a dynamic, demo-ready case console
 
-**For:** whoever builds the UI (Aakash, or Claude: see §13 for a prompt to
-paste). **Goal:** replace today's plain 7-tab viewer with a polished,
-live console that shows *everything* the tool produces for a case, and that
-looks good in the SIH demo video. **Branch:** `jp/ui` (from `setup`).
+**For:** Aakash, who is building the UI. **Goal:** replace today's plain
+7-tab viewer with a polished, live console that shows *everything* the tool
+produces for a case, and that looks good in the SIH demo video.
+**Branch:** `aakash/ui`. Aakash keeps it current by merging `staging` into it.
+He is building it in React + Tailwind, compiled into `viewer/static/` (§3).
 
 ---
 
@@ -61,6 +62,10 @@ These come from the product itself. A UI that breaks one of them cannot ship.
 **Alternative, only if the builder is much faster in it:** React + Vite. The
 built `dist/` must be committed into `viewer/static/`, so the .exe and
 air-gapped machines still need no Node. No CDN imports.
+
+**Aakash chose the alternative** (29 Sep): React + Tailwind in `ui/`, built
+by Vite into `viewer/static/`. The rules above still apply: commit the built
+files, and load nothing from a CDN or web font.
 
 **Not now:** FastAPI or any new Python dependency. The forensic core is
 stdlib-only by design (`docs/TECH_STACK.md`).
@@ -373,20 +378,14 @@ P0-P3 alone already make a strong demo. P4-P5 make it feel alive.
 
 ## 13. Handoff
 
-**If Aakash builds it:**
-1. Branch off `jp/ui` (or `setup`).
-2. Touch only `viewer/`, `report/case.py`, `tests/test_pipeline.py` and the `serve` docs.
-3. Open a PR into `setup`.
-4. Don't change `setup` directly or any other `jp/*` branch.
-5. `report/case.py::load_case` is the single source of data. Add to it; don't read files from the front-end by path.
-
-**If Claude builds it,** paste this:
-
-> Build the UI described in `docs/UI_PLAN.md` on branch `jp/ui` of
-> victorysingh/dvr-forensics-toolkit (local clone
-> `C:\Users\JAIPREET SINGH\150\dvr-forensics-toolkit`), phases P0-P5 in
-> order. Keep every rule in §1. Use the demo cases in
-> `C:\Users\JAIPREET SINGH\150\demo` and check each phase in the built-in
-> browser with screenshots at 1920×1080. Run the full test suite before each
-> commit. Push `jp/ui` and open a PR into `setup` when P3 is done, then
-> update it as P4 and P5 land. Rebuild `pkg_dist/ps26150-dvr.exe` at the end.
+The UI is Aakash's, on `aakash/ui`:
+1. Work on `aakash/ui`, and merge `staging` into it now and then. `staging`
+   is where the rest of the team's current work lands; it is kept in sync
+   with `setup`.
+2. Touch only `ui/`, `viewer/`, `report/case.py`, `tests/test_pipeline.py`
+   and the `serve` docs.
+3. `report/case.py::load_case` is the single source of data. Add to it;
+   don't read files from the front-end by path.
+4. When to merge `aakash/ui` into `setup` is Aakash's call as team lead.
+5. The demo cases (§9) are on JP's machine. Ask JP for a copy, or run the
+   pipeline on the rehearsal inputs to make your own.

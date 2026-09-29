@@ -1021,6 +1021,9 @@ def cmd_export_nist(args) -> int:
     from core.hashing import sha256_file
     from report import nist_export as N
 
+    if not os.path.isfile(args.es):
+        print(f"[!] no extracted stream at {args.es} - run `extract-carved` or `extract` first")
+        return 1
     es = open(args.es, "rb").read()
     try:
         start = N._parse_local(args.start)
@@ -1449,8 +1452,10 @@ def cmd_analyse_video(args) -> int:
     tiles = MODEL_SETS[args.models]["tiles"] if args.tiles is None else args.tiles
     print(f"  models        {args.models}; tiles "
           + (f"{tiles} x {tiles} and the whole frame" if tiles > 1 else "none (whole frame only)"))
+    print(f"  rotation      {args.rotate} (frames also looked at turned round, for cameras that look down)")
     try:
-        r = run(clips, out_dir, fps=args.fps, log=print, tiles_n=tiles, model_set=args.models)
+        r = run(clips, out_dir, fps=args.fps, log=print, tiles_n=tiles, model_set=args.models,
+                rotate=args.rotate)
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"[!] {exc}")
         return 1
@@ -1479,6 +1484,7 @@ def cmd_analyse_video(args) -> int:
         ledger.append("video_analytics_run", {
             "report": "analytics/analytics.json", "clips": len(clips), "fps": args.fps,
             "tiles": tiles, "model_set": args.models, "rule": r["rule"],
+            "rotate": args.rotate, "frames_turned": r["rotation"]["frames_turned"],
             "models": {k: v["sha256"] for k, v in r["models"].items()},
             "frames_with": tot, "status": "lead, not evidence"},
             data_hash=sha256_file(path))
@@ -2325,7 +2331,7 @@ def main() -> int:
     p.add_argument("--out", required=True, help="case directory")
     p.add_argument("--label", default="outside_index",
                    help="index label to extract: outside_index (default), CH01.., "
-                        "mixed-evidence, or all")
+                        "mixed-evidence, unlabelled (no index on the source), or all")
     p.add_argument("--ids", default="", help="comma-separated stream ids instead")
     p.add_argument("--format", choices=["auto", "dhav", "ps", "annexb"], default="auto",
                    help="which carve to extract from (auto: DHAV if it found streams, else "
@@ -2359,6 +2365,10 @@ def main() -> int:
                    help="also run the object model on each tile of an n x n grid, which finds "
                         "small people (default 2 for yolox, 3 for classic; 1 = whole frame "
                         "only, about 2-3x faster)")
+    p.add_argument("--rotate", default="auto", choices=("auto", "on", "off"),
+                   help="also look at each frame turned round, for cameras that look down "
+                        "(people lie at every angle): auto = round fisheye pictures (default), "
+                        "on = every frame, for a ceiling camera, off = never")
     p.add_argument("--recount", action="store_true",
                    help="re-apply the static/implausible rules to stored results, no decoding")
     p.set_defaults(func=cmd_analyse_video)

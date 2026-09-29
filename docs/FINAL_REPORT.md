@@ -75,7 +75,7 @@ that holds media for two or three. So the project was built around one rule:
 | **Confidence, never yes/no** | CP Plus units are commonly Dahua-built; a disk has evidence that scores, not a vendor | `detect/engine.py` |
 | **Split, never guess** | carved footage whose camera cannot be told apart is split, never merged | `recover/carver.py`, `recover/annexb.py` |
 | **No UTC without stated inputs** | recorders keep local time on unaudited clocks | `analyse/timeline.py::ClockModel`, `analyse/combined.py` |
-| **Analytics are leads, not evidence** | a detector scored a steel pot as a face at 0.99; scored against 287 labelled real frames it first found a person in 0 of 57; now in 32 of 57, and 777 of 1,089 people on CAVIAR footage never used for choosing | `analytics/`, `analyse/activity.py` |
+| **Analytics are leads, not evidence** | a detector scored a steel pot as a face at 0.99; scored against 287 labelled real frames it first found a person in 0 of 57; now in 44 of 57 (faces 22 of 27), and 810 of 1,089 people on CAVIAR footage never used for choosing | `analytics/`, `analyse/activity.py` |
 | **Stdlib-only forensic core** | auditable, and runs air-gapped on a bare Python install | `TECH_STACK.md` |
 
 ## 3. Architecture
@@ -147,7 +147,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 544 in all: 521 on generated data with known ground
+- **Automated tests:** 551 in all: 528 on generated data with known ground
   truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -287,6 +287,9 @@ and 30+ rival repositories (`RESEARCH_BASIS.md` §5, `docs/research/`):
   number.** On our CP Plus unit the DHAV channel byte is 0 for every camera,
   where identifier-based demultiplexing, as in Information 2026, cannot help.
   (The continuity principle is Park & Lee 2014's; the field evidence is ours.)
+  Run beside OpenDHFS, the newest open DHFS tool, on a disk with known
+  contents: both find the same frames, and only ours splits the three
+  cameras, exactly as written (`VALIDATION_REPORT.md` §8m).
 
 Hashing, the Merkle map, the custody ledger, the s.63 draft, "AI as a lead"
 and offline use are engineering other teams also have, and are not pitched
@@ -322,11 +325,13 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   built: the offset from the cameras' infrared switches at dusk and dawn
   (`VALIDATION_REPORT.md` §8l). It is tested on generated days and real
   night and day footage, and not yet run on our drives' outdoor cameras.
-- **The OCR reads 1 of 5 reference titles and no clock on real frames.**
-  It read "Camera 01" on drive 2 correctly, but no title on drive 1, where
-  thin white text sits on a bright wall, and no clock on either drive: both
-  recorders' clocks carry letters (a weekday, or AM/PM) that its clock
-  whitelist excludes. It remains `synthetic_only`.
+- **The on-screen text reader (OCR) is weak.** Measured on six real
+  recorders' files (36 painted clocks), it found the clock on 3 of the 6,
+  read 5 frames exactly and 9 wrongly (a year off, or 12 hours off when "PM"
+  is lost), and read no title right. The wrong readings are years or hours
+  off, so the comparison with the container's own date flags them. On our
+  drives it read "Camera 01" correctly and nothing on drive 1's bright
+  scenes. It remains `synthetic_only`: a lead to check, not a time source.
 - **About 38% of CP Plus video frames do not decode strictly.** The cause
   is measured: 0.3-0.4% of the frames are missing from the disk, and each
   breaks the rest of its ~8.6 s group of pictures. Most have no intact copy
@@ -345,12 +350,13 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   recorder footage labelled by eye, the first version reported a person in 0
   of the 57 frames that had one.
   - It now runs YOLOX-S on the whole frame and a 2 x 2 grid of tiles, and
-    YuNet for faces. It finds a person in 32 of 57, faces in 12 of 27 and
-    vehicles in 8 of 12.
-  - On CAVIAR CCTV footage that played no part in any choice, it finds 777
+    YuNet for faces, and looks at a fisheye picture turned round as well.
+    It finds a person in 44 of 57, faces in 22 of 27 and vehicles in 8 of
+    12.
+  - On CAVIAR CCTV footage that played no part in any choice, it finds 810
     of 1,089 labelled people, against 543 for the previous tiled models.
-  - Its 5 false alarms are all one moment: a hand holding a board up to the
-    lens.
+  - Its false alarms: 6 person frames, each a hand in the picture, and 1
+    face frame, a head at the fisheye's edge.
   - It still misses distorted and distant people.
   - A lead is worth reviewing; an empty list proves nothing
     (`VALIDATION_REPORT.md` §8a).
