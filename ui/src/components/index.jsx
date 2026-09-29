@@ -154,7 +154,7 @@ export function ConfBar({ value, color }) {
     <span className="flex items-center gap-2">
       <span className="panel-2 h-1.5 flex-1 min-w-16 rounded-full overflow-hidden">
         <i className="block h-full rounded-full"
-          style={{ width: pct0(value), background: color || "var(--color-accent-dark)" }} />
+          style={{ width: pct0(value), background: color || "var(--color-accent)" }} />
       </span>
       <span className="font-mono text-[11.5px] w-11 text-right">{pct0(value)}</span>
     </span>

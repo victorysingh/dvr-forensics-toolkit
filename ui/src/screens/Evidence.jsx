@@ -6,6 +6,7 @@
 // statistics and the entropy-vs-video verdict.
 import { Section, Card, DL, Hash, Empty, DataTable } from "../components/index.jsx";
 import { bytes, num, pct, dur, hex } from "../lib/format.js";
+import PlatterMap from "../components/PlatterMap.jsx";
 
 export default function Evidence({ c }) {
   const s = c.scan;
@@ -33,6 +34,15 @@ export default function Evidence({ c }) {
 
   return (
     <>
+      {/* UI_PLAN 6.2 wants the platter drawn here. This is the positions the
+          case already knows - carved streams, bad regions, the scanned
+          extent; a per-block picture needs the /blockmap route (P2). */}
+      <Section title="The platter" hint="every recovered stream at its real offset">
+        <Card>
+          <PlatterMap c={c} />
+        </Card>
+      </Section>
+
       <Section title="Device">
         <Card>
           <DL rows={[

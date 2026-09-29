@@ -185,17 +185,107 @@
   --tracking-micro: 0.06em;
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+   LIGHT
+   Each look gets its own light palette rather than one global inversion,
+   because the thing that makes a look a look is the relationship between
+   its colours, and flipping them all at once destroys it: Instrument's
+   signal green and Platter's cyan are both unreadable on white, and
+   Dossier is arguably a light design that happens to have been drawn dark.
+   Two attribute selectors outrank the one-attribute look blocks above, so
+   these override cleanly without !important.
+
+   Every status colour is re-picked, not reused. #22c55e on white fails
+   contrast; the same claim has to stay legible in both themes or the status
+   stops carrying meaning.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* the default tokens, for the moment before a look is applied */
+[data-theme="light"] {
+  --color-bg: #f4f6f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #eaeef4;
+  --color-line: #ccd5e0;
+  --color-ink: #121a24;
+  --color-ink-dim: #55636f;
+  --color-accent: #0d7e72;
+  --color-validated: #15803d;
+  --color-spec: #1d4ed8;
+  --color-synthetic: #b45309;
+  --color-detected: #55636f;
+  --color-lead: #6d28d9;
+  --color-danger: #c62828;
+}
+
+/* INSTRUMENT, light: a readout printed on paper rather than lit on glass. */
+[data-look="instrument"][data-theme="light"] {
+  --color-bg: #f3f5f2;
+  --color-surface: #ffffff;
+  --color-surface-2: #e8ece6;
+  --color-line: #c9d2c8;
+  --color-ink: #0f151a;
+  --color-ink-dim: #58676f;
+
+  --color-accent: #4a760a;          /* the signal green, taken down for white */
+  --color-validated: #3d7a17;
+  --color-spec: #1b6786;
+  --color-synthetic: #8d5c08;
+  --color-detected: #58676f;
+  --color-lead: #6733bf;
+  --color-danger: #bd2414;
+}
+
+/* DOSSIER, light: cream stock and warm ink - the look's natural state. */
+[data-look="dossier"][data-theme="light"] {
+  --color-bg: #f7f2e6;
+  --color-surface: #fffdf7;
+  --color-surface-2: #eee7d6;
+  --color-line: #d7ccb4;
+  --color-ink: #241f18;
+  --color-ink-dim: #6b6152;
+
+  --color-accent: #866624;          /* gold, as ink rather than leaf */
+  --color-validated: #47682f;
+  --color-spec: #3a5882;
+  --color-synthetic: #8d5c08;
+  --color-detected: #6b6152;
+  --color-lead: #674a89;
+  --color-danger: #8f3327;
+}
+
+/* PLATTER, light: cool paper, the duotone kept but weighted for white. */
+[data-look="platter"][data-theme="light"] {
+  --color-bg: #f1f4fb;
+  --color-surface: #ffffff;
+  --color-surface-2: #e4ebf7;
+  --color-line: #c4cfe4;
+  --color-ink: #0c1230;
+  --color-ink-dim: #52618c;
+
+  --color-accent: #077b92;
+  --color-validated: #157650;
+  --color-spec: #2750c0;
+  --color-synthetic: #8d5c08;
+  --color-detected: #52618c;
+  --color-lead: #ab167c;            /* the duotone partner, darkened */
+  --color-danger: #be1f3f;
+}
+
 /* ── Base ────────────────────────────────────────────────────────────── */
 @layer base {
   html { color-scheme: dark; }
+  html[data-theme="light"] { color-scheme: light; }
 
   body {
     background: var(--color-bg);
     color: var(--color-ink);
     font-family: var(--font-body);
     font-variant-numeric: tabular-nums;   /* columns of figures line up */
-    -webkit-font-smoothing: antialiased;
   }
+
+  /* Smoothing thins light text on a dark ground, which these looks want.
+     On a light ground it thins it too far, so it is dark-only. */
+  html:not([data-theme="light"]) body { -webkit-font-smoothing: antialiased; }
 
   /* Dossier sets prose in a serif, so its figures want old-style off and
      a slightly larger body to keep the serif readable. */
