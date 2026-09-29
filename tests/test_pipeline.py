@@ -1911,6 +1911,154 @@ def test_hikbtree(tmp: str) -> None:
           and tl["counts"]["remnant"] == 1, str(kinds))
 
 
+# Vendor-made files, not ours.  Each Hikvision entry: its "HK" time
+# descriptors in stream order, and what the keyframe after each shows painted
+# on the picture (read by eye), or the recorder's own file-name time.
+#  IMKH  VideoLAN samples/IMKH/00000001541000000.mp4, SHA-256 79b1e557...
+#  T4182 samples.ffmpeg.org trac ticket4182 20150327215559_ch01.mp4, 20e31574...
+#  T3566 samples.ffmpeg.org trac ticket3566 Control Room 1..._20140314235910_
+#        20140314235939_164863298.mp4, 80eaa112... (video type 0xB0: ffmpeg
+#        cannot decode it, so its check is the file name, not the picture)
+IMKH_HK = ["400e484b010012448778aa1000ffffff", "400e484b0100124487792a0800ffffff",
+           "400e484b010012448779aa0800ffffff", "400e484b01001244877a2aa800ffffff",
+           "400e484b01001244877aaab000ffffff", "400e484b01001244877b2aa800ffffff",
+           "400e484b01001244877baa0800ffffff", "400e484b01001244877c2a0800ffffff",
+           "400e484b01001244877caa0800ffffff", "400e484b01001244877d2a1800ffffff"]
+IMKH_PAINTED = [f"01:55:{s}" for s in range(33, 52, 2)]
+T4182_HK = ["400e484b01000f3dd782f54000ffffff", "400e484b01000f3dd783754000ffffff",
+            "400e484b01000f3dd783f54000ffffff", "400e484b01000f3dd784754000ffffff",
+            "400e484b01000f3dd784f54000ffffff"]
+T4182_PAINTED = [f"21:56:{s}" for s in range(11, 20, 2)]
+T3566_HK_FIRST = "400e484b00010e375fb2a987ffffffff"
+# Real Dahua .dav files: (saved name, SHA-256 prefix, frames before the first
+# keyframe, ffmpeg keeps a truncated last frame, video frames compared)
+DAHUA_SAMPLES = [("ffmpeg_t6144_19.25.00-19.25.50[R].dav", "c17602dd", 21, False, 726),
+                 ("handbrake_1935_dav-sample.dav", "9787cb4b", 12, True, 104)]
+
+
+def test_independent_checks(tmp: str) -> None:
+    """Checks that do not rest on our own reading: Hikvision-made files for
+    the HK time and the PS carver, and ffmpeg's dhav demuxer as a second
+    implementation of the DHAV frame walk, on real Dahua files."""
+    print("\n[independent checks: vendor-made samples, second implementation]")
+    import hashlib
+    import random
+    import shutil as _sh
+    from recover import pscarve
+    from tests import synth_dahua as SD
+    from validate import dhav_crosscheck as XC, ps_sample as PSS
+
+    hk = lambda hexes: [pscarve.hk_time(bytes.fromhex(h)) for h in hexes]
+    times = hk(IMKH_HK)
+    check("Hikvision-made file (2018): all 10 HK times decode to a real date, 2 s apart",
+          times == [f"2018-04-09 01:55:{s}" for s in range(34, 53, 2)], str(times))
+    check("... and every painted clock is the HK time minus exactly 1 s (a constant, "
+          "not noise)", PSS.offsets(times, IMKH_PAINTED) == [-1.0] * 10)
+    t2 = hk(T4182_HK)
+    check("a second Hikvision-made file (2015): its 5 HK times equal the painted clock to "
+          "the second", PSS.offsets(t2, T4182_PAINTED) == [0.0] * 5
+          and t2[0] == "2015-03-27 21:56:11", str(t2))
+    check("a third (2014): the first HK time equals the start time in the recorder's own "
+          "file name", hk([T3566_HK_FIRST]) == ["2014-03-14 23:59:10"])
+
+    a = {"video": [(10, 1, True, 100.0, 0), (20, 2, False, 100.0, 50)], "audio": [(5, 9)], "aux": 1}
+    same = {"video": [(10, 1, True, 100.04), (20, 2, False, 100.5)], "audio": [(5, 9)]}
+    extra = {"video": [(10, 1, True, 100.0), (7, 3, False, 100.0), (20, 2, False, 100.5)],
+             "audio": [(5, 9)]}
+    r1, r2 = XC.compare(a, same), XC.compare(a, extra)
+    check("second implementation: agreement is frame for frame; a frame only one side "
+          "has is found at its index",
+          r1["video"]["identical"] and r1["time"]["ffmpeg_within_the_frames_own_second"] == 2
+          and not r2["video"]["identical"] and r2["video"]["first_difference"]["frame"] == 1,
+          str(r2["video"]))
+    mid = {"video": [(8, 7, False, 99.0, 0), (10, 1, True, 100.0, 20), (20, 2, False, 100.0, 50)],
+           "audio": [(5, 9)], "aux": 0,
+           "truncated_tail": {"kind": "video", "payload_present": 6, "offset": 90}}
+    ff_mid = {"video": [(10, 1, True, 100.0), (20, 2, False, 100.2), (6, 4, False, 100.3)],
+              "audio": [(5, 9)]}
+    ff_wrong = {"video": [(10, 1, True, 100.0), (20, 2, False, 100.2), (9, 4, False, 100.3)],
+                "audio": [(5, 9)]}
+    r3, r4 = XC.compare(mid, ff_mid), XC.compare(mid, ff_wrong)
+    check("the two expected differences are aligned and counted - ffmpeg starts at the "
+          "first keyframe, and keeps exactly the bytes of a truncated last frame - and "
+          "nothing else is excused",
+          r3["video"]["identical"]
+          and r3["expected_differences"]["ours_before_first_keyframe"] == 1
+          and r3["expected_differences"]["ffmpeg_truncated_last_frame"]
+          and not r4["video"]["identical"], str(r3["expected_differences"]))
+
+    ffmpeg = os.environ.get("FFMPEG") or _sh.which("ffmpeg")
+    if ffmpeg:
+        cam = SD.Camera(1, SD.T0, 1000, 100, 50, random.Random(7))
+        dav = os.path.join(tmp, "xc.dav")
+        with open(dav, "wb") as fh:
+            for _ in range(60):
+                for *_, b in cam.next_frames():
+                    fh.write(b)
+        good = XC.check_file(dav, ffmpeg)
+        raw = bytearray(open(dav, "rb").read())
+        k = raw.find(b"DHAV", 20000)
+        raw[k + 23] ^= 0xFF                       # break one header checksum only
+        bad_path = os.path.join(tmp, "xc_bad.dav")
+        open(bad_path, "wb").write(raw)
+        bad = XC.check_file(bad_path, ffmpeg)
+        check("ffmpeg's dhav demuxer and ours agree on every frame: size, checksum, key "
+              "flag, and each time inside the frame's own second",
+              good["video"]["identical"] and good["audio"]["identical"]
+              and good["video"]["ours"] == 60
+              and good["time"]["ffmpeg_within_the_frames_own_second"] == 60, str(good["video"]))
+        check("a frame ffmpeg keeps but we reject (bad header checksum) is reported, "
+              "with where", not bad["video"]["identical"]
+              and (bad["video"]["ours"], bad["video"]["ffmpeg"]) == (59, 60)
+              and bad["video"]["first_difference"]["ours"]["offset"] > k, str(bad["video"]))
+    else:
+        print("  [ffmpeg] skipped - put ffmpeg on PATH or set FFMPEG")
+
+    folder = os.environ.get("VENDOR_SAMPLES")
+    if not folder:
+        print("  [vendor samples] skipped - set VENDOR_SAMPLES to the folder of sample files")
+        return
+    at = lambda name: os.path.join(folder, name)
+    if os.path.exists(at("imkh_00000001541000000.mp4")):
+        rep = PSS.check(at("imkh_00000001541000000.mp4"), os.path.join(tmp, "imkh"), ffmpeg or "")
+        s = rep["streams"][0]
+        check("Hikvision-made file: one stream from right after the 40-byte IMKH header, "
+              "every complete pack kept, the 10 HK times as pinned",
+              rep["sha256"].startswith("79b1e557") and s["offset"] == 0x28 and s["packs"] == 463
+              and rep["uncarved_bytes"]["after"] == 6436 and rep["psm_times"] == times
+              and s["resolution"] == "1920x1088", str(s))
+        if ffmpeg:
+            f = rep["frames"]
+            check("... and every video frame ffmpeg decodes from our carve is identical to "
+                  "the same frame from the vendor's file", f["common"] == 463
+                  and f["common_identical"] == 463, str(f))
+    if ffmpeg and os.path.exists(at("ffmpeg_t4182_20150327215559_ch01.mp4")):
+        rep = PSS.check(at("ffmpeg_t4182_20150327215559_ch01.mp4"), os.path.join(tmp, "t4182"),
+                        ffmpeg)
+        check("the 2015 Hikvision file: whole stream carved, 215/215 frames identical to "
+              "ffmpeg's decode of the vendor file, HK times as pinned",
+              rep["sha256"].startswith("20e31574") and rep["streams"][0]["offset"] == 0x28
+              and rep["uncarved_bytes"]["after"] == 0 and rep["psm_times"] == t2
+              and rep["frames"]["common_identical"] == rep["frames"]["common"] == 215,
+              str(rep.get("frames")))
+    if ffmpeg:
+        for name, sha, lead, cut, n in DAHUA_SAMPLES:
+            if not os.path.exists(at(name)):
+                continue
+            with open(at(name), "rb") as fh:
+                ok_sha = hashlib.sha256(fh.read()).hexdigest().startswith(sha)
+            r = XC.check_file(at(name), ffmpeg)
+            ex = r["expected_differences"]
+            check(f"real Dahua file {name[:24]}: ffmpeg and ours identical on all {n} video "
+                  "frames and all audio, times inside their own second, the only differences "
+                  "the two expected ones",
+                  ok_sha and r["video"]["identical"] and r["audio"]["identical"]
+                  and r["video"]["matching_prefix"] == n
+                  and ex["ours_before_first_keyframe"] == lead
+                  and ex["ffmpeg_truncated_last_frame"] == cut
+                  and r["time"]["ffmpeg_within_the_frames_own_second"] == n, str(r["video"]))
+
+
 def test_combined(tmp: str) -> None:
     """Two recorders share no clock. A combined view may only put them on one
     axis when every case states its recorder's timezone; without that it must
@@ -3451,6 +3599,7 @@ def main() -> int:
         test_osd_rules()
         test_osd_reader(tmp)
         test_hikbtree(tmp)
+        test_independent_checks(tmp)
         test_validate_export(tmp)
         test_model(tmp)
         test_annexb_carver(tmp)
