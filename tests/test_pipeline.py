@@ -811,11 +811,25 @@ def test_heimvision(tmp: str) -> None:
           found and v["files"] == 4 and v["files_written"] == 3 and v["ident"] == "ok1ormated"
           and res.validation_status == "spec_only"
           and all(f["source"] == "observed_real_media" for f in res.field_provenance), str(v))
-    check("the recorder's zone measured from its own FAT clock: UTC-8, on every file",
-          v["recorder_zone_minutes"] == -480 and v["recorder_zone_agreement"] == "3/3 files")
-    check("one recording per camera, spanning the files, from the frame times",
+    check("the recorder's zone setting measured: display clock UTC+8 against its own "
+          "system clock (FAT times), on every file",
+          v["recorder_zone_minutes"] == 480 and v["recorder_zone_agreement"] == "3/3 files")
+    r0 = res.recordings[0]
+    check("one recording per camera, spanning the files, in recorder-local time: no UTC "
+          "without a stated zone, and the measured zone is not applied",
           [r.camera_id for r in res.recordings] == ["CH01", "CH02", "CH03", "CH04"]
-          and res.recordings[0].start_utc == "2021-08-04T13:59:51Z", str([r.id for r in res.recordings]))
+          and r0.start_utc is None and v["span_utc"] == (None, None)
+          and v["span_local"][0] == "2021-08-04 13:59:51"
+          and r0.timestamps[0].raw_value.endswith("= 2021-08-04 13:59:51 recorder-local")
+          and all(c.decoded_utc is None for c in r0.timestamps),
+          str([r.id for r in res.recordings]))
+    p_tz = type(p)(tz_offset_min=480)
+    with BlockDevice(img) as dev:
+        r_tz = p_tz.parse(dev)
+    check("with the zone stated by the examiner (+480), UTC = display clock - 8 h",
+          r_tz.recordings[0].start_utc == "2021-08-04T05:59:51Z"
+          and r_tz.recordings[0].timestamps[0].tz_offset_min == 480,
+          str(r_tz.recordings[0].start_utc))
     with BlockDevice(img) as dev:
         st = p.extract_recording(dev, "hv-ch03-0000", os.path.join(tmp, "hv_c3"))
     out = open(os.path.join(tmp, "hv_c3.h265"), "rb").read()
@@ -848,8 +862,9 @@ def test_heimvision(tmp: str) -> None:
     check("footage before a camera's logged 'Rec begin', measured from its first video frame",
           v["footage_before_logged_start_s"] == {"CH01": 0.0, "CH02": 2.0, "CH03": 0.0, "CH04": 0.0},
           str(v["footage_before_logged_start_s"]))
-    check("the zone measured a second way: ext3 inode times against the log's own UTC",
-          v["recorder_zone_minutes_ext3"] == {"dvr_log.db": -480, "search.db": -480})
+    check("the zone measured a second way: the databases' own times against their ext3 "
+          "inode times (the system clock)",
+          v["recorder_zone_minutes_ext3"] == {"dvr_log.db": 480, "search.db": 480})
     with BlockDevice(img) as dev:
         fs = Ext(dev, parse_partitions(dev.read_at(0, 64 << 10), 512)[0].start_offset)
         pad = next(e for e in fs.listdir() if e["name"] == "pad.bin")
@@ -878,10 +893,12 @@ def test_heimvision(tmp: str) -> None:
     with BlockDevice(path) as dev:
         real = get_parser("HeimVision").parse(dev)
     rv = real.volume
-    check("real image: 806 of 17,152 files written, 4 cameras, 24 h, recorder at UTC-8",
+    check("real image: 806 of 17,152 files written, 4 cameras, 24 h recorder-local; zone "
+          "setting UTC+8",
           rv["files"] == 17152 and rv["files_written"] == 806 and len(real.recordings) == 4
-          and rv["span_utc"] == ("2021-08-04T13:59:51Z", "2021-08-05T14:00:01Z")
-          and rv["recorder_zone_minutes"] == -480 and rv["recorder_zone_agreement"] == "806/806 files",
+          and rv["span_local"] == ("2021-08-04 13:59:51", "2021-08-05 14:00:01")
+          and rv["span_utc"] == (None, None)
+          and rv["recorder_zone_minutes"] == 480 and rv["recorder_zone_agreement"] == "806/806 files",
           str(rv.get("summary")))
     check("real image: the recorder's own log (194 entries, unbroken) and index (806/806 files "
           "as their headers say) agree with the disk; index.bin leaves only the last file open",
@@ -891,9 +908,9 @@ def test_heimvision(tmp: str) -> None:
           and rv["index_bin"] == {"complete": 805, "written_not_complete": ["DIR00006/FILE0037.DAT"],
                                   "complete_not_written": []},
           str(rv["recorder_index"]) + str(rv["index_bin"]))
-    check("real image: UTC-8 again from the ext3 clock; CH02-CH04 video 6.9-7.5 s before "
+    check("real image: UTC+8 again from the ext3 clock; CH02-CH04 video 6.9-7.5 s before "
           "their logged 'Rec begin'",
-          rv["recorder_zone_minutes_ext3"] == {"dvr_log.db": -480, "search.db": -480}
+          rv["recorder_zone_minutes_ext3"] == {"dvr_log.db": 480, "search.db": 480}
           and rv["footage_before_logged_start_s"] == {"CH01": -0.4, "CH02": 7.5, "CH03": 7.4,
                                                      "CH04": 6.9},
           str(rv["footage_before_logged_start_s"]))

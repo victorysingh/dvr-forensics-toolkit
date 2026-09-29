@@ -40,8 +40,8 @@ It was run on two real 1 TB surveillance drives:
 - **A third, public image (NIST CFReDS HeimVision K9604-W, 150 GB E01):** our
   E01 reader reproduced FTK Imager's MD5 and SHA-1; a new plugin, built from
   the disk itself, recovered **24 hours on 4 cameras**, each frame naming its
-  camera and microsecond time, and measured the recorder's zone (UTC-8) from
-  its own FAT clock.
+  camera and time on the recorder's display clock (the clock painted on the
+  picture), and measured its zone setting, UTC+8, from its own system clock.
 
 No vendor format is yet `validated`. That status needs a byte-match against
 the recorder's own export; the tool to make it is built, and the export is
@@ -139,7 +139,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 | E01 | read by our own reader; computed MD5 and SHA-1 **equal FTK Imager's** over all 150 GB |
 | Layout | GPT; ext3 system partition; FAT32 ring of 17,152 files of 8 MiB; frames `liu ` ... ` uil` naming camera and microsecond time - decoded from the disk, now `plugins/heimvision.py` |
 | Recorded | 806 files, 6.30 GB: **24 h continuous on 4 cameras**, 1.296 M frames each at 15 fps, no gap over 2 s after the start |
-| Time | the recorder's FAT clock is 8 h behind its frame times on all 806 files: set to UTC-8 in a UTC-4 location - and its Linux clock (ext3 times) is 8 h behind its own log's UTC, a second measurement |
+| Time | frame, log and index times are the recorder's display clock - equal to the clock painted on the picture: local time written as if UTC. Its system clock (FAT times on all 806 files, ext3 times of both databases) runs 8 h behind: a zone setting of UTC+8, measured twice, not applied. Made at Marshall University (UTC-4 in August), so true UTC needs the clock's error, which the disk does not hold |
 | Recorder's own records | its event log and recording index (SQLite on the ext3 partition) read and **checked, not trusted**: 194 log entries, none deleted; the index gives all 806 files exactly the times their headers do; recording began at 13:59:50-51 UTC on all four cameras, and CH02-CH04 hold ~7 s of video from before it |
 | No-parser carver | `carve-annexb`, scored frame by frame by the plugin: 5,187,890 slices, every one in the files accounted for, 0.07% of them container bytes; the four cameras share one parameter set, so its streams mix them - only the container separates cameras and gives time |
 

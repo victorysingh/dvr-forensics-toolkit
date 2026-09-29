@@ -345,6 +345,8 @@ def _extract_with_plugin(args, plugin) -> int:
     from core.contract import SCHEMA_VERSION, dump_json, utc_now
 
     os.makedirs(args.out, exist_ok=True)
+    if getattr(args, "tz_offset", None) is not None and hasattr(plugin, "tz_offset_min"):
+        plugin.tz_offset_min = args.tz_offset
     print(f"{BANNER} - {args.vendor} extract {args.recording}\n")
     try:
         with BlockDevice(args.device) as dev:
@@ -368,8 +370,15 @@ def _extract_with_plugin(args, plugin) -> int:
     dump_json(manifest, mpath)
     print(f"  [+] {stats['file']}  {human_size(stats['bytes'])}  {stats['frames']} frames  "
           f"sha256 {stats['sha256'][:16]}...")
-    print(f"  span          {stats.get('first_time_utc')} -> {stats.get('last_time_utc')} "
-          f"(recorder clock, zone not established)")
+    if stats.get("first_time_local"):
+        print(f"  span          {stats['first_time_local']} -> {stats.get('last_time_local')} "
+              f"(recorder-local)")
+        if stats.get("first_time_utc"):
+            print(f"  span (UTC)    {stats['first_time_utc']} -> {stats.get('last_time_utc')} "
+                  f"(zone as stated; clock error not measured)")
+    else:
+        print(f"  span          {stats.get('first_time_utc')} -> {stats.get('last_time_utc')} "
+              f"(recorder clock, zone not established)")
     print(f"  [+] {os.path.basename(mpath)}")
     print(f"\n  status {result.validation_status.upper()}")
     return 0
