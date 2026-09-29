@@ -1037,6 +1037,67 @@ def test_godrej(tmp: str) -> None:
           not badq_det and claimed == ["Godrej"] and not other, str(claimed))
 
 
+def test_daylight(tmp: str) -> None:
+    """The recorder's offset from UTC from its cameras' infrared switches: at
+    the right offset every dusk and dawn switch sits at one sun elevation."""
+    print("\n[daylight: the recorder's clock from its cameras' infrared switches]")
+    import random
+    import shutil as _sh
+    from datetime import datetime, timedelta
+    from analyse import daylight as DL
+
+    lat, lon = 12.97, 77.59                                   # Bengaluru
+    sunset = DL.solar_elevation(datetime(2026, 9, 23, 12, 46), lat, lon)   # 18:16 IST
+    noon = DL.solar_elevation(datetime(2026, 9, 23, 6, 40), lat, lon)
+    check("the sun, by NOAA's equations: Bengaluru's 18:16 IST sunset on 23 Sep sits at the "
+          "horizon, and its noon sun is high", -1.5 < sunset < 1.0 and 75 < noon < 79,
+          f"{sunset:.2f} {noon:.1f}")
+
+    rng = random.Random(3)
+    truth, h_switch = 337, -2.0                     # IST + a clock 7 min fast; the camera's threshold
+    series, jit, t = [], {}, datetime(2026, 9, 1)
+    while t < datetime(2026, 9, 11):
+        utc = t - timedelta(minutes=truth)
+        j = jit.setdefault((utc.date(), utc.hour < 12), rng.uniform(-0.6, 0.6))   # weather
+        h = DL.solar_elevation(utc, lat, lon)
+        c = 25 + rng.uniform(-5, 5) if h > h_switch + j else 1 + rng.uniform(0, 1)
+        if h < -10 and rng.random() < 0.01:
+            c = 30                                                  # a headlight at night
+        series.append((t, c))
+        t += timedelta(minutes=2)
+    ev = DL.switches(series)
+    res = DL.estimate(ev, lat, lon, zone=330)
+    check("ten days of footage: 10 dusk and 10 dawn switches, headlight flashes ignored",
+          (res["dusk"], res["dawn"]) == (10, 10), str((res["dusk"], res["dawn"])))
+    check("the offset found without the unit or the camera's threshold: UTC+337 min, i.e. IST "
+          "and a clock 7 min fast; the switch elevation recovered; per-switch offsets agree",
+          abs(res["offset_min"] - truth) <= 3 and abs(res["clock_error_min"] - 7) <= 3
+          and abs(res["switch_elevation_deg"] - h_switch) < 0.5
+          and res["per_switch_offset_min"]["range"][1] - res["per_switch_offset_min"]["range"][0] <= 10,
+          res["reading"])
+    one_kind = DL.estimate([e for e in ev if e["kind"] == "dusk"], lat, lon)
+    check("dusks alone are refused - every offset fits them equally - and the 12-hour alias "
+          "is ruled out by the sun's direction",
+          one_kind["offset_min"] is None and abs(res["offset_min"] - truth) < 60)
+
+    ffmpeg = os.environ.get("FFMPEG") or _sh.which("ffmpeg")
+    folder = os.environ.get("VENDOR_SAMPLES")
+    if not (ffmpeg and folder):
+        print("  [real footage] skipped - needs ffmpeg and VENDOR_SAMPLES")
+        return
+    night = [c for _, c in DL.sample(os.path.join(folder, "imkh_00000001541000000.mp4"), 3,
+                                     ffmpeg=ffmpeg)]
+    day = [c for _, c in DL.sample(os.path.join(folder, "ffmpeg_t4182_20150327215559_ch01.mp4"),
+                                   3, ffmpeg=ffmpeg)]
+    dav = DL.sample(os.path.join(folder, "ffmpeg_t6144_19.25.00-19.25.50[R].dav"), 3,
+                    ffmpeg=ffmpeg)
+    check("real recorder footage: a Hikvision infrared night picture measures as infrared and "
+          "a daylight one as colour, far apart; a .dav's samples carry the recorder's own times",
+          max(night) <= DL.MONO_MAX and min(day) > 4 * DL.MONO_MAX
+          and dav[0][0] == datetime(2017, 9, 18, 19, 25, 0),
+          f"night {max(night)} day {min(day)} dav {dav[0][0]}")
+
+
 def test_dahua_real_media() -> None:
     """Pins the parser to what was observed on the real SkyHawk disk.  Runs
     only when DHFS_REAL_IMAGE points at the partial image (never committed)."""
@@ -3978,6 +4039,7 @@ def main() -> int:
         test_case_export(tmp)
         test_heimvision(tmp)
         test_godrej(tmp)
+        test_daylight(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
