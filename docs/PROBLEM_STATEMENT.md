@@ -86,7 +86,7 @@ produce reliable and legally defensible forensic results.
 | Recovery | `parsers/dahua.py` remnants; `recover/carver.py`; `recover/pscarve.py`; `recover/annexb.py` (vendors with no parser) | Dahua remnants + indexless DHAV carver, and an MPEG-PS carver for Hikvision footage (recovered from under a reformatted drive, dated), both on real media (`spec_only`) and run inside the acquisition pass |
 | Timeline Analysis | `analyse/timeline.py` | working: zone + measured clock error, gaps, cross-camera correlation |
 | Reporting | `report/`, `viewer/` | working: HTML + JSON report, dependency-free viewer |
-| Machine Learning | `analyse/activity.py` | motion activity from compressed frame sizes (lead, not evidence); face and object detection built as leads in the optional layer (ffmpeg + ONNX, `analytics/`), measured against 487 frames labelled by eye: no false alarm, but a person found in 0 of the 57 frames that had one (faces 3 of 27, vehicles 4 of 12) |
+| Machine Learning | `analyse/activity.py` | motion activity from compressed frame sizes (lead, not evidence); face and object detection built as leads in the optional layer (ffmpeg + ONNX, `analytics/`), measured against 487 frames labelled by eye: untiled, a person found in 0 of the 57 frames that had one; tiled, in 24 of 57 (faces 11 of 27, vehicles 5 of 12), with 1 false alarm |
 
 ## Named deliverables
 
