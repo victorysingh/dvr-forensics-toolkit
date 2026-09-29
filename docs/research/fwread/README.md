@@ -32,6 +32,14 @@ python ko.py comm.ko find "Capacity"            # functions that load a string
 python so.py liblayouthddb.so syms rawDiskLayout
 ```
 
+- `sofia.py` reads Qualvision's statically linked `Sofia` (ARM, ELF at file
+  offset 0x200, loaded at 0x10000): where a debug string is used, and the
+  code around it, each literal load labelled.
+
+| Qualvision (Godrej) firmware | File read | SHA-256 |
+|---|---|---|
+| `NVR401L-4P4.20240531.zip` (homaxi.com, SHA-256 `fe10f5381258146817c1663d10207ec2971eefb890e2485d437804d99172a80a`) → `.upf` → `usr.ubiimg` (UBIFS, LZO) | `/Sofia` (from `Sofia.lzma`) | `eb9e9e1d5ff48f519eb5c9fef1f8f140006976f0a4462799273524625ec2944b` |
+
 ## Where each Uniview structure comes from (`comm.ko`)
 
 | Structure | Function(s) | What to look for |
@@ -63,3 +71,21 @@ Not recovered, and so not used by the plugin: TP-Link's database-area record
 (`rawDiskLayout_DBAreaInfoInit`, `rawDiskLayout_restoreDBAreaInfo`), which
 holds where the zones start and how large a zone is; and TP-Link's GOP
 header.
+
+## Where each Qualvision (Godrej) structure comes from (`Sofia`)
+
+Godrej's SeeThru cloud portal drives Qualvision's `/tdkcgi` API, and
+`Sofia` implements it, so a SeeThru recorder runs this software
+(`../vendor_formats.md`). Addresses are virtual addresses.
+
+| Structure | Function (found by its string) | What to look for |
+|---|---|---|
+| Disk head | `IDiskExt::CheckHead` 0x954e64 (`sofia.py Sofia str "int IDiskExt::CheckHead()"`) | `QVEX` = 0x58455651 at +0; 0x10000 at +4; +8 and +0xC against the disk object's +0x44/+0x48; the three bounds checks on +0x10..+0x1C |
+| Frame head | `CheckFrameHead` 0x989858 | `u32[+0] & 0xFFFFFF == 0x10000`; `(type + 0x20) & 0xFF <= 0x0B`; length at +4 |
+| Head size | `LoadFrameHead` 0x98a164 | reads 0x14 bytes into the object at +0xD4 |
+| Payload, next frame | `ReadPacket` 0x98a320 | allocates length + 0x14, reads length bytes from +0x14; next = here + 0x14 + length (0x98a728) |
+| Frame time | `CHOTUpload::OpenFile` 0x309610 (`str "openfile frame head time"`) | the debug print's shifts on the u32 at +8 (sec, min, hour, day, month, year-2000) and the u16 at +0xC (ms) |
+
+Not recovered, and so not used by the plugin: the VIDEO/PIC index blocks and
+the per-channel HM time index (which name a frame's camera), the meaning of
+frame types 0xE0-0xEB, and the six bytes at +0x0E of a frame head.

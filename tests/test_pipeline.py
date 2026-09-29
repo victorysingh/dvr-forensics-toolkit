@@ -970,6 +970,56 @@ def test_heimvision(tmp: str) -> None:
               and rep["zone_setting_minutes_from_ftk_times"] == 480, str(rep["fat"]))
 
 
+def test_godrej(tmp: str) -> None:
+    """Godrej's SeeThru recorders run Qualvision's software: the QVFS layout
+    read from Qualvision's firmware (a QVEX head and a self-checking frame
+    chain), on a disk built to that reading - spec_only."""
+    print("\n[Godrej plugin (Qualvision QVFS, from its firmware)]")
+    from parsers import available_vendors
+    from tests import synth_qvfs as SQ
+
+    qimg = os.path.join(tmp, "qvfs.img")
+    qt = SQ.build(qimg)
+    g = get_parser("Godrej")
+    with BlockDevice(qimg) as dev:
+        gdet = g.detect(dev)
+        gr = g.parse(dev)
+        outs = [g.extract_recording(dev, r.id, os.path.join(tmp, f"qv{i}"))
+                for i, r in enumerate(gr.recordings)]
+        claimed = sorted(v for v in available_vendors() if get_parser(v).detect(dev))
+    gv = gr.volume
+    check("Godrej/Qualvision: the QVEX head read as the firmware checks it; region bounds hold; "
+          "the size field is the disk in sectors; status spec_only from the firmware",
+          gdet and gv["head"]["bounds_ok"] and gv["region_unit_bytes"] == 512
+          and gv["head"]["region_b"] == (SQ.B_START, SQ.B_SIZE)
+          and gr.validation_status == "spec_only", str(gv["head"]))
+    check("footage found by the frame chain - both runs at their offsets, every frame, first "
+          "and last times to the millisecond - and a lone fake head chained to nothing is "
+          "passed over",
+          [(r.offset, r.frame_count) for r in gr.recordings]
+          == [(t["offset"], t["frames"]) for t in qt["runs"]]
+          and [r.duration_s for r in gr.recordings] == [4.76, 2.96]
+          and gr.recordings[0].timestamps[0].raw_value.endswith("2025-03-14 09:30:00 recorder-local")
+          and all(r.camera_id == "UNKNOWN" and r.start_utc is None for r in gr.recordings)
+          and not any(r.offset <= qt["fake_head_at"] < r.offset + r.length for r in gr.recordings),
+          str([(r.offset, r.frame_count, r.duration_s) for r in gr.recordings]))
+    check("a run's video extracted exactly (payloads with a start code), audio left out",
+          all(open(os.path.join(tmp, f"qv{i}.es"), "rb").read() == qt["runs"][i]["video"]
+              for i in range(2))
+          and [o["frames_without_start_code"] for o in outs] == [24, 15], str(outs))
+    raw = bytearray(open(qimg, "rb").read())
+    struct.pack_into("<I", raw, 0x14, SQ.TOTAL)                  # region A now too big
+    badq = os.path.join(tmp, "qvfs_bad.img")
+    open(badq, "wb").write(raw)
+    with BlockDevice(badq) as dev:
+        badq_det = g.detect(dev)
+    with BlockDevice(os.path.join(tmp, "heimvision.img")) as dev:
+        other = g.detect(dev)
+    check("a QVEX head failing the firmware's own bounds check is not taken; on the QVFS disk "
+          "no other plugin claims it, and Godrej claims no other vendor's disk",
+          not badq_det and claimed == ["Godrej"] and not other, str(claimed))
+
+
 def test_dahua_real_media() -> None:
     """Pins the parser to what was observed on the real SkyHawk disk.  Runs
     only when DHFS_REAL_IMAGE points at the partial image (never committed)."""
@@ -3911,6 +3961,7 @@ def main() -> int:
         test_parallel_taps(tmp)
         test_case_export(tmp)
         test_heimvision(tmp)
+        test_godrej(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
