@@ -70,3 +70,10 @@ refused.
   detection is right. Small, distant, dark or blurred subjects are missed;
   shapes are sometimes taken for people or vehicles. Every result is a moment
   to review in the footage itself.
+- **Not proof of absence.** Scored against 287 frames of real recorder
+  footage labelled by eye (`docs/VALIDATION_REPORT.md` §8a), it raised no
+  false alarm but reported a person in none of the 57 frames that had one:
+  the object model misses small, distorted and distant people, and the
+  static rule removes a person who sits still. Measure it on your own
+  footage with `python -m validate.analytics_eval` (sample, label, score,
+  sweep).
