@@ -82,7 +82,7 @@ produce reliable and legally defensible forensic results.
 |---|---|---|
 | Device Identification | `detect/signatures.py`, `detect/engine.py`, `detect/model.py` | working: vendor by confidence score; model from platter strings and the examiner's reading of the unit, cross-checked |
 | Acquisition | `acquire/device.py`, `acquire/scanner.py` | working |
-| File System & Format Parsing | `parsers/`, `plugins/` | HeimVision read off a real NIST image (`plugins/heimvision.py`, `spec_only`); Honeywell from published research (`plugins/honeywell.py`, `spec_only`); Dahua DHFS on real media (`spec_only`, two drives); Hikvision index records and MPEG-PS container on real media (`spec_only`), full-FS parser on the same observed layout (`spec_only`, not yet run on an intact Hikvision disk); drop-in plugins |
+| File System & Format Parsing | `parsers/`, `plugins/` | all eight named OEMs have a plugin, each with its status: Dahua DHFS and CP Plus (the same format on our unit) and Hikvision (index records, MPEG-PS, full filesystem on the observed layout) read off our two real drives; HeimVision off a real NIST image; Honeywell from published research; Uniview, TP-Link's index and Godrej (Qualvision) from the vendors' own firmware; Matrix from its own documents. Only the first three are observed on real media; none is `validated` (that needs a byte-match with the recorder's own export) |
 | Recovery | `parsers/dahua.py` remnants; `recover/carver.py`; `recover/pscarve.py`; `recover/annexb.py` (vendors with no parser) | Dahua remnants + indexless DHAV carver, and an MPEG-PS carver for Hikvision footage (recovered from under a reformatted drive, dated), both on real media (`spec_only`) and run inside the acquisition pass |
 | Timeline Analysis | `analyse/timeline.py` | working: zone + measured clock error, gaps, cross-camera correlation |
 | Reporting | `report/`, `viewer/` | working: HTML + JSON report, dependency-free viewer |
@@ -104,12 +104,15 @@ each to its file:
 ## Reading the PS honestly
 
 The PS names eight OEMs and asks for "at least five to six". We hold media for
-two: a CP Plus unit's drive, which carries Dahua-family DHFS 4.1 (so it covers
-the Dahua format, with CP Plus attribution resting on the unit's label), and a
-second drive believed to be Hikvision, not yet read. The defensible way to answer this is detection across
-all eight plus a documented plugin SDK, with per-vendor status stated
-explicitly — not an implied claim of full support for eight formats we cannot
-test. See Rule 3 in `START_HERE.md`.
+two recorders: a CP Plus unit's drive, which carries Dahua-family DHFS 4.1 (so
+it covers the Dahua format, with CP Plus attribution resting on the unit's
+label), and a Hikvision unit's drive, reformatted by a Dahua-family recorder,
+from which ~6,300 hours of Hikvision footage were recovered. NIST's public
+HeimVision image makes a third family. Every one of the eight has a plugin, and
+each states how it was built and how strongly it is evidenced: three from real
+drives, the rest from a paper, the vendors' own firmware or documents. That is
+the defensible answer - not an implied claim of full support for formats we
+could not test. See Rule 3 in `START_HERE.md`.
 
 The PS also asks for AI analytics (face, object, motion). That is genuinely
 requested, so it belongs in the architecture, but it is the last thing to

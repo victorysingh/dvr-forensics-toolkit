@@ -1,12 +1,11 @@
-# Project status and handoff — 26 Sep 2026
+# Project status and handoff — 30 Sep 2026
 
-Where SIH26150 stands two days before the deadline: what is done against
-the problem statement, what the two real drives gave us, how to run it,
-and — in §6 — what is left in JP's lane.
+Where SIH26150 stands: what is done against the problem statement, what the
+two real drives gave us, how to run it, and — in §6 — what is left in JP's
+lane.
 
-Everything below is on `setup` or in PR #4 (Hikvision index), except the
-case outputs, which live under `out/` on Shrestha's machine (gitignored:
-they are evidence).
+Everything below is on `setup`, except the case outputs, which live under
+`out/` on Shrestha's machine (gitignored: they are evidence).
 
 ---
 

@@ -187,7 +187,7 @@ MIN_IDENTIFIER = 6          # shorter strings match by chance too often to mean 
 
 
 def normalize_mac(mac: str) -> Optional[str]:
-    """'f8-20-97-10-12-b7' -> 'F8:20:97:10:12:B7'; None if not 12 hex digits."""
+    """'02-00-5e-10-00-01' -> '02:00:5E:10:00:01'; None if not 12 hex digits."""
     h = re.sub(r"[:\-. ]", "", (mac or "").strip())
     if not re.fullmatch(r"[0-9A-Fa-f]{12}", h):
         return None
