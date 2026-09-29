@@ -15,7 +15,7 @@ Status: **`synthetic_only`** — see §6, which says plainly what has not been r
 | Drive | Streams no index accounts for | What names the camera |
 |---|---|---|
 | 1 — CP Plus (`WWD4A3NX`) | 2,246 streams, March → August 2026 | nothing in the bytes: the DHAV channel byte is `0` for every camera (`DAHUA_DHFS.md` §4). The picture reads *Parking*, *Road View 1*, *Road View 2* |
-| 2 — Hikvision (`Z9C2632A`) | 495 of 2,516 streams, older than the surviving index | nothing: no HIKBTREE record covers them. The picture reads *Camera 01*, *Camera 03* |
+| 2 — Hikvision (`Z9C2632A`) | 495 of 2,516 streams: 440 stale tails older than their block's record, 55 in blocks with no record (`VALIDATION_REPORT.md` §8b) | nothing: no HIKBTREE record covers them. The picture reads *Camera 01*, *Camera 03* |
 
 Those titles are not a guess — an examiner read them off decoded frames by eye
 during validation (`VALIDATION_REPORT.md` §8a, §8b). This code does the same
