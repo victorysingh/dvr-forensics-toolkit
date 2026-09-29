@@ -1154,8 +1154,26 @@ def test_plugins(tmp: str) -> None:
             sc.scan_block(0, fh.read(), 0, "")
         check("the scan detects the new vendor with no core change",
               any(d.vendor == "Acme" for d in sc.detections()))
+        # A packaged build also loads plugins/ next to the executable; a file
+        # there never replaces a shipped plugin of the same name.
+        ddir = os.path.join(tmp, "dropin")
+        os.makedirs(ddir)
+        with open(os.path.join(ddir, "acme.py"), "w", encoding="utf-8") as fh:
+            fh.write("raise RuntimeError('must not replace the shipped acme.py')\n")
+        with open(os.path.join(ddir, "zeta.py"), "w", encoding="utf-8") as fh:
+            fh.write('"""Zeta test plugin."""\n')
+        P.DROP_IN_DIR = ddir
+        P.LOADED_PLUGINS.clear()
+        P.PLUGIN_ERRORS.clear()
+        P._load_plugins()
+        check("a packaged build also loads plugins/ next to the executable",
+              "zeta.py" in P.LOADED_PLUGINS)
+        check("a dropped-in file never replaces a shipped plugin of the same name",
+              os.path.join(ddir, "acme.py") in P.PLUGIN_ERRORS
+              and "acme.py" in P.LOADED_PLUGINS and "acme.py" not in P.PLUGIN_ERRORS)
     finally:
         P.PLUGIN_DIR = saved_dir
+        P.DROP_IN_DIR = None
         P.REGISTRY.pop("Acme", None)
         P.LOADED_PLUGINS.clear()
         P.PLUGIN_ERRORS.clear()

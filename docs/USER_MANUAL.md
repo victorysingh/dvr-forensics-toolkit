@@ -30,7 +30,10 @@ it produces is labelled `validated` — see §6.
 
 ## 2. Requirements
 
-- Python 3.11 or newer. No packages to install.
+- Python 3.11 or newer. No packages to install. **Or** the packaged
+  `ps26150-dvr.exe`: one file, no Python. It takes the same commands as
+  `python cli.py`, and loads new vendors from a `plugins\` folder next to it
+  (`packaging/README.md`).
 - Linux for live acquisition (the tested path); Windows works with an
   Administrator shell and `\\.\PhysicalDriveN` paths.
 - Free space for the outputs, not the drive: about 50 MB per drive for the
