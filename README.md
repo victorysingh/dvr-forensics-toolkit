@@ -14,7 +14,8 @@
 
 **Smart India Hackathon 2026 · SIH26150 · NTRO · Blockchain & Cybersecurity · Team Chronicles.exe (178295)**
 
-[![case-console](assets/case-console.png)](assets/case-console.png)
+[![case-console](assets/case-console.png)](<img width="1290" height="597" alt="Screenshot 2026-09-30 035020" src="https://github.com/user-attachments/assets/fff92a15-3f53-415d-830d-1e59f0c997a8" />
+)
 The case console on two real drives: (1) all eight PS vendors, each with its status; (2) the pipeline from acquisition to report; (3) 2,246 recordings recovered from outside the index; (4) people and faces detected in recovered footage; (5) AI triage, leads never called evidence; (6) court exports: BSA s.63, CASE/UCO, NIST.
 
 ---
