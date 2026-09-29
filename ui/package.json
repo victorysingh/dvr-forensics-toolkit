@@ -1,0 +1,22 @@
+{
+  "name": "ps26150-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "PS26150 DVR forensics case console. Builds to viewer/static/, which is committed and shipped inside ps26150-dvr.exe - an air-gapped machine never needs Node.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "tailwindcss": "^4.1.14",
+    "vite": "^7.1.9"
+  }
+}
