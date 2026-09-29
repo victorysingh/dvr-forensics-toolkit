@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 491 pass, 0 fail: 473 on generated data with known ground truth (2 need ffmpeg), 13 on real media (9 on the CP Plus drive's image, 4 on the HeimVision E01), 5 on vendor-made files from other recorders (§8g) |
+| Automated tests | 493 pass, 0 fail: 474 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 5 on vendor-made files from other recorders (§8g) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
@@ -451,6 +451,24 @@ places every `00 00 01` in the 806 written files by the parser.
 - `carve-annexb` therefore stays `synthetic_only`: its slice finding is
   measured on real media, but the streams it made here are not any one
   camera's footage.
+
+**Checked against FTK Imager's own reading of the disk** (29 Sep,
+`python -m validate.ftk_listing IMAGE.E01 LISTING.csv`). The image ships with
+the file listing FTK Imager 4.3.1.1 made when it was acquired
+(`HeimVision K9604-W File Listing.csv`, 17,418 entries). FTK's FAT32 and ext3
+code is commercial and independent of ours:
+
+| Check | Result |
+|---|---|
+| FAT32 files | **17,154 in both** (17,152 `.dat` plus `ident.bin` and `index.bin`), none only on one side |
+| Sizes | **0 differ** |
+| Write times | **0 differ**; both show the same 808 entries written and the rest never written (FTK "N/A") |
+| ext3 system files | `dvr_log.db`, `search.db`, `pbversion`, `manual_rec_status.bin`: size, mtime and atime **identical** |
+| Zone setting | FTK prints `dvr_log.db`'s mtime as 2021-08-05 06:00:00 UTC; the recorder's log ends at 14:00:01 on its display clock: **UTC+8**, the same as the plugin measures (and not the UTC-8 first reported) |
+| Deleted entries | none, on either side |
+
+This confirms the filesystem reading, not the video format: FTK does not
+parse the `.dat` contents.
 
 **Status:** `spec_only` - observed on real media, not byte-matched against a
 HeimVision export. `tests/test_pipeline.py` pins these numbers when
