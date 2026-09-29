@@ -2413,6 +2413,50 @@ def test_parser_fuzz(tmp: str) -> None:
         check(f"{vendor}: 12 corrupted disks - no crash, hang or safety-net stop", not bad, str(bad[:2]))
 
 
+def test_carver_fuzz(tmp: str) -> None:
+    """The three carvers and the E01 reader against damaged input
+    (validate/fuzz_parsers.py, a fixed seed): none crashes or hangs; and a
+    damaged E01 set is refused without leaving its evidence file open."""
+    print("\n[carvers and the E01 reader: fuzzed with damaged input]")
+    import random
+    import threading
+    from acquire.device import DeviceError
+    from validate import fuzz_parsers as F
+    for name in F.CARVERS:
+        data, reads, _ = F.seed(name, tmp)
+        rnd = random.Random(f"{name}:test")
+        bad = []
+        for n in range(8):
+            patches, size, what = F.mutate(data, reads, rnd)
+            box: dict = {}
+            t = threading.Thread(target=lambda: box.update(
+                F.run_carver(name, data, patches, size, F.SEGMENTS.get(name, []))), daemon=True)
+            t.start()
+            t.join(60)
+            if box.get("outcome", "hang") not in ("ok", "device-error"):
+                bad.append((n, box.get("outcome", "hang"), box.get("error", ""), what))
+        check(f"{name}: 8 damaged inputs - no crash or hang", not bad, str(bad[:2]))
+
+    from tests import synth_ewf
+    media = bytes(64 << 10)
+    first = synth_ewf.write(os.path.join(tmp, "leak"), media)[0]
+    with open(first, "r+b") as fh:                  # damage the first section's descriptor
+        fh.seek(13 + 16)
+        fh.write(b"\xff" * 8)
+    refused = released = False
+    try:
+        BlockDevice(first)
+    except DeviceError:
+        refused = True
+        try:                                        # while the refusal is still being handled
+            os.remove(first)                        # (fails on Windows if a handle is open)
+            released = True
+        except OSError:
+            pass
+    check("a damaged E01 set is refused as a device error and its evidence file is not left open",
+          refused and released, f"refused={refused} released={released}")
+
+
 def test_analytics_apply(tmp: str) -> None:
     """`apply` scores a set sampled earlier under today's rules from its
     stored boxes alone - no video, no frames."""
@@ -4552,6 +4596,7 @@ def main() -> int:
         test_analytics_apply(tmp)
         test_parser_safety_net()
         test_parser_fuzz(tmp)
+        test_carver_fuzz(tmp)
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)
