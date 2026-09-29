@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import ntpath
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -49,6 +50,25 @@ ONBOARDING = [
                                  "export. Only this moves a vendor to 'validated'.",
      "tool": "human sign-off", "state": "per vendor"},
 ]
+
+
+def _static_file(url_path: str) -> str | None:
+    """Resolve a URL path inside viewer/static/, or None if it escapes.
+
+    The UI is split into ES modules under static/js/, so a flat basename is
+    not enough any more.  Everything is still confined to STATIC: the real
+    path is resolved (following any symlink) and must stay inside it.
+    """
+    rel = unquote(url_path).lstrip("/")
+    if not rel or rel.endswith("/"):
+        rel = "index.html"
+    if os.path.isabs(rel) or ntpath.isabs(rel):
+        return None
+    full = os.path.realpath(os.path.join(STATIC, rel))
+    root = os.path.realpath(STATIC)
+    if full != root and not full.startswith(root + os.sep):
+        return None
+    return full if os.path.isfile(full) else None
 
 
 def _case_dir(out_root: str, case_id: str) -> str | None:
@@ -109,9 +129,8 @@ class Handler(BaseHTTPRequestHandler):
                     with open(f, "rb") as fh:
                         return self._send(200, fh.read(), "image/jpeg")
                 return self._send(404, b"not found", "text/plain")
-            name = "index.html" if path in ("/", "") else os.path.basename(path)
-            f = os.path.join(STATIC, name)
-            if os.path.isfile(f):
+            f = _static_file(path)
+            if f:
                 with open(f, "rb") as fh:
                     ctype = mimetypes.guess_type(f)[0] or "application/octet-stream"
                     return self._send(200, fh.read(), ctype)
