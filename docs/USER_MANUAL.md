@@ -278,9 +278,9 @@ structures is a disk that another recorder formatted.
 
 ### 3.4f Footage from a recorder we have no parser for
 
-When detection names a vendor with no parser (Godrej), or
-TP-Link (whose plugin reads the index but places no footage) — or names
-nobody — recover the video anyway:
+When detection names nobody, or TP-Link (whose plugin reads the index but
+places no footage), or a Godrej disk with no `QVEX` head (a model not made
+by Qualvision) — recover the video anyway:
 
 ```bash
 python cli.py carve-annexb --device /dev/sdb --out out/CASE-001     # or scan --carve-annexb

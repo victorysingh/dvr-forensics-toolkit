@@ -147,10 +147,10 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 493 in all: 474 on generated data with known ground
+- **Automated tests:** 518 in all: 497 on generated data with known ground
   truth, 14 on real media (9 on the CP Plus drive's image, 5 on the
-  HeimVision E01 and its FTK listing), and 5 on vendor-made files from other
-  recorders (`VALIDATION_REPORT.md` §1).
+  HeimVision E01 and its FTK listing), and 7 on vendor-made files: 5 from
+  other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
   They cover the Merkle tree, the custody chain, bad sectors, device loss,
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the
@@ -173,7 +173,8 @@ Full account: `VALIDATION_REPORT.md`.
   - Uniview: `spec_only`, from the storage driver in Uniview's own firmware.
   - TP-Link: `detected_not_parsed`; its index is read when plain (from the VIGI firmware), but no footage is placed.
   - Matrix: `spec_only`, from Matrix's own documents (its recording tree).
-  - Godrej: `detected_not_parsed`.
+  - Godrej: `spec_only`, from Qualvision's firmware (Godrej's SeeThru
+    recorders run Qualvision's software): footage found and dated, no camera.
 - **Checked without an export** (`VALIDATION_REPORT.md` §8g), as SWGDE
   18-Q-001 and ISO/IEC 17025 allow when no reference export exists:
   - ffmpeg's `dhav` demuxer, a second implementation, agrees with ours frame
@@ -302,14 +303,13 @@ as unique.
 | Uniview | `spec_only` | drop-in plugin from the storage driver in Uniview's own firmware (static disassembly); footage found with or without its index (VALIDATION_REPORT §8f) |
 | TP-Link | `detected_not_parsed` | drop-in plugin from the VIGI firmware: format sector and index detected, a plain index read (recordings, system log); footage not placed - `carve-annexb`; an encrypted index is reported as such |
 | Matrix | `spec_only` | drop-in plugin from Matrix's own documents: the CameraNN/date/hour tree of .stm files, read on ext2/3/4 (incl. one RAID 1 mirror); .stm extracted as stored (VALIDATION_REPORT §8h) |
-| Godrej | `detected_not_parsed` | brand strings and model numbering; video recoverable with no parser by `carve-annexb`; sourced first answers in `OEM_COMPARISON.md` §5.1 |
+| Godrej | `spec_only` | drop-in plugin from Qualvision's own firmware (Godrej SeeThru runs Qualvision's software): disk head, frame chain, dated runs; cameras and the index not decoded (VALIDATION_REPORT §8j) |
 
 **Four platforms are read from real media (three of the eight, plus
 HeimVision from a public NIST image), one more from published research, and
-one (Uniview, plus TP-Link's index) from the vendor's own firmware, and
-one (Matrix) from the vendor's own documents - seven of the eight parsed or
-their index read;
-all eight are detected; and footage can be recovered from any vendor that
+two (Uniview, and Godrej via Qualvision, plus TP-Link's index) from the
+vendors' own firmware, and one (Matrix) from the vendor's own documents -
+all eight named OEMs parsed or their index read; and footage can be recovered from any vendor that
 stores standard H.264/H.265.** That is our honest answer to "five to six".
 
 ## 10. Limitations
@@ -368,7 +368,8 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
    What is left, folding the signature search into that pass, is small.
 5. **Any real disk** from Honeywell, Uniview or TP-Link: run the plugin
    (`parse --vendor ...`) - the first real disk is its test. The same for
-   Matrix. From Godrej: run `survey` and `carve-annexb`, then write a plugin.
+   Matrix and Godrej. From anyone else: run `survey` and `carve-annexb`, then
+   write a plugin.
 
 ## 12. Deliverables named in the PS
 
