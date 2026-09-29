@@ -1806,7 +1806,9 @@ def cmd_identify_model(args) -> int:
         print("  no model-numbered string found in what was searched")
     for c in res["candidates"][:15]:
         print(f"  {c['kind']:<9} {c['model']:<26} {c['vendor']:<10} {c['count']:>6}x  "
-              f"first at 0x{c['offsets'][0]:X}")
+              f"first at 0x{c['offsets'][0]:X}"
+              + ("  (possible chance match: short, seen once)"
+                 if c.get("possible_chance_match") else ""))
     ui = res.get("unit_identifiers")
     for r in (ui or {}).get("found", []):
         print(f"  unit's    {r['identifier'] + ' ' + r['value']:<36} {r['form']:<20} "
