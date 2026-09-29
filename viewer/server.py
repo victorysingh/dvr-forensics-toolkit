@@ -80,7 +80,7 @@ def _case_dir(out_root: str, case_id: str) -> str | None:
 
 class Handler(BaseHTTPRequestHandler):
     out_root = "out"
-    server_version = "ps26150-ui"
+    server_version = "anokhidrishti-ui"
 
     def log_message(self, fmt, *args):             # quiet by default
         pass
@@ -142,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
 def serve(out_root: str = "out", port: int = 8150) -> None:
     Handler.out_root = out_root
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"PS26150 UI on http://127.0.0.1:{port}/  (cases from {os.path.abspath(out_root)})")
+    print(f"AnokhiDrishti on http://127.0.0.1:{port}/  (cases from {os.path.abspath(out_root)})")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

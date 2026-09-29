@@ -114,7 +114,7 @@ function TopBar({ cases, caseId, screen, c }) {
       min-h-[52px]">
       <div className="flex items-center gap-2 font-semibold whitespace-nowrap">
         <span className="text-teal-500 text-lg">&#9703;</span>
-        <span>PS26150<span className="dim font-normal text-[11px] hidden sm:inline">
+        <span>AnokhiDrishti<span className="dim font-normal text-[11px] hidden sm:inline">
           &nbsp;&middot; DVR/NVR forensics</span></span>
       </div>
 
@@ -169,7 +169,7 @@ function ThemeToggle() {
     const now = !dark;
     setDark(now);
     document.documentElement.classList.toggle("dark", now);
-    try { localStorage.setItem("ps26150-theme", now ? "dark" : "light"); } catch { /* ignore */ }
+    try { localStorage.setItem("anokhidrishti-theme", now ? "dark" : "light"); } catch { /* ignore */ }
   };
   return (
     <button onClick={flip} title="Toggle theme (t)"
@@ -292,7 +292,7 @@ function useKeyboard(screens, caseId) {
       if (e.key === "t") {
         const now = !document.documentElement.classList.contains("dark");
         document.documentElement.classList.toggle("dark", now);
-        try { localStorage.setItem("ps26150-theme", now ? "dark" : "light"); } catch { /* ignore */ }
+        try { localStorage.setItem("anokhidrishti-theme", now ? "dark" : "light"); } catch { /* ignore */ }
         return;
       }
       if (e.key === "/") {
