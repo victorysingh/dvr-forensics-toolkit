@@ -391,8 +391,9 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
     dog a person, read a tree trunk as one in 2 frames, and reported **no
     vehicle**: the car parked in full view at night scored 0.25-0.47, under
     the 0.5 threshold, and the static rule removed it. Parked cars are now
-    reported as parked vehicles from 0.3 (§8a); drive 1 is still to be
-    re-scored.
+    reported as parked vehicles from 0.3. Re-scored from its stored boxes,
+    drive 1's night car is reported, as a parked vehicle, in 26 of its 35
+    frames, with no false one (§8a).
   - A lead is worth reviewing; an empty list proves nothing
     (`VALIDATION_REPORT.md` §8a).
 - **On fast media the single pass is CPU-bound.**

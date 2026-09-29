@@ -703,14 +703,34 @@ On set A the rule likewise dropped the parked cars in the night car park.
 | Set A: moving vehicles | 7 of 12 frames (8 before). One night-car-park frame's car is now recognised as parked and reported as such, not as a moving vehicle |
 | People and faces | unchanged: 44 of 57, 22 of 27 |
 
-**On our own drive this is not yet measured.** The night *Parking* car
-should now appear as a parked vehicle. `score` lists each parked vehicle
-with how many frames in its span a person labelled as holding a vehicle.
-The drive-1 set need not be sampled again: `validate.analytics_eval apply`
-re-applies today's thresholds and rules to the boxes a sample stored. Its
-`detections.json` and `labels.csv` are enough, with no frames or video. On
-set A, `apply` then `score` on the earlier sample gives exactly the result of
-a fresh run of the current tool.
+**On our own drive (30 Sep), re-scored from the stored boxes.**
+- `validate.analytics_eval apply` re-applies today's thresholds and rules to
+  the boxes a sample stored. Its `detections.json` and `labels.csv` are
+  enough, with no frames or video.
+- On set A, `apply` then `score` on the earlier sample gives exactly the
+  result of a fresh run of the current tool.
+- For drive 1, Shrestha sent the two text files of the YOLOX set (210
+  frames): `detections.json`, SHA-256 `b8680a61…2175cde`; Claude's
+  `labels.csv`, `7295e5ef…`; and his reviewed labels, `d381a9f1…0db0ebba`.
+
+| | Claude's labels | Shrestha's reviewed labels |
+|---|---|---|
+| **Parked vehicles** | **1: the car parked in *Parking* at night**, seen in 26 of its 35 frames (up to 0.47). All 33 frames in its span are labelled as holding a vehicle. No other parked vehicle, so none false. | the same |
+| Person | 2 of 3 found | **2 of 2** |
+| Person false alarms | 3 of 207 frames | 3 of 208 |
+| Face | none to find; 0 false alarms | 0 of 1 (a ~5 px head in shadow); 0 false alarms |
+| Moving vehicles | 0 of 100 | 0 of 92 |
+
+- **The night car, missed until now, is reported.** It is boxed in all 35
+  frames at 0.23-0.47, and 26 reach the parked threshold (0.3).
+- **The person false alarms are two things.** One is a dog (0.71). The
+  other is the tree trunk in front of the red car, in frames 54, 59 and 62:
+  the static rule flags that spot in most frames, but its box shifts enough
+  in these three to escape it. Both are the static rule's known gap.
+- **The moving-vehicle misses are the far car** (~19 x 9 px, which the
+  person's review reads as no vehicle at all) **and the red car half-hidden
+  by a tree**, parked in daylight. Its boxes stay under 0.3, so it is not a
+  parked vehicle either.
 
 ### On our own drive (29 Sep): 210 frames of the CP Plus cameras
 
