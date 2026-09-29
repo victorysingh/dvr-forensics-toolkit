@@ -159,14 +159,16 @@ def _labelled_thumb(thumb: dict, clip: dict) -> dict:
 
     analytics.json stores a thumbnail as a file and a time; what was detected
     on that frame is the detection entry at the same time in the same clip."""
+    from analytics.static import counted
+
     boxes = [d for h in clip.get("detections", []) if h.get("t_s") == thumb.get("t_s")
              for d in h.get("detections", [])]
-    # a static or implausible box is flagged, not counted - it names nothing
-    counted = [d for d in boxes if not d.get("static") and not d.get("implausible")]
-    labels = sorted({d["label"] for d in counted})
+    # a static, implausible or weak box is flagged, not counted - it names nothing
+    kept = [d for d in boxes if counted(d)]
+    labels = sorted({d["label"] for d in kept})
     return dict(thumb, clip=clip["clip"],
                 label=", ".join(labels) or ("flagged, not counted" if boxes else None),
-                score=max((d["score"] for d in counted), default=None))
+                score=max((d["score"] for d in kept), default=None))
 
 
 def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
@@ -354,7 +356,9 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
             "frames_analysed": sum(c["frames_analysed"] for c in an.get("clips", [])),
             "top": hits[:100],
             "thumbnails": [_labelled_thumb(t, c) for c in an.get("clips", [])
-                           for t in c.get("thumbnails", [])][:60]}
+                           for t in c.get("thumbnails", [])][:60],
+            "parked": [dict(s, clip=c["clip"]) for c in an.get("clips", [])
+                       for s in c.get("parked_vehicles", [])][:100]}
 
     osd = _load(j("analytics", "osd.json"))
     if osd:

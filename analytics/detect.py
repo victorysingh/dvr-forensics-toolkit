@@ -34,9 +34,9 @@ from typing import Optional
 import numpy as np
 import onnxruntime as ort
 
-from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, threshold, thresholds
+from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, keep_threshold, mark_weak, thresholds
 from analytics.static import (STATIC_IOU, STATIC_MIN_FRAMES, STATIC_SHARE, counted,
-                              flag_implausible, flag_static)
+                              flag_implausible, flag_static, parked_spots)
 from analytics.tiles import ROTATIONS, TILE_OVERLAP, merge, tiles, to_frame, unrotate
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -283,7 +283,8 @@ def detect_frame(models: dict, small: np.ndarray, big: Optional[np.ndarray] = No
     exactly."""
     s = MODEL_SETS[models["set"]]
     n = s["tiles"] if n is None else n
-    low_f, low_o = low or (s["faces_min"], min([s["objects_min"], *s["class_min"].values()]))
+    low_f, low_o = low or (s["faces_min"],
+                           min([s["objects_min"], s["parked_min"], *s["class_min"].values()]))
     big = small if big is None else big
     if models["set"] == "classic":
         found = (_tiled(ultraface, models["faces"], small, n, low_f)
@@ -300,7 +301,8 @@ def detect_frame(models: dict, small: np.ndarray, big: Optional[np.ndarray] = No
                 found.append(d)
     found = found if n == 1 and not turned else merge(found)
     if low is None:          # per class; merging is per label, so the order does not matter
-        found = [d for d in found if d["score"] >= threshold(models["set"], d["label"])]
+        found = mark_weak(models["set"], [d for d in found
+                                          if d["score"] >= keep_threshold(models["set"], d["label"])])
     return found
 
 
@@ -340,6 +342,7 @@ def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
             hits.append({"t_s": round(t, 2), "detections": dets, "_rgb": small})
     flag_static(hits, frames)
     flag_implausible(hits)
+    parked = parked_spots(hits)
     counts: dict[str, int] = {}
     static: dict[str, int] = {}
     for h in hits:
@@ -364,7 +367,7 @@ def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
     hits.sort(key=lambda h: h["t_s"])
     return {"clip": os.path.basename(path), "clip_sha256": sha256_file(path),
             "frames_analysed": frames, "frames_turned": turned, "sample_fps": fps,
-            "frames_with": counts, "static_frames": static,
+            "frames_with": counts, "static_frames": static, "parked_vehicles": parked,
             "detections": hits, "thumbnails": thumbs}
 
 
@@ -404,6 +407,7 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
                              "and 270 degrees; 'auto' = a round fisheye picture",
                      "frames_turned": sum(r["frames_turned"] for r in results)},
         "sample_fps": fps, "clips": results, "frames_with_totals": totals,
+        "parked_vehicle_spots": sum(len(r["parked_vehicles"]) for r in results),
         "static_totals": static_totals,
         "static_rule": f"same label, box IoU >= {STATIC_IOU}, in >= {STATIC_MIN_FRAMES} frames "
                        f"and >= {STATIC_SHARE:.0%} of a clip's analysed frames",
@@ -420,6 +424,10 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
             "real recorder footage labelled by eye, the tool reported a person in 44 of the "
             "57 frames that had one and a face in 22 of 27; on CAVIAR footage it found 810 "
             "of 1,089 labelled people (docs/VALIDATION_REPORT.md section 8a).",
+            "A car, bus or truck that stays in one place through much of a clip is reported "
+            "once per place, as a parked vehicle (parked_vehicles, with its first and last "
+            "time and the frames it was seen in); its boxes count from a lower score, since "
+            "they recur, and are not counted as vehicles in frames_with.",
             "Detections that stay in the same place through most of a clip are flagged "
             "'static' and not counted: on real footage a steel pot was repeatedly detected "
             "as a face. Static means the box did not move - usually an object mistaken for "

@@ -74,6 +74,12 @@ EOF
 **Bring back:** the `score` and `sweep` printout, and `score.json` with its
 SHA-256. The frames stay on this machine: they show the site.
 
+**Parked vehicles (added 29 Sep, late).** Pull `staging` again before this
+step. `score` now also lists each **parked vehicle**: a car, bus or truck
+that stays in one place, reported once per place, from 0.3. Check that the
+car parked in *Parking* at night shows up as one, in how many of the 35
+night frames, and that no parked vehicle is something else.
+
 ## 2. On-screen titles and clocks (OCR) against what the eye read
 
 The reader has been measured on six public recorders (validation report

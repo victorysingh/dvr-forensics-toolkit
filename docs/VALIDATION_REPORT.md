@@ -18,14 +18,14 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 558 pass, 0 fail: 535 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 561 pass, 0 fail: 538 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
-| Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4, fisheye pictures also looked at turned round): a person in **44 of 57**, faces **22 of 27**, vehicles 8 of 12; on CAVIAR **810 of 1,089** labelled people (the previous tiled models: 543), 837 with its overhead lobby camera turned round. False alarms: 6 person frames, all a hand in the picture, and 1 face frame, a head at the fisheye's edge. A lead is worth reviewing; an empty list still proves nothing |
+| Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4, fisheye pictures also looked at turned round): a person in **44 of 57**, faces **22 of 27**, moving vehicles 7 of 12, and parked cars reported as a lead of their own (all 6 in the night car park; none false on CAVIAR); on CAVIAR **810 of 1,089** labelled people (the previous tiled models: 543), 837 with its overhead lobby camera turned round. False alarms: 6 person frames, all a hand in the picture, and 1 face frame, a head at the fisheye's edge. A lead is worth reviewing; an empty list still proves nothing |
 | OSD reader (optional) | rules and orchestration tested; **measured** on six recorders' own files, 36 painted clocks: the clock found on 3 of 6 recorders, 5 frames read exactly, 9 wrong, 22 unread; no title right (§8c). A clock reading is a lead to check, not a time source |
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
@@ -668,6 +668,45 @@ looking up into the lens is upside down in it.
 - **Still missed on the fisheye:** 11 person frames (people on the floor
   below, small and bent by the lens) and 1 face (the installer upside down
   and blurred close to the lens).
+
+### Parked vehicles (29 Sep)
+
+**Why.** On our own drive, the car parked in full view in *Parking* at night
+was boxed by YOLOX in all 35 frames, at 0.25-0.47. It was never reported,
+for two reasons:
+- its scores were under the 0.5 vehicle threshold;
+- a parked car is static by definition, and the static rule (made for a
+  steel pot scored as a face) removes it.
+
+On set A the rule likewise dropped the parked cars in the night car park.
+
+**The change** (`analytics/static.py` `parked_spots`).
+- A car, bus or truck seen in the same place through much of a clip (the
+  static rule's own test) is reported **once per place, as a parked
+  vehicle**: a lead of its own, with its first and last time and the number
+  of frames it was seen in.
+- Its boxes are kept from 0.3 (`parked_min`). A box that comes back at the
+  same place frame after frame is stronger evidence than one box at that
+  score.
+- A car box under 0.5 that is not part of a parked vehicle is marked
+  "weak" and not counted.
+- Moving vehicles are counted frame by frame as before, from 0.5.
+- Bicycles and motorcycles are not parked leads. At low scores the model
+  called chair legs in the studio clip "bicycle", in the same place.
+
+**Measured with the tool:**
+
+| | Result |
+|---|---|
+| Set A: parked vehicles | **8 places, all real cars**: the 6 cars in the night infrared car park, each seen in 5-6 of its 6 frames (0.37-0.84; before this, a vehicle was counted in only 2 of those frames), and the car parked at the Swann/Lorex street edge (0.87-0.88; set A's labels leave it out by their ~15-pixel rule) |
+| CAVIAR (no vehicle in any scene) | **0 parked-vehicle places**, so none false |
+| Set A: moving vehicles | 7 of 12 frames (8 before). One night-car-park frame's car is now recognised as parked and reported as such, not as a moving vehicle |
+| People and faces | unchanged: 44 of 57, 22 of 27 |
+
+**On our own drive this is not yet measured.** The night *Parking* car
+should now appear as a parked vehicle. `score` lists each parked vehicle
+with how many frames in its span a person labelled as holding a vehicle, so
+the runbook's step 1 re-score shows it.
 
 ### On our own drive (29 Sep): 210 frames of the CP Plus cameras
 
