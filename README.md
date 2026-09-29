@@ -12,12 +12,10 @@
 
 > **A vendor-agnostic DVR/NVR forensic tool that reads a surveillance drive once, read-only, and in that one pass hashes it, identifies the recorder, and recovers footage the recorder's own index no longer lists. Every vendor claim carries a status set by its weakest evidence, and every action lands in a hash-chained custody ledger.**
 
-**Smart India Hackathon 2026 · SIH26150 · NTRO · Blockchain & Cybersecurity · Team TEAM_NAME (TEAM_ID)**
+**Smart India Hackathon 2026 · SIH26150 · NTRO · Blockchain & Cybersecurity · Team Chronicles.exe (178295)**
 
-<!-- TODO: add a screenshot of the case console, e.g.
 [![case-console](assets/case-console.png)](assets/case-console.png)
-The case console (`python cli.py serve`) on drive 1: recovered streams, timeline and custody ledger.
--->
+The case console on two real drives: (1) all eight PS vendors, each with its status; (2) the pipeline from acquisition to report; (3) 2,246 recordings recovered from outside the index; (4) people and faces detected in recovered footage; (5) AI triage, leads never called evidence; (6) court exports: BSA s.63, CASE/UCO, NIST.
 
 ---
 
@@ -321,7 +319,7 @@ We build on published prior art (Yoon & Hwang 2026, Rzayeva et al., Dragonas et 
 
 ---
 
-## Team TEAM_NAME
+## Team Chronicles.exe
 
 **Smart India Hackathon 2026 · SIH26150 · NTRO · Blockchain & Cybersecurity · Software**
 
