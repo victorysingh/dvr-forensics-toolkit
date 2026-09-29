@@ -276,10 +276,11 @@ and the platter's model strings against the unit. A disagreement is a finding
 to explain, not an error: a Hikvision unit whose disk carries Dahua
 structures is a disk that another recorder formatted.
 
-### 3.4g Uniview and TP-Link (plugins from the vendors' firmware)
+### 3.4g Uniview, TP-Link and Matrix (plugins)
 
-Both are `plugins/` files, loaded like Honeywell's; see VALIDATION_REPORT §8f
-for what they rest on. No real disk from either has been read yet.
+All three are `plugins/` files, loaded like Honeywell's. Uniview and TP-Link
+rest on the vendors' firmware (VALIDATION_REPORT §8f), Matrix on its own
+documents (§8h). No real disk from any of them has been read yet.
 
 ```bash
 # Uniview: recordings per block, with camera and recorder-clock times
@@ -290,6 +291,11 @@ python cli.py parse --vendor Uniview --device /dev/sdb --remnants   # GOPs with 
 
 # TP-Link: scan first, so the index header's offset is passed as a hint
 python cli.py parse --vendor TP-Link --device /dev/sdb --out out/CASE-001
+
+# Matrix: the recording tree on the disk's ext filesystem
+python cli.py parse --vendor Matrix --device /dev/sdb --out out/CASE-001
+python cli.py extract --vendor Matrix --device /dev/sdb --out out/CASE-001 \
+    --recording mtx-camera01-20180421-144719-s1  # the .stm and sidecars as stored
 ```
 
 - **Uniview.** Each recording is one 256 MiB block of one camera. `--remnants`
@@ -299,10 +305,15 @@ python cli.py parse --vendor TP-Link --device /dev/sdb --out out/CASE-001
   readable (encrypted). When read: recordings per camera and the recorder's
   system log, as the index states them. No footage is placed on the disk -
   use `carve-annexb` (§3.4f).
+- **Matrix** (from Matrix's documents, VALIDATION_REPORT §8h). One recording
+  per `.stm` file, with camera, date and times from the recorder's own folder
+  and file names. The `.stm` is extracted as stored - its format is not
+  published; Matrix's Device Player converts it. The summary names any
+  filesystem it could not read (XFS, a striped RAID member).
 
 ### 3.4f Footage from a recorder we have no parser for
 
-When detection names a vendor with no parser (Godrej, Matrix), or
+When detection names a vendor with no parser (Godrej), or
 TP-Link (whose plugin reads the index but places no footage) — or names
 nobody — recover the video anyway:
 

@@ -3232,6 +3232,116 @@ def test_tplink(tmp: str) -> None:
           row["parser"] == "TP-Link" and row["parser_status"] == "detected_not_parsed", str(row))
 
 
+def test_ext4(tmp: str) -> None:
+    """The ext reader on ext4: extents in the inode and behind an index
+    block, an allocated-but-unwritten extent, 64-bit group descriptors, a
+    directory over several blocks - and features it cannot read, refused."""
+    print("\n[ext4 reader]")
+    import random
+    from parsers.ext3 import Ext, ExtError
+    from tests.synth_ext4 import BS, Ext4
+
+    rnd = random.Random(1)
+    fs = Ext4(8000, label="vol", created=1700000000)
+    a, b, c = rnd.randbytes(10 * BS + 123), rnd.randbytes(3 * BS), rnd.randbytes(5000)
+    fs.add_file("d/a.bin", a, 1700000100, fragments=6)
+    fs.add_file("d/b.bin", b, 1700000200, fragments=2)
+    fs.add_file("c.bin", c, 1700000300, unwritten=True)
+    for k in range(300):
+        fs.add_file(f"many/file{k:04d}_with_a_long_name.txt", b"x", 1700000400)
+    img = os.path.join(tmp, "ext4.img")
+    raw = bytearray(fs.build())
+    with open(img, "wb") as fh:
+        fh.write(raw)
+    with BlockDevice(img) as dev:
+        e = Ext(dev, 0)
+        root = {x["name"]: x for x in e.listdir()}
+        d = {x["name"]: x for x in e.listdir(root["d"]["number"])}
+        ok_a = e.read(d["a.bin"]) == a and len(e.extents(d["a.bin"])) == 6
+        ok_b, ok_c = e.read(d["b.bin"]) == b, e.read(root["c.bin"]) == bytes(len(c))
+        many = len(e.listdir(root["many"]["number"]))
+        runs = e.byte_runs(d["a.bin"])
+    check("ext4 recognised; 64-bit descriptors read", e.kind == "ext4" and e.desc_size == 64
+          and e.label == "vol")
+    check("a file in six extents behind an index block reads back exactly; its disk runs cover it",
+          ok_a and ok_b and sum(n for _, _, n in runs) == len(a), str(runs))
+    check("an allocated but unwritten extent reads as zeros, not as whatever the disk holds",
+          ok_c and many == 300)
+    raw[1024 + 0x60] |= 0x10                         # meta_bg
+    with open(os.path.join(tmp, "ext4_metabg.img"), "wb") as fh:
+        fh.write(raw)
+    try:
+        with BlockDevice(os.path.join(tmp, "ext4_metabg.img")) as dev:
+            Ext(dev, 0)
+        refused = False
+    except ExtError as exc:
+        refused = "meta_bg" in str(exc)
+    check("a layout it does not read (meta_bg descriptors) is refused, not guessed", refused)
+
+
+def test_matrix(tmp: str) -> None:
+    """The Matrix plugin on disks built to Matrix's own documents: the
+    CameraNN/DD_Mon_YYYY/HH tree on ext4, in a partition or one RAID 1
+    mirror; anything else is named, not read."""
+    print("\n[Matrix plugin (spec_only, from Matrix's documents)]")
+    import argparse
+    import cli
+    from report.case import vendor_matrix
+    from tests import synth_matrix as SM
+
+    img = os.path.join(tmp, "matrix.img")
+    truth = SM.build(img)
+    p = get_parser("Matrix")
+    with BlockDevice(img) as dev:
+        found = p.detect(dev)
+        res = p.parse(dev)
+    recs = res.recordings
+    check("the plugin registers, finds ext4 in the partition and the camera tree; spec_only",
+          found and res.validation_status == "spec_only"
+          and res.volume["filesystems"][0]["offset"] == truth["fs_at"]
+          and res.volume["filesystems"][0]["camera_folders"] == ["/Camera01", "/Camera02"])
+    check("one recording per .stm file: camera, codec, times from the recorder's own names",
+          [(r.id, r.camera_id, r.codec) for r in recs]
+          == [("mtx-camera01-20180421-144719-s1", "Camera01", "h264"),
+              ("mtx-camera01-20180421-150000-s1", "Camera01", "h264"),
+              ("mtx-camera02-20180421-144720-s1", "Camera02", "h265")]
+          and recs[0].duration_s == 760.0 and recs[0].start_utc is None
+          and recs[0].timestamps[0].raw_value.endswith("= 2018-04-21 14:47:19 recorder-local")
+          and res.volume["other_files_in_hour_folders"] == 1, str([r.id for r in recs]))
+    check("each recording's disk runs cover the file exactly, fragments included",
+          all(sum(n for _, _, n in p.files[r.id]["runs"]) == r.length for r in recs))
+    with BlockDevice(img) as dev:
+        st = p.extract_recording(dev, recs[0].id, os.path.join(tmp, "mtx_rec"))
+    out = open(os.path.join(tmp, st["file"]), "rb").read()
+    want = truth["files"]["Camera01/21_Apr_2018/14/14_47_19~14_59_59.stm1"]
+    check("extract: the .stm as stored and its three sidecars, each hashed; pictures counted",
+          out == want and st["file"] == "mtx_rec.stm1" and sorted(st["sidecars"])
+          == ["mtx_rec.evnt", "mtx_rec.ifrm", "mtx_rec.tmid"] and st["frames"] == 60, str(st))
+
+    notes = {}
+    for layout in ("raid1", "raid0", "xfs"):
+        path = os.path.join(tmp, f"matrix_{layout}.img")
+        SM.build(path, layout)
+        with BlockDevice(path) as dev:
+            r = get_parser("Matrix").parse(dev)
+        notes[layout] = (len(r.recordings), r.volume["summary"][0][1], "; ".join(r.volume["not_read"]))
+    check("one mirror of a Linux md RAID 1 is read",
+          notes["raid1"][0] == 3 and "RAID 1 mirror" in notes["raid1"][1], str(notes["raid1"]))
+    check("a RAID 0 member and an XFS disk are named, not read",
+          notes["raid0"][0] == 0 and "needs all its disks" in notes["raid0"][2]
+          and notes["xfs"][0] == 0 and "XFS" in notes["xfs"][2], str(notes))
+    with BlockDevice(os.path.join(tmp, "unknown_vendor.img")) as dev:
+        check("a disk with no SATATYA tree is not detected", not p.detect(dev))
+    row = next(r for r in vendor_matrix() if r["vendor"] == "Matrix")
+    rc = cli.cmd_extract(argparse.Namespace(device=img, vendor="Matrix", recording=recs[2].id,
+                                            out=os.path.join(tmp, "mtx_out"), tz_offset=None))
+    man = json.load(open(os.path.join(tmp, "mtx_out", f"{recs[2].id}.manifest.json"),
+                         encoding="utf-8"))
+    check("extract --vendor Matrix works through the plugin; the matrix lists the parser",
+          rc == 0 and man["output"]["codec"] == "h265" and row["parser"] == "Matrix"
+          and row["parser_status"] == "spec_only", str(row))
+
+
 def test_s63_certificate(tmp: str) -> None:
     """The s.63 certificate draft: the Schedule's wording, the case's own
     hashes and device facts, and nothing said on a person's behalf."""
@@ -3643,6 +3753,8 @@ def main() -> int:
         test_honeywell(tmp)
         test_uniview(tmp)
         test_tplink(tmp)
+        test_ext4(tmp)
+        test_matrix(tmp)
         test_s63_certificate(tmp)
         test_real_media_tools(tmp)
         test_ewf(tmp)
