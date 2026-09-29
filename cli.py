@@ -632,6 +632,9 @@ def cmd_verify(args) -> int:
     if not v["valid"]:
         print(f"                expected {v['expected']}")
         print(f"                found    {v['found']}")
+    seal = ledger.verify_seal()
+    print(f"custody seal  : {seal['message']}")
+    chain_ok = v["valid"] and seal["valid"]
 
     leaves, blockmap = [], os.path.join(out_dir, "blockmap.jsonl")
     if os.path.exists(blockmap):
@@ -648,8 +651,8 @@ def cmd_verify(args) -> int:
         print(f"                stored     {stored}")
         if not ok:
             print(f"                recomputed {recomputed}")
-        return 0 if (v["valid"] and ok and _verify_preserved(out_dir, ledger)) else 1
-    return 0 if v["valid"] else 1
+        return 0 if (chain_ok and ok and _verify_preserved(out_dir, ledger)) else 1
+    return 0 if chain_ok else 1
 
 
 def _verify_preserved(out_dir: str, ledger: CustodyLedger) -> bool:
@@ -2004,19 +2007,20 @@ def _demux_export(path: str, out_dir: str):
     ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
     if not (ffmpeg and ffprobe):
         return None, None
-    codec = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0",
-                            "-show_entries", "stream=codec_name",
-                            "-of", "default=nw=1:nk=1", path],
-                           capture_output=True, text=True).stdout.strip()
+    from core import proc
+    codec = proc.run([ffprobe, "-v", "error", "-select_streams", "v:0",
+                      "-show_entries", "stream=codec_name",
+                      "-of", "default=nw=1:nk=1", path],
+                     timeout=proc.PROBE_S, capture_output=True, text=True).stdout.strip()
     fmt = {"h264": "h264", "hevc": "hevc"}.get(codec)
     if not fmt:
         raise ValueError(f"the export's video is {codec or 'unreadable'}; "
                          f"only H.264 and H.265 can be compared")
     dst = os.path.join(out_dir, os.path.basename(path) + (".h264" if fmt == "h264" else ".h265"))
     args = ["-v", "error", "-y", "-i", path, "-map", "0:v:0", "-c:v", "copy", "-f", fmt, dst]
-    subprocess.run([ffmpeg] + args, check=True)
-    version = subprocess.run([ffmpeg, "-version"], capture_output=True,
-                             text=True).stdout.splitlines()[0]
+    proc.run([ffmpeg] + args, timeout=proc.STREAM_S, check=True)
+    version = proc.run([ffmpeg, "-version"], timeout=proc.PROBE_S, capture_output=True,
+                       text=True).stdout.splitlines()[0]
     return dst, {"tool": version, "command": "ffmpeg " + " ".join(args)}
 
 

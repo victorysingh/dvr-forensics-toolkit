@@ -107,6 +107,113 @@ def test_ledger(tmp: str) -> None:
           canonical_json({"b": 1, "a": 2}) == canonical_json({"a": 2, "b": 1}))
 
 
+def test_ledger_seal(tmp: str) -> None:
+    """The keyed seal catches what the chain cannot: entries cut off the end,
+    and a ledger rewritten from scratch."""
+    print("\n[custody ledger: keyed seal]")
+    from acquire import ledger as L
+    keys = os.path.join(tmp, "seal_keys")
+    key_a = os.path.join(keys, "a.key")
+    os.environ[L.SEAL_KEY_ENV] = key_a
+    path = os.path.join(tmp, "sealed", "custody_ledger.jsonl")
+    led = CustodyLedger(path, actor="JP", case_id="S-1")
+    for k in range(4):
+        led.append("step", {"k": k})
+    original_seal = open(led.seal_path, encoding="utf-8").read()
+    s = CustodyLedger(path).verify_seal()
+    check("a fresh ledger is sealed, and the seal checks",
+          os.path.exists(key_a) and s["checked"] and s["valid"] and s["count"] == 4, str(s))
+    check("the key is kept outside the case folder",
+          not os.path.abspath(key_a).startswith(os.path.dirname(os.path.abspath(path))))
+
+    # Cut the last entry off: what remains is still a valid chain.
+    lines = open(path, encoding="utf-8").read().splitlines(True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.writelines(lines[:3])
+    cut = CustodyLedger(path)
+    check("a ledger with its last entry cut off still passes the chain check alone",
+          cut.verify()["valid"])
+    check("... but not the seal: entries were removed",
+          not cut.verify_seal()["valid"] and "removed" in cut.verify_seal()["message"])
+
+    # Someone without the key writes a whole new ledger of the same length.
+    os.environ[L.SEAL_KEY_ENV] = os.path.join(keys, "someone-else.key")
+    forged = CustodyLedger(os.path.join(tmp, "forged", "custody_ledger.jsonl"),
+                           actor="someone else", case_id="S-1")
+    for k in range(4):
+        forged.append("step", {"k": k, "invented": True})
+    shutil.copyfile(forged.path, path)
+    with open(led.seal_path, "w", encoding="utf-8") as fh:
+        fh.write(original_seal)
+    os.environ[L.SEAL_KEY_ENV] = key_a
+    rew = CustodyLedger(path)
+    check("a ledger rewritten from scratch passes the chain check alone ...",
+          rew.verify()["valid"])
+    check("... but fails the seal", not rew.verify_seal()["valid"]
+          and "rewritten" in rew.verify_seal()["message"], str(rew.verify_seal()))
+
+    # Edit the seal itself.
+    data = json.loads(original_seal)
+    kid = next(iter(data["seals"]))
+    data["seals"][kid]["count"] = 3
+    with open(led.seal_path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    check("an edited seal file is caught",
+          "edited" in CustodyLedger(path).verify_seal()["message"])
+
+    # A second examiner's machine: its own key; each seal vouches for its part.
+    p2 = os.path.join(tmp, "handover", "custody_ledger.jsonl")
+    first = CustodyLedger(p2, actor="JP")
+    first.append("scan_completed")
+    first.append("report_generated")
+    os.environ[L.SEAL_KEY_ENV] = os.path.join(keys, "b.key")
+    CustodyLedger(p2, actor="Shrestha").append("certificate_drafted")
+    sb = CustodyLedger(p2).verify_seal()
+    os.environ[L.SEAL_KEY_ENV] = key_a
+    sa = CustodyLedger(p2).verify_seal()
+    check("handed over: each machine's seal checks its own part",
+          sb["valid"] and sb["count"] == 3 and sa["valid"] and sa["count"] == 2
+          and "outside this key's seal" in sa["message"], f"{sa} {sb}")
+    os.environ[L.SEAL_KEY_ENV] = os.path.join(keys, "not-here.key")
+    nk = CustodyLedger(p2).verify_seal()
+    check("with no key on this machine the seal is reported, not failed",
+          nk["valid"] and not nk["checked"] and "cannot be checked here" in nk["message"])
+    un = CustodyLedger(os.path.join(tmp, "unsealed.jsonl")).verify_seal()
+    check("a ledger written before sealing is reported as unsealed",
+          not un["sealed"] and un["valid"])
+    os.environ[L.SEAL_KEY_ENV] = os.path.join(keys, "suite.key")
+
+
+def test_proc() -> None:
+    """Outside programs are stopped when they hang, and say so."""
+    print("\n[outside programs: time limits]")
+    import subprocess as sp
+    import time
+    from core import proc
+    t0 = time.time()
+    r = proc.run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1,
+                 capture_output=True, text=True)
+    check("a program past its time limit is stopped and marked timed out",
+          r.timed_out and r.returncode == proc.TIMED_OUT and time.time() - t0 < 15
+          and "did not finish within 1 s" in r.stderr, f"{r.returncode} {r.stderr!r}")
+    try:
+        proc.run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1, check=True,
+                 capture_output=True)
+        raised = False
+    except sp.CalledProcessError:
+        raised = True
+    check("with check=True a time-out raises, as any failure would", raised)
+    check("a program that finishes is returned as usual",
+          proc.run([sys.executable, "-c", "print('ok')"], capture_output=True, text=True,
+                   timeout=30).stdout.strip() == "ok")
+    t0 = time.time()
+    with sp.Popen([sys.executable, "-c", "import sys, time; sys.stdout.buffer.write(b'x' * 8); "
+                   "sys.stdout.flush(); time.sleep(30)"], stdout=sp.PIPE) as p:
+        chunks = list(proc.read_chunks(p, 8, stall_s=1))
+    check("a streaming decoder that goes silent is stopped, keeping what it gave",
+          chunks == [b"x" * 8] and time.time() - t0 < 15, f"{chunks} {time.time() - t0:.1f}s")
+
+
 # ---------------------------------------------------------------------------
 def test_boundary_signatures() -> None:
     print("\n[signature block boundaries]")
@@ -4403,9 +4510,13 @@ def test_case_export(tmp: str) -> None:
 
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
+    # seal keys go under the test folder, never into the examiner's own ~/.ps26150
+    os.environ["PS26150_SEAL_KEY"] = os.path.join(tmp, "seal_keys", "suite.key")
     try:
         test_merkle()
         test_ledger(tmp)
+        test_ledger_seal(tmp)
+        test_proc()
         test_boundary_signatures()
         test_bad_sectors(tmp)
         test_partitions()

@@ -121,6 +121,15 @@ python cli.py report   --out out/CASE-001 --notes "..."
 python cli.py verify   --out out/CASE-001                          # again, now covering preserved blocks
 ```
 
+- `verify` also checks the **custody seal**. Every ledger entry re-seals the
+  ledger with an HMAC keyed by a secret kept outside the case folder, in
+  `~/.ps26150/ledger_seal.key` (or the path in `PS26150_SEAL_KEY`), made on
+  first use. The hash chain alone cannot tell a ledger cut short or rewritten
+  from scratch; the seal can. **Back the key up with the examiner's records,
+  never inside the case folder.** Another workstation can still check the
+  chain, but only a machine holding the key can check the seal: `verify` then
+  says "cannot be checked here" rather than failing. Each workstation seals
+  with its own key, so a case handed over keeps both seals.
 - `label-ps --device /dev/sdX --out out/CASE` names the camera of each carved
   MPEG-PS stream from a surviving Hikvision HIKBTREE index, where the scan found
   one; the timeline then shows camera lanes and recorded-vs-recovered hours.
