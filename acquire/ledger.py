@@ -19,11 +19,25 @@ Chain rule, stated so a third party can re-verify independently:
     entry.prev_hash = previous entry_hash, or 64 zeros for the genesis entry
 
 Canonical JSON = UTF-8, sorted keys, no insignificant whitespace.
+
+What the chain cannot catch on its own: cutting entries off the end (what
+remains is still a valid chain), or writing a whole new ledger from scratch.
+So every append also seals the ledger: an HMAC-SHA256 of the number of
+entries and the last entry hash, keyed with a secret kept OUTSIDE the case
+folder (`~/.ps26150/ledger_seal.key`, or the path in PS26150_SEAL_KEY). The
+seal sits beside the ledger in `custody_ledger.seal.json`. Anyone can still
+read the ledger and re-check the chain; only the key holder can re-seal, so
+a shortened or rewritten ledger no longer matches its seal. Each machine
+seals with its own key, so on a case passed between examiners every key's
+seal vouches for the entries that existed when it last sealed.
+
+    seal = HMAC-SHA256(key, "ps26150-ledger-seal-v1|<entries>|<last entry_hash>")
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 from typing import Any, Optional
@@ -31,6 +45,52 @@ from typing import Any, Optional
 from core.contract import canonical_json, utc_now
 
 GENESIS_PREV = "0" * 64
+SEAL_RULE = "ps26150-ledger-seal-v1"
+SEAL_KEY_ENV = "PS26150_SEAL_KEY"
+
+
+def seal_key_path() -> str:
+    """Where this machine's seal key lives: never inside a case folder."""
+    return os.environ.get(SEAL_KEY_ENV) or os.path.join(
+        os.path.expanduser("~"), ".ps26150", "ledger_seal.key")
+
+
+def load_seal_key(create: bool = False) -> Optional[bytes]:
+    """This machine's seal key; with `create`, made on first use (32 random
+    bytes, readable by this user only). None when there is none and it cannot
+    be made - the ledger then stays unsealed, and verify says so."""
+    path = seal_key_path()
+    try:
+        with open(path, "rb") as fh:
+            key = fh.read()
+        if len(key) >= 32:
+            return key
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return None
+    if not create:
+        return None
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        key = os.urandom(32)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(key)
+        return key
+    except FileExistsError:          # made by another process a moment ago
+        return load_seal_key(create=False)
+    except OSError:
+        return None
+
+
+def seal_key_id(key: bytes) -> str:
+    """A name for a key that gives nothing of it away."""
+    return hashlib.sha256(key).hexdigest()[:16]
+
+
+def _seal_mac(key: bytes, count: int, head: str) -> str:
+    return hmac.new(key, f"{SEAL_RULE}|{count}|{head}".encode(), hashlib.sha256).hexdigest()
 
 
 class LedgerError(Exception):
@@ -81,7 +141,74 @@ class CustodyLedger:
             fh.write(json.dumps(entry, sort_keys=True, separators=(",", ":"),
                                 ensure_ascii=False) + "\n")
         self.entries.append(entry)
+        self._seal()
         return entry
+
+    # -- the seal ------------------------------------------------------------
+    @property
+    def seal_path(self) -> str:
+        return os.path.splitext(self.path)[0] + ".seal.json"
+
+    def _read_seals(self) -> dict:
+        try:
+            with open(self.seal_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (FileNotFoundError, ValueError):
+            data = {}
+        data.setdefault("rule", SEAL_RULE)
+        data.setdefault("seals", {})
+        return data
+
+    def _seal(self) -> None:
+        """Re-seal under this machine's key; other keys' seals are kept."""
+        key = load_seal_key(create=True)
+        if key is None:
+            return
+        data = self._read_seals()
+        data["seals"][seal_key_id(key)] = {"count": self.seq, "head": self.head,
+                                          "hmac": _seal_mac(key, self.seq, self.head)}
+        tmp = self.seal_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=1, sort_keys=True)
+        os.replace(tmp, self.seal_path)
+
+    def verify_seal(self) -> dict:
+        """Check the seal made with this machine's key, if the case has one.
+
+        valid False: the seal no longer matches - entries were cut off the end,
+        the ledger was rewritten, or the seal file itself was edited.
+        checked False: the case is unsealed, or sealed only with keys that are
+        not on this machine; that is reported, not counted as a failure."""
+        if not os.path.exists(self.seal_path):
+            return {"sealed": False, "checked": False, "valid": True,
+                    "message": "not sealed (written before sealing, or no key could be kept)"}
+        seals = self._read_seals()["seals"]
+        key = load_seal_key(create=False)
+        kid = seal_key_id(key) if key else None
+        mine = seals.get(kid) if kid else None
+        others = sorted(k for k in seals if k != kid)
+        if mine is None:
+            return {"sealed": True, "checked": False, "valid": True, "keys": others,
+                    "message": f"sealed with key {', '.join(others)}; not on this machine, "
+                               "so the seal cannot be checked here"}
+
+        def broken(reason: str) -> dict:
+            return {"sealed": True, "checked": True, "valid": False, "key": kid,
+                    "message": f"SEAL BROKEN (key {kid}): {reason}"}
+
+        count, head = mine.get("count", -1), mine.get("head", "")
+        if not hmac.compare_digest(str(mine.get("hmac", "")), _seal_mac(key, count, head)):
+            return broken("the seal file was edited")
+        if len(self.entries) < count:
+            return broken(f"entries were removed - the seal covers {count}, "
+                          f"the ledger holds {len(self.entries)}")
+        if count and self.entries[count - 1].get("entry_hash") != head:
+            return broken(f"the ledger was rewritten - entry {count - 1} is not the one sealed")
+        later = len(self.entries) - count
+        return {"sealed": True, "checked": True, "valid": True, "key": kid, "count": count,
+                "message": f"seal intact (key {kid}): all {count} entries it covers are there, "
+                           "unchanged" + (f"; {later} later entries are outside this key's seal"
+                                          if later else "")}
 
     # -- verification ------------------------------------------------------
     def verify(self) -> dict:
