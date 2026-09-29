@@ -321,9 +321,12 @@ It **never** ticks Owned / Maintained / Managed / Operated, never makes the
 "working properly" statement, and leaves name, relation, residence,
 signature, date, time and place blank unless you pass them.
 
-It is a **draft**: the wording follows the Schedule as reproduced by a
-bare-act site on 28 Sep 2026. Check it against the Gazette / India Code text
-before it is used.
+It is a **draft** for the party or the expert to complete and sign. The
+wording and layout follow the Schedule as printed in the Gazette of India Extraordinary, Part II Sec. 1, No. 55, 25 Dec 2023, pp. 46-47 (CG-DL-E-25122023-250882):
+a test compares the draft with the Gazette's text word for word. Who signs
+Part B, and when a s.79A Examiner is needed, are legal questions for the
+team's legal lead (see *Pune Bar Association v. UoI*, SC 2026, in
+FINAL_REPORT §7).
 
 ### 3.4h Real-media checks in one command
 
