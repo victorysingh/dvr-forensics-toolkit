@@ -18,10 +18,16 @@ the declarant's name, residence, signature, date, time and place.  Those
 stay blank for the party and the expert to complete, or are filled only
 from what they typed on the command line.
 
-It is a DRAFT.  The wording follows the Schedule as reproduced at
-advocatekhoj.com (checked 28 Sep 2026), whose opening matches the text
-India Code indexes; the official PDF could not be reached that day.  Check
-it against the Gazette text before it goes near a court.
+It is a DRAFT for the party or the expert to complete and sign.  The
+wording was checked word for word on 29 Sep 2026 against the Schedule as
+published in the Gazette of India Extraordinary, Part II Section 1, No. 55
+of 25 Dec 2023 (CG-DL-E-25122023-250882, pp. 46-47; the PDF is digitally
+signed by the Government of India Press), in the copy the Ministry of Home
+Affairs hosts (mha.gov.in/sites/default/files/2024-04/
+250882_english_01042024_0.pdf, SHA-256 13e2b6eb...039de239).  The layout
+follows the printed form: tick boxes after each source and before each
+algorithm, the algorithms one to a line.  The earlier wording, taken from a
+bare-act site, matched; only punctuation (":—") and line breaks changed.
 
 Stdlib only.  Reads the case directory; writes nothing itself.
 """
@@ -33,10 +39,10 @@ import json
 import os
 from typing import Optional
 
-RULE = "report.s63.v1"
-WORDING_SOURCE = ("Schedule to s.63(4)(c), Bharatiya Sakshya Adhiniyam 2023, as reproduced at "
-                  "advocatekhoj.com (checked 28 Sep 2026); verify against the Gazette / India "
-                  "Code text before use")
+RULE = "report.s63.v2"
+WORDING_SOURCE = ("The Schedule [See section 63(4)(c)], Bharatiya Sakshya Adhiniyam 2023 (No. 47 "
+                  "of 2023), Gazette of India Extraordinary, Part II Sec. 1, No. 55, 25 Dec 2023, "
+                  "pp. 46-47 (CG-DL-E-25122023-250882); checked word for word 29 Sep 2026")
 SOURCES = ["Computer / Storage Media", "DVR", "Mobile", "Flash Drive", "CD/DVD", "Server",
            "Cloud", "Other"]
 ALGORITHMS = ["SHA1", "SHA256", "MD5"]
@@ -158,6 +164,22 @@ def build(case_dir: str, part: str = "B", declarant: Optional[dict] = None,
 
 
 # ---------------------------------------------------------------------------
+def form_words(text: str) -> list[str]:
+    """The words of a certificate form - a rendered draft (HTML) or the
+    Gazette's text - with blanks, tick boxes, markup and spacing removed, so
+    the two can be compared word for word."""
+    import re
+    s = text.split("<h2 style='break-before:page'>Hash report", 1)[0]
+    if "THE SCHEDULE" in s:
+        s = s[s.index("THE SCHEDULE"):]
+    s = re.sub(r"</?(i|b)>", "", s)                 # inline styling joins, it does not split
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = html.unescape(s).replace("☐", " ").replace("☑", " ").replace(" ", " ")
+    s = re.sub(r"_+", " ", s)
+    s = re.sub(r"\s+([,.)])", r"\1", s)
+    return s.split()
+
+
 def _e(v) -> str:
     return html.escape("" if v is None else str(v))
 
@@ -184,48 +206,56 @@ def render(cert: dict) -> str:
         "for that person.</div>")
     for n in cert["notes"]:
         add(f"<div class='box bad'>{_e(n)}</div>")
-    add("<h1 style='text-align:center'>THE SCHEDULE</h1>")
-    add("<p style='text-align:center'>[See section 63(4)(c)]</p>")
-    add("<h2 style='text-align:center;border:0'>CERTIFICATE</h2>")
+    # The form as printed in the Gazette (pp. 46-47): its words, its line
+    # breaks, a box after each source and before each algorithm.
+    add("<p style='text-align:center'>THE SCHEDULE</p>")
+    add("<p style='text-align:center'>[<i>See</i> section 63(<i>4</i>)(<i>c</i>)]</p>")
+    add("<p style='text-align:center'><b>CERTIFICATE</b></p>")
     who = "Party" if part == "A" else "Expert"
-    add(f"<h3 style='text-align:center'>PART {part}</h3>"
+    add(f"<p style='text-align:center'>PART {part}</p>"
         f"<p style='text-align:center'>(To be filled by the {who})</p>")
     add(f"<p>I, {_blank(d['name'])} (Name), Son/daughter/spouse of {_blank(d['relation'])} "
         f"residing/employed at {_blank(d['address'], 24)} do hereby solemnly affirm and "
-        f"sincerely state and submit as follows:-</p>")
+        f"sincerely state and submit as follows:—</p>")
     if part == "A":
         add("<p>I have produced electronic record/output of the digital record taken from the "
-            "following device/digital record source (tick mark):-</p>")
+            "following device/digital record source (tick mark):—</p>")
     else:
         add("<p>The produced electronic record/output of the digital record are obtained from "
-            "the following device/digital record source (tick mark):-</p>")
-    add("<p>" + " &nbsp; ".join(f"{s} {_tick(s in f['source_ticks'])}" for s in SOURCES) + "</p>")
-    add(f"<p>Other: {_blank(f['other'])}</p>")
-    add(f"<p>Make &amp; Model: {_blank(f['make_model'])} Color: {_blank(f['color'])} "
-        f"Serial Number: {_blank(f['serial'])} IMEI/UIN/UID/MAC/Cloud ID {_blank(f['ids'])} "
-        f"(as applicable) and any other relevant information, if any, about the "
-        f"device/digital record {_blank(f['other_information'])} (specify).</p>")
+            "the following device/digital record source (tick mark):—</p>")
+    add("<p>" + " &nbsp; ".join(f"{s} {_tick(s in f['source_ticks'])}" for s in SOURCES[:4])
+        + "<br>" + " &nbsp; ".join(f"{s} {_tick(s in f['source_ticks'])}" for s in SOURCES[4:])
+        + "</p>")
+    add(f"<p>Other: {_blank(f['other'], 40)}</p>")
+    add(f"<p>Make &amp; Model: {_blank(f['make_model'])} Color: {_blank(f['color'])}<br>"
+        f"Serial Number: {_blank(f['serial'])}<br>"
+        f"IMEI/UIN/UID/MAC/Cloud ID{_blank(f['ids'], 20)} (as applicable)<br>"
+        f"and any other relevant information, if any, about the device/digital "
+        f"record{_blank(f['other_information'], 4)}(specify).</p>")
     if part == "A":
         add("<p>The digital device or the digital record source was under the lawful control "
             "for regularly creating, storing or processing information for the purposes of "
             "carrying out regular activities and during this period, the computer or the "
             "communication device was working properly and the relevant information was "
-            "regularly fed into the computer during the ordinary course of business.</p>")
-        add("<p>If the computer/digital device at any point of time was not working properly or "
+            "regularly fed into the computer during the ordinary course of business. "
+            "If the computer/digital device at any point of time was not working properly or "
             "out of operation, then it has not affected the electronic/digital record or its "
-            "accuracy. The digital device or the source of the digital record is:-</p>")
-        add("<p>" + " &nbsp; ".join(f"{r} {_tick(False)}" for r in ROLES)
-            + " by me (select as applicable).</p>")
+            "accuracy. The digital device or the source of the digital record is:—</p>")
+        add("<p>" + " &nbsp; ".join(f"{r} {_tick(False)}" for r in ROLES) + "</p>")
+        add("<p>by me (select as applicable).</p>")
     add(f"<p>I state that the HASH value/s of the electronic/digital record/s is "
-        f"{_blank(inline, 24)}, obtained through the following algorithm:-</p>")
-    add("<p>" + " &nbsp; ".join(f"{_tick(a in f['algorithm_ticks'])} {a}:" for a in ALGORITHMS)
-        + f" {_tick(False)} Other{'_' * 12} (Legally acceptable standard) "
-        "(Hash report to be enclosed with the certificate)</p>")
-    add(f"<p style='margin-top:36px'>({'Name and signature' if part == 'A' else 'Name, designation and signature'})"
+        f"{_blank(inline, 24)}, obtained through the following algorithm:—</p>")
+    for a in ALGORITHMS:
+        add(f"<p>{_tick(a in f['algorithm_ticks'])} {a}:</p>")
+    add(f"<p>{_tick(False)} Other{'_' * 18} (Legally acceptable standard)</p>")
+    add("<p>(Hash report to be enclosed with the certificate)</p>")
+    add(f"<p style='margin-top:36px;text-align:right'>"
+        f"({'Name and signature' if part == 'A' else 'Name, designation and signature'})"
         + (f" &nbsp; {_e(d['name'])}" if d["name"] else "")
         + (f", {_e(d['designation'])}" if d["designation"] and part == "B" else "") + "</p>")
-    add(f"<p>Date (DD/MM/YYYY): {_blank(d['date'], 10)} Time (IST): {_blank(d['time'], 6)}hours "
-        f"(In 24 hours format) Place: {_blank(d['place'])}</p>")
+    add(f"<p>Date (DD/MM/YYYY): {_blank(d['date'], 10)}</p>")
+    add(f"<p>Time (IST): {_blank(d['time'], 8)}hours (In 24 hours format)</p>")
+    add(f"<p>Place: {_blank(d['place'], 12)}</p>")
 
     add("<h2 style='break-before:page'>Hash report (enclosure)</h2>")
     add("<table><tr><th>Record</th><th>Algorithm</th><th>Value</th><th>Bytes</th>"
