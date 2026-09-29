@@ -1413,6 +1413,82 @@ def test_short_read(tmp: str) -> None:
         scanner_mod.BlockDevice = saved
 
 
+def test_regions(tmp: str) -> None:
+    """An encrypted disk carves nothing; the scan must say why instead of
+    reporting silence.  Video, ciphertext-like bytes, and container headers
+    around ciphertext-like payloads are all incompressible - start codes are
+    what tell them apart."""
+    print("\n[high entropy without video structure]")
+    import random
+    from detect import regions as R
+    from report.case import load_case
+    from report.html import render
+
+    rnd = random.Random(26150)
+    mib = 1 << 20
+    frame = lambda: b"\x00\x00\x01\x41" + rnd.randbytes(2044)
+    video = b"".join(frame() for _ in range(2 * mib // 2048))
+    boxed = b"".join(b"DHAV" + rnd.randbytes(64 * 1024 - 4) for _ in range(2 * mib // (64 * 1024)))
+    layout = [("video", video), ("unstructured", rnd.randbytes(3 * mib)),
+              ("container_without_video", boxed), ("empty", bytes(mib)),
+              ("unstructured", rnd.randbytes(mib))]
+    img = os.path.join(tmp, "regions.img")
+    with open(img, "wb") as fh:
+        for _, data in layout:
+            fh.write(data)
+    out = os.path.join(tmp, "regions_case")
+    session = ScanSession(img, out, CaseInfo(case_id="T-REG", investigator="test"),
+                          block_size=mib, quiet=True)
+    session.run()
+    reg = json.load(open(os.path.join(out, "regions.json"), encoding="utf-8"))
+    check("each block told apart: video by its start codes, the rest by their absence",
+          reg["counts"] == {"empty": 1, "structured": 0, "video": 2,
+                            "container_without_video": 2, "unstructured": 4}, str(reg["counts"]))
+    check("flagged regions merged into runs at the right offsets; video never flagged",
+          [(r["kind"], r["offset"] // mib, r["length"] // mib) for r in reg["regions"]]
+          == [("unstructured", 2, 3), ("container_without_video", 5, 2), ("unstructured", 8, 1)],
+          str(reg["regions"]))
+    check("the verdict says 'consistent with', never 'encrypted' as a finding",
+          reg["flagged_share"] == 0.75 and "consistent with an encrypted disk" in reg["verdict"]
+          and "Not claimed as encrypted" in reg["verdict"], reg["verdict"])
+    ledger = [json.loads(x) for x in open(os.path.join(out, "custody_ledger.jsonl"), encoding="utf-8")]
+    done = [x for x in ledger if x.get("action") == "scan_completed"]
+    check("the verdict is in the custody ledger with the scan",
+          bool(done) and done[-1]["detail"]["regions"]["flagged_blocks"] == 6,
+          str(done[-1].get("detail", {}).get("regions") if done else ledger[-1]))
+    os.remove(os.path.join(out, "regions.json"))
+    case = load_case(out)
+    check("an older scan without regions.json is classified from its block map; the report "
+          "shows the regions",
+          case["regions"]["flagged_blocks"] == 6
+          and "High entropy without video structure" in render(case))
+    check("random data stays under the start-code limit; sparse video is far above it",
+          R.start_code_limit(8 << 20) < 10
+          and R.classify({"incompressibility": 1.0, "start_codes": 60, "hits": 0,
+                          "length": 8 << 20}) == "video")
+    check("a video block whose first 4 KiB is a zero-padded header is video, not empty",
+          R.classify({"incompressibility": 0.02, "start_codes": 22512, "hits": 0,
+                      "length": 8 << 20}) == "video")
+
+    path = os.environ.get("HEIMVISION_E01")
+    if not path:
+        print("  [real image] skipped - set HEIMVISION_E01 to the CFReDS K9604-W .E01")
+        return
+    from dataclasses import asdict
+    from detect.engine import SignatureScanner
+    p = get_parser("HeimVision")
+    kinds = []
+    with BlockDevice(path) as dev:
+        p.parse(dev)
+        files = p.recording_files["hv-ch01-0000"]
+        for f in files[::len(files) // 10][:10]:
+            off = f["extents"][0][0] + (4 << 20)          # mid-file: a dense sample
+            s = SignatureScanner().scan_block(off, dev.read_at(off, 8 << 20), 0, "")
+            kinds.append((R.classify(asdict(s)), s.incompressibility >= R.DENSE))
+    check("real image: real H.265 recordings are never flagged, dense samples included",
+          [k for k, _ in kinds] == ["video"] * 10 and any(d for _, d in kinds), str(kinds))
+
+
 def test_survey(tmp: str) -> None:
     """The survey must rediscover a format it was not told about, and must
     not invent headers in noise."""
@@ -3193,6 +3269,7 @@ def main() -> int:
         test_device_loss(tmp)
         test_short_read(tmp)
         test_survey(tmp)
+        test_regions(tmp)
         test_activity(tmp)
         test_timeline_clock_default()
         test_timeline_recurring()

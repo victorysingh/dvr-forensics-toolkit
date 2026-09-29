@@ -158,14 +158,18 @@ def _print_summary(report, session, out_dir: str) -> None:
     print(f"  SPS / PPS / IDR  {codec.sps:,} / {codec.pps:,} / {codec.idr:,}")
     print(f"  likely codec   {codec.likely_codec or 'none detected'}")
 
-    hot = sorted(session.scanner.blocks, key=lambda b: b.incompressibility,
-                 reverse=True)[:3]
-    if hot and hot[0].incompressibility > 0.95:
-        print(f"\n--- high-entropy regions (reported, not parsed) --------------")
-        for b in hot:
-            if b.incompressibility > 0.95:
-                print(f"  @ {b.offset:>12} ratio {b.incompressibility:.3f} "
-                      f"- encrypted or already-compressed; NOT claimed as encrypted")
+    reg = session.regions
+    if reg:
+        c = reg["counts"]
+        print(f"\n--- high entropy without video structure (regions.json) ------")
+        print(f"  blocks        {c['video']} video, {c['structured']} structured, "
+              f"{c['empty']} empty, {c['container_without_video']} container without video, "
+              f"{c['unstructured']} unstructured")
+        print(f"  verdict       {reg['verdict']}")
+        for r in reg["regions"][:5]:
+            print(f"  @ 0x{r['offset']:X}  {human_size(r['length'])}  {r['kind']}")
+        if len(reg["regions"]) > 5:
+            print(f"  ... {len(reg['regions']) - 5} more in regions.json")
 
     print(f"\n--- chain of custody ----------------------------------------")
     v = session.ledger.verify()
