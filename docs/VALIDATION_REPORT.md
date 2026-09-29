@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 591 pass, 0 fail: 568 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 605 pass, 0 fail: 582 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -28,11 +28,12 @@ Two different things are validated here, and they must not be confused:
 | Outside programs | every ffmpeg / ffprobe / Tesseract call has a time limit, and a streaming decoder that goes silent is stopped: a hung decoder on damaged footage is reported, not left to freeze the tool (4 tests) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
 | Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4, fisheye pictures also looked at turned round): a person in **44 of 57**, faces **22 of 27**, moving vehicles 7 of 12, and parked cars reported as a lead of their own (all 6 in the night car park; none false on CAVIAR); on CAVIAR **810 of 1,089** labelled people (the previous tiled models: 543), 837 with its overhead lobby camera turned round. False alarms: 6 person frames, all a hand in the picture, and 1 face frame, a head at the fisheye's edge. A lead is worth reviewing; an empty list still proves nothing |
+| Face search by photo (optional) | candidates, not identifications. Our numpy code reproduces OpenCV's SFace to a cosine of 0.99998. LFW made recorder-sized: the same person passes in 97.8% of pairs (4,519 of 4,619) with eyes 12 px or more apart, and no pair of different people passes at any size (0 of 9,543). Strangers in 12 real surveillance clips (529 faces x 1,833 references): 78 faces under 8 px pass, all kept out by the 12 px minimum; **1 false candidate** above it, an upside-down head at a fisheye's edge (§8n) |
 | OSD reader (optional) | rules and orchestration tested; **measured** on six recorders' own files, 36 painted clocks: the clock found on 3 of 6 recorders, 5 frames read exactly, 9 wrong, 22 unread; no title right (§8c). A clock reading is a lead to check, not a time source |
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
-| Parsers against damaged or tampered disks | **9,600 corrupted disks** fed to all 8 vendor parsers (§8m). Before the fixes: 144 crashes and 1 hang in 3,200. After, in all 9,600: **no crash and no hang**. The few cases the safety net caught were fixed at the parser too. A parser can no longer end in a traceback. The 3 carvers and the E01 reader were fuzzed too: one bug (a damaged E01 set left its evidence file open), fixed |
+| Parsers against damaged or tampered disks | **9,600 corrupted disks** fed to all 8 vendor parsers (§8o). Before the fixes: 144 crashes and 1 hang in 3,200. After, in all 9,600: **no crash and no hang**. The few cases the safety net caught were fixed at the parser too. A parser can no longer end in a traceback. The 3 carvers and the E01 reader were fuzzed too: one bug (a damaged E01 set left its evidence file open), fixed |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
@@ -45,7 +46,7 @@ Two different things are validated here, and they must not be confused:
 | Workstation | Kali Linux, kernel 7.1.5, Python 3.14.6, booting from a USB SSD (Realtek RTL9210, `0bda:9210`) |
 | Tool | `dvr-forensics-toolkit`, commit `26fb542` or later (branch `shrestha/single-pass-recovery-report-ui`) |
 | Evidence | Seagate SkyHawk ST1000VX013, 1 TB, s/n `WWD4A3NX`, from a CP Plus recorder |
-| Recorder unit (read 28 Sep) | CP Plus **`CP-UNR-104F1`**, a 4-channel NVR, hardware V1.0; firmware (System Version) **`V1.00.14.00.T`**, built 16/08/2025; SN `TSTSERIAL0000001`, DevID `0A0B0C0D`, MAC `02:00:5E:10:00:01` - from its label and its System Info screen (photos SHA-256 `2f873a693b6355d2...` and `bed79a8b0388affb...`; these are WhatsApp copies, which strip the time taken - the originals are to be hashed). A CP Plus NVR is Dahua-built, which agrees with the DHFS 4.1 on this drive. Recorded in the case with `record-device` on 29 Sep, from the values read off JP's photos (`--read-from other`: the photos are not on the examining machine; attach them with `--photo`). Whether this unit wrote the drive: **the disk does not say.** `identify-model` over the whole write-blocked drive (29 Sep, 12 worker processes, 42 MiB/s) searched all 9,814 non-video blocks, 76.67 GiB. It found none of the unit's serial, DevID or MAC (the MAC as text three ways and as its 6 raw bytes), and no model string. Its one candidate, `HRG745` at 0x6CFC3A4E2A, matches the Honeywell pattern by chance in binary data: the bytes around it are not text. The check first said "differ" because of it; the tool now lists a candidate that is short (8 characters or fewer) and seen once as a possible chance match, and keeps it out of the check, which reads "not determined" (29 Sep, §10). Result `model.json` SHA-256 `c56b3f8a…0f54741`, in the case ledger |
+| Recorder unit (read 28 Sep) | CP Plus **`CP-UNR-104F1`**, a 4-channel NVR, hardware V1.0; firmware (System Version) **`V1.00.14.00.T`**, built 16/08/2025; SN, DevID and MAC (recorded, not published here: a CP Plus serial can reach the unit through the vendor's cloud app) - from its label and its System Info screen (photos SHA-256 `2f873a693b6355d2...` and `bed79a8b0388affb...`; these are WhatsApp copies, which strip the time taken - the originals are to be hashed). A CP Plus NVR is Dahua-built, which agrees with the DHFS 4.1 on this drive. Recorded in the case with `record-device` on 29 Sep, from the values read off JP's photos (`--read-from other`: the photos are not on the examining machine; attach them with `--photo`). Whether this unit wrote the drive: **the disk does not say.** `identify-model` over the whole write-blocked drive (29 Sep, 12 worker processes, 42 MiB/s) searched all 9,814 non-video blocks, 76.67 GiB. It found none of the unit's serial, DevID or MAC (the MAC as text three ways and as its 6 raw bytes), and no model string. Its one candidate, `HRG745` at 0x6CFC3A4E2A, matches the Honeywell pattern by chance in binary data: the bytes around it are not text. The check first said "differ" because of it; the tool now lists a candidate that is short (8 characters or fewer) and seen once as a possible chance match, and keeps it out of the check, which reads "not determined" (29 Sep, §10). Result `model.json` SHA-256 `c56b3f8a…0f54741`, in the case ledger |
 | Adapter | generic USB 2.0 SATA bridge, Super Top M6116 (`14cd:6116`), 480 Mbit/s, own power supply |
 | Image | first 20 GiB of the drive, SHA-256 `c4098d59cff3973de9d281ba5613005ba52165743c36edfcf56f61aad8f4e610` (23 Sep 2026) |
 
@@ -1620,7 +1621,166 @@ What this does and does not show:
   teams' own published figures. They were not re-run here, because both need
   the 150 GB E01 streamed through their own readers.
 
-## 8m. Parsers against corrupted disks (fuzzing, 30 Sep)
+## 8n. Face search by a reference photo (optional layer — candidates, not identifications; 30 Sep)
+
+`cli.py face-search --out CASE --photo P` scores every face found in a case's
+clips against the face in a photo the examiner supplies:
+
+- YuNet finds each face and five points on it (eyes, nose tip, mouth corners).
+- The face is lined up on those points onto ArcFace's 112 x 112 template.
+- SFace (OpenCV Zoo, Apache-2.0, pinned by SHA-256) turns it into 128 numbers.
+- Two faces are compared by the cosine between their vectors.
+
+A face is a **candidate** when the cosine is at least **0.363**, the threshold
+OpenCV publishes for SFace, and its eyes are at least **12 px** apart in the
+recording (`analytics/face_rules.py`). Every other face is listed with its
+score and never called a candidate. The photo's SHA-256, both models' and the
+thresholds go into the custody ledger, and the report gains section 6b-ii.
+
+A stranger at or above the threshold is a **false candidate**; the same person
+below it is a **miss**. Both are measured below with
+`python -m validate.face_eval`, which runs the tool's own code.
+
+**The same computation as OpenCV.** The tool runs the two ONNX models with
+numpy, without OpenCV. It was checked against OpenCV 5.0's own
+`FaceDetectorYN` and `FaceRecognizerSF` on three versions of one
+public-domain photo (NASA's astronaut portrait at 512 px, at 150 px, and
+tilted):
+- the five points agree within 0.005 px, and the detector scores to the third
+  decimal;
+- the face vectors agree to a cosine of 0.99998-0.99999;
+- the match score between two versions is 0.9509 in both, and 0.8298
+  (OpenCV) against 0.8303 (ours).
+
+The script is `docs/research/face_search/check_opencv.py`.
+
+**Data.** LFW (Huang et al. 2007), the benchmark SFace is published with. It
+is not in the repository: `lfw.tgz` SHA-256
+`055f7d9c632d7370e6fb4afc7468d40f970c34a80d4c6f50ffec63f5a8d536c0` and
+`pairs.txt` SHA-256
+`ea42330c62c92989f9d7c03237ed5d591365e89b3e649747777b70e692dc1592`, the
+files scikit-learn's `fetch_lfw_pairs` downloads. The first 4 of its
+10 folds are used: 2,400 pairs, 1,200 of the same person
+and 1,200 of two different people.
+
+### Measurement 1: LFW, as photos and at recorder size
+
+- **As photos** (a check that the set-up is right): the same person passes in
+  **1,179/1,200 (98.2%)** of pairs and two different people in
+  **0/1,200 (0.0%)**.
+- **At recorder size:**
+  - The second photo of each pair was scaled to 8 sizes (0.12 to 0.75 of its
+    own), placed on a 704 x 576 grey picture, encoded as H.264 at CRF 28, and
+    decoded the way face search reads a recording (1320 x 1080).
+  - The first photo stays the reference, as an examiner's photo would.
+  - 19,085 of 19,200 small faces were found; the 115 misses are all at
+    the 0.12 and 0.16 scales.
+
+Binned by the distance between the eyes in the recording:
+
+| Eyes apart (px, in the recording) | Same person: passes | Different people: pass |
+|---|---|---|
+| 0-8 | 1,454/2,583 (56.3%) | 0/2,544 (0.0%) |
+| 8-10 | 1,044/1,126 (92.7%) | 0/1,130 (0.0%) |
+| 10-12 | 1,159/1,214 (95.5%) | 0/1,239 (0.0%) |
+| 12-14 | 876/908 (96.5%) | 0/883 (0.0%) |
+| 14-16 | 446/457 (97.6%) | 0/498 (0.0%) |
+| 16-20 | 948/967 (98.0%) | 0/956 (0.0%) |
+| 20-24 | 715/727 (98.3%) | 0/687 (0.0%) |
+| 24-32 | 905/925 (97.8%) | 0/983 (0.0%) |
+| 32 or more | 629/635 (99.1%) | 0/623 (0.0%) |
+
+### Measurement 2: strangers in real surveillance footage
+
+- **What was compared:** every face the tool finds in 12 real
+  clips, sampled at 2 frames a second, against all 1,833 reference
+  faces of those 2,400 pairs.
+- **Why each hit is false:** nobody in these clips is an LFW public figure,
+  so every score at or above 0.363 is a false candidate.
+- **The clips:** the six public recorder clips of set A (§8a) and the six
+  CAVIAR clips of set B.
+- **Left out:** R2's carved stream was run too but is not counted, because it
+  is cut from the 2017 Dahua clip already in set A.
+
+| Eyes apart (px) | Faces | Comparisons | At or above 0.363 | Faces with any |
+|---|---|---|---|---|
+| 0-8 | 524 | 960,492 | 134 | 78 |
+| 8-10 | 4 | 7,332 | 0 | 0 |
+| 32 or more | 1 | 1,833 | 1 | 1 |
+
+- **Small faces are where strangers pass.**
+  - Of 524 faces with eyes under 8 px apart, 78
+    scored at or above 0.363 against at least one reference
+    (134 of 960,492 comparisons):
+    9 of 13 faces in `dav-sample.dav`, 37 of 290 faces in `ThreePastShop1cor.mpg`, 32 of 210 faces in `WalkByShop1cor.mpg`.
+  - None of these became a candidate: all are under the 12 px minimum.
+  - LFW made small does not show this: 0 of 2,544 different-person
+    pairs under 8 px pass. Real footage is noisier than a shrunk photo, and
+    that is why this second measurement exists.
+- **One false candidate above the size limit.**
+  - What it is: a head upside down at the top edge of the 2017 fisheye
+    picture (`ffmpeg_t6144_19.25.00-19.25.50[R].dav`, 44.5 s, eyes 41.5 px
+    apart), a person looking up into the camera. It scored 0.404 against one
+    reference.
+  - Why: the face detector's five points are wrong on an upside-down face,
+    so the lined-up face it compares is a smear, not a face. The same head
+    in R2's carved copy of the clip, sampled at a slightly different
+    moment, scored at most 0.30.
+  - What catches it: not the size limit. The tool saves the lined-up face
+    beside every ranked result for the examiner to look at, and this one
+    would be rejected at a glance.
+  - The fix: search a fisheye picture turned round as well, as
+    `analyse-video` does (§8a). Not done yet (§10).
+- **Faces between 8 and 32 px are rare in these clips** (4,
+  all between 8 and 10 px), so the real-footage rate at those sizes is not
+  measured.
+
+### What sets the thresholds
+
+- **0.363** is OpenCV's published threshold, kept as it is. On LFW no pair of
+  different people passes it at any size: 0 of 1,200 as photos and 0
+  of 9,543 at recorder size.
+- **12 px** between the eyes:
+  - At and above it, the same person passes in 96.5% or more of pairs
+    in every bin (4,519 of 4,619 overall, 97.8%), and no different pair
+    passes (0 of 4,630).
+  - Below it the pass rate falls: 95.5% at 10-12 px, 92.7% at
+    8-10 px and 56.3% under 8 px. Under 8 px, strangers pass on real
+    footage.
+  - The real clips have too few faces between 8 and 12 px to say whether 10
+    would do as well, so 12 is the cautious choice.
+
+### End to end, on a real recorder clip
+
+The astronaut photo was pasted into a real recorder clip
+(`ffmpeg_t4182_20150327215559_ch01.mp4`, from 4 to 9 s). `face-search` was
+then run with the original photo on that clip and on a second real clip:
+
+- **Pasted at 260 px:**
+  - found in all 5 sampled frames it is on screen (4-8 s), similarity
+    0.871-0.872, eyes 21 px apart: **5 candidates**;
+  - the second clip: no face, and no candidate.
+- **Pasted at 110 px:**
+  - found in the same 5 frames, similarity 0.388-0.403, which is above the
+    threshold;
+  - but its eyes are 8 px apart, so **0 candidates** and 5 "too small to
+    compare": the size rule at work.
+
+### What this does not show
+
+- **The same person in real recorder footage is not measured.**
+  - We hold no labelled footage of one person alongside a photo of them, so
+    LFW made small stands in for it.
+  - LFW made small has no infrared, no view from above and no motion blur,
+    and its faces are mostly frontal. On real footage the same person will
+    pass less often than the table says.
+- **LFW is photographs of public figures**, mostly adult and light-skinned.
+  Face recognition errs more for some groups than for others, and the tool's
+  notes say so with every result.
+- **The numbers hold for SFace at 0.363.** `--min-similarity` changes the
+  threshold, and then these numbers no longer apply.
+
+## 8o. Parsers against corrupted disks (fuzzing, 30 Sep)
 
 Evidence arrives damaged: bad sectors, a half-overwritten index, a disk cut
 short, or bytes changed on purpose. A parser that crashes on such a disk
@@ -1827,4 +1987,5 @@ tool's own parser reads, field by field.
 - ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** ~~Still to run on the real images.~~ **Run 29 Sep: agree on both drives' images and on five vendor-made files (§9a).**
 - ~~The ffmpeg cross-check on drive 1's own `.dav` files.~~ **Run 29 Sep (§8g):** 719,097 of 719,097 emitted frames identical. It found one thing to fix: after a frame-counter gap the DHAV date and millisecond counter can disagree by up to ~3 s (6 files, 227 frames). Frames after such a gap should carry that wider time uncertainty in the timeline and report; today they do not.
 - Analytics recall on our own cameras: 210 drive-1 frames, labelled by Claude, the 20 deciding frames checked by a person, scored with both detectors (§8a). New detector: people 2 of 2 (was 0), no face false alarms (was 7), but the dog is still a person, a tree trunk is a new one, and no vehicle is reported - the parked car scores 0.25-0.47 against a 0.5 threshold. Open: the static rule's 25% share lets an intermittent fixed false alarm through.
+- Face search (§8n): search a fisheye picture turned round as well, as `analyse-video` does. The one false candidate above the size limit was an upside-down head the face detector's points misread. The same person in real recorder footage (rather than LFW made small) is not measured: that needs labelled footage of one person and a photo of them.
 - ~~Drive 2 `label-ps` re-run on the drive.~~ **Run 29 Sep (§8b):** 440 `stale_tail`, 55 `outside_index`; index unchanged since 26 Sep.

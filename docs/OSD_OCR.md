@@ -101,8 +101,7 @@ UTC.
 
 ## 5. What it is not
 
-- **Not identification.** It reads a camera's name. There is no recognition of
-  any kind in this tool.
+- **Not identification.** It reads a camera's name and recognises no one.
 - **Not evidence.** A title here is pixels read by a machine; the examiner
   confirms it in the frame itself. In the data contract it is a claim with
   `source="osd_ocr"`, which is the weakest timestamp source we define.

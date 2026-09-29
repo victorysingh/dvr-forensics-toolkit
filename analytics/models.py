@@ -40,6 +40,14 @@ MODELS = {
                      "face_detection_yunet/face_detection_yunet_2026may.onnx",
               "license": "MIT",
               "sha256": "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"},
+    # face search only (analytics/face_search.py), never run by analyse-video
+    "sface": {"file": "face_recognition_sface_2021dec.onnx",
+              "name": "SFace face recogniser (OpenCV Zoo, 2021dec; MobileFaceNet, SFace loss)",
+              "source": "https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface",
+              "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/"
+                     "face_recognition_sface/face_recognition_sface_2021dec.onnx",
+              "license": "Apache-2.0",
+              "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"},
 }
 
 # Which model does which job, at what threshold, on how many tiles by default.

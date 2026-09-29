@@ -1425,9 +1425,39 @@ def cmd_activity(args) -> int:
     return 0
 
 
+def _recorder_times(case_dir: str, clips: list, key: str) -> bool:
+    """Hikvision PS streams carry the recorder's clock (HK descriptor): put a
+    recorder-local time on each entry of clip[key], from the stream's first
+    keyframe.  False if the case has no PS streams."""
+    psr = os.path.join(case_dir, "carve", "ps_report.json")
+    if not os.path.exists(psr):
+        return False
+    from datetime import datetime, timedelta
+    with open(psr, "r", encoding="utf-8") as fh:
+        t0 = {x["id"]: x.get("time_first_local") for x in json.load(fh)["streams"]}
+    for c in clips:
+        start = t0.get(os.path.splitext(c["clip"])[0])
+        if start:
+            s0 = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+            for h in c[key]:
+                h["time_local"] = (s0 + timedelta(seconds=h["t_s"])).strftime("%Y-%m-%d %H:%M:%S")
+    return True
+
+
+def _extracted_clips(case_dir: str, ids: str) -> list:
+    """The clips extract-carved wrote, optionally only the ids given."""
+    import glob
+    src = os.path.join(case_dir, "carve", "streams")
+    clips = sorted(glob.glob(os.path.join(src, "*.h265")) + glob.glob(os.path.join(src, "*.h264"))
+                   + glob.glob(os.path.join(case_dir, "carve", "ps_streams", "*.ps")))
+    if ids:
+        want = set(ids.split(","))
+        clips = [c for c in clips if os.path.splitext(os.path.basename(c))[0] in want]
+    return clips
+
+
 def cmd_analyse_video(args) -> int:
     """Optional layer: faces and objects in extracted clips (lead, not evidence)."""
-    import glob
     if args.recount:
         from analytics.static import recount
         from core.hashing import sha256_file
@@ -1459,11 +1489,7 @@ def cmd_analyse_video(args) -> int:
     from core.hashing import sha256_file
 
     src = os.path.join(args.out, "carve", "streams")
-    clips = sorted(glob.glob(os.path.join(src, "*.h265")) + glob.glob(os.path.join(src, "*.h264"))
-                   + glob.glob(os.path.join(args.out, "carve", "ps_streams", "*.ps")))
-    if args.ids:
-        want = set(args.ids.split(","))
-        clips = [c for c in clips if os.path.splitext(os.path.basename(c))[0] in want]
+    clips = _extracted_clips(args.out, args.ids)
     if not clips:
         print(f"[!] no extracted clips in {src} - run `extract-carved` first")
         return 1
@@ -1481,19 +1507,7 @@ def cmd_analyse_video(args) -> int:
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"[!] {exc}")
         return 1
-    # Hikvision PS streams carry the recorder's clock (HK descriptor): put a
-    # recorder-local time on each detection, from the stream's first keyframe.
-    psr = os.path.join(args.out, "carve", "ps_report.json")
-    if os.path.exists(psr):
-        from datetime import datetime, timedelta
-        with open(psr, "r", encoding="utf-8") as fh:
-            t0 = {x["id"]: x.get("time_first_local") for x in json.load(fh)["streams"]}
-        for c in r["clips"]:
-            start = t0.get(os.path.splitext(c["clip"])[0])
-            if start:
-                s0 = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
-                for h in c["detections"]:
-                    h["time_local"] = (s0 + timedelta(seconds=h["t_s"])).strftime("%Y-%m-%d %H:%M:%S")
+    if _recorder_times(args.out, r["clips"], "detections"):
         with open(os.path.join(out_dir, "analytics.json"), "w", encoding="utf-8") as fh:
             json.dump(r, fh, indent=1)
     tot = r["frames_with_totals"]
@@ -1511,6 +1525,72 @@ def cmd_analyse_video(args) -> int:
             "frames_with": tot, "status": "lead, not evidence"},
             data_hash=sha256_file(path))
     print(f"\n[+] {path}\n  every detection is a lead for review; face DETECTION, never identification")
+    return 0
+
+
+def cmd_face_search(args) -> int:
+    """Optional layer: rank the faces in clips by likeness to a reference photo
+    (candidates for an examiner to compare by eye, never an identification)."""
+    try:
+        from analytics.face_search import run
+    except ImportError as exc:
+        print(f"[!] the optional analytics layer is not installed ({exc}).")
+        print("    It needs ffmpeg, numpy and onnxruntime - see analytics/README.md.")
+        print("    The forensic core does not need it.")
+        return 2
+    from core.hashing import sha256_file
+
+    if not os.path.isfile(args.photo):
+        print(f"[!] no photo at {args.photo}")
+        return 1
+    if args.video:
+        clips, src = list(args.video), "given"
+        missing = [c for c in clips if not os.path.isfile(c)]
+        if missing:
+            print(f"[!] no file at {', '.join(missing)}")
+            return 1
+    else:
+        clips = _extracted_clips(args.out, args.ids)
+        src = f"from {os.path.join(args.out, 'carve')}"
+        if not clips:
+            print(f"[!] no extracted clips in {src[5:]} - run `extract-carved` first, or give --video")
+            return 1
+    out_dir = os.path.join(args.out, "analytics")
+    print(f"{BANNER} - face search (candidates for review, not identification)\n")
+    print(f"  clips         {len(clips)} {src}, sampled at {args.fps} fps")
+    try:
+        r = run(args.photo, clips, out_dir, fps=args.fps, log=print, match_min=args.min_similarity)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    path = os.path.join(out_dir, "face_search.json")
+    if _recorder_times(args.out, r["clips"], "faces"):
+        when = {(c["clip"], f["t_s"]): f.get("time_local") for c in r["clips"] for f in c["faces"]}
+        for f in r["top"]:
+            f["time_local"] = when.get((f["clip"], f["t_s"]))
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(r, fh, indent=1)
+    tot = r["totals"]
+    print(f"\n  faces compared {tot['faces_compared']}; candidates {tot['candidates']} (similarity "
+          f">= {r['match_min']}, eyes >= {r['min_eye_px']} px apart); too small to compare "
+          f"{tot['too_small']}")
+    for f in r["top"][:10]:
+        print(f"    {f['clip']}  {f['t_s']:>8.1f} s  similarity {f['similarity']:.3f}  "
+              f"eyes {f['eye_px']:.0f} px" + ("  CANDIDATE" if f["candidate"] else ""))
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("face_search_run", {
+            "report": "analytics/face_search.json", "rule": r["rule"],
+            "photo": r["reference"]["photo"], "photo_sha256": r["reference"]["photo_sha256"],
+            "clips": len(clips), "fps": args.fps, "match_min": r["match_min"],
+            "min_eye_px": r["min_eye_px"],
+            "models": {k: v["sha256"] for k, v in r["models"].items()},
+            "totals": tot, "status": r["status"]},
+            data_hash=sha256_file(path))
+    print(f"\n[+] {path}\n  a candidate is a face to compare by eye with the photo; "
+          "face search never identifies anyone")
     return 0
 
 
@@ -2406,6 +2486,21 @@ def main() -> int:
     p.add_argument("--recount", action="store_true",
                    help="re-apply the static/implausible rules to stored results, no decoding")
     p.set_defaults(func=cmd_analyse_video)
+
+    p = sub.add_parser("face-search",
+                       help="optional: rank faces in clips by likeness to a reference photo "
+                            "(candidates for review, never identification)")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--photo", required=True, help="the reference photo (one face; the largest is used)")
+    p.add_argument("--fps", type=float, default=1.0, help="frames searched per second of video")
+    p.add_argument("--ids", default="", help="comma-separated clip ids (default: all extracted)")
+    p.add_argument("--video", nargs="+", default=None, metavar="FILE",
+                   help="search these video files instead of the case's extracted clips")
+    from analytics.face_rules import MATCH_MIN
+    p.add_argument("--min-similarity", type=float, default=MATCH_MIN,
+                   help=f"a face at or above this is a candidate (default {MATCH_MIN}, "
+                        "OpenCV's published threshold for SFace)")
+    p.set_defaults(func=cmd_face_search)
 
     p = sub.add_parser("combine",
                        help="one view across several recorders (separate axes unless "

@@ -19,7 +19,7 @@ These come from the product itself. A UI that breaks one of them cannot ship.
 | **Read-only** | The UI never opens an evidence device and never writes. It only reads files the pipeline wrote inside a case folder. |
 | **Ships in the .exe** | `packaging/ps26150.spec` bundles `viewer/static/` into `ps26150-dvr.exe`. So no build step at run time, and all files live in that folder. |
 | **Honest statuses** | Every parsed result carries a status: `validated` / `spec_only` / `synthetic_only` / `detected_not_parsed`. Show it next to the result, never hide it. |
-| **AI = lead, not evidence** | Every AI screen carries that label and the models' hashes. Never say "person identified". This is face *detection*; there is no recognition. |
+| **AI = lead, not evidence** | Every AI screen carries that label and the models' hashes. Never say "person identified" or "match found". `analyse-video` is face *detection*; face search (6.7) shows **candidates** for the examiner to compare by eye. |
 | **Time is recorder-local** | Unless a case states a zone, times are the recorder's own clock. Label them "recorder clock", never "UTC". |
 | **Traceable numbers** | Every number shown should say which file it came from, with that file's SHA-256 on hover. `load_case` already returns the hashes. |
 
@@ -236,6 +236,11 @@ or file), how it moves, and the demo moment.
 - **Motion activity** (`activity`), if present: a camera × hour heatmap with peaks marked.
 - **Measured accuracy card:** "on 287 labelled real frames: person 24/57, 1 false alarm" (VALIDATION_REPORT §8a, once PR #56 merges), so the demo is honest about limits.
 - **Demo moment:** the gallery of detections, each one a lead with a score, not a verdict.
+- **Face search panel** (`face_search` in `load_case`, when `analytics/face_search.json` exists; added 30 Sep):
+  - the reference face (`face_search/reference_face.jpg`) with the photo's SHA-256;
+  - the ranked faces (`face_search.top`): each frame and its lined-up face beside the reference, with the similarity and the eye distance;
+  - a candidate gets the violet badge "candidate - compare by eye"; a face under `min_eye_px` is greyed "too small to compare";
+  - the banner: "Candidates, not identifications. No candidate does not mean the person is absent."
 
 ### 6.8 Chain of custody
 - **A vertical timeline of ledger entries** (`custody.entries`):

@@ -1,12 +1,11 @@
-# Project status and handoff — 26 Sep 2026
+# Project status and handoff — 30 Sep 2026
 
-Where SIH26150 stands two days before the deadline: what is done against
-the problem statement, what the two real drives gave us, how to run it,
-and — in §6 — what is left in JP's lane.
+Where SIH26150 stands: what is done against the problem statement, what the
+two real drives gave us, how to run it, and — in §6 — what is left in JP's
+lane.
 
-Everything below is on `setup` or in PR #4 (Hikvision index), except the
-case outputs, which live under `out/` on Shrestha's machine (gitignored:
-they are evidence).
+Everything below is on `setup`, except the case outputs, which live under
+`out/` on Shrestha's machine (gitignored: they are evidence).
 
 ---
 
@@ -29,7 +28,7 @@ they are evidence).
 | Chain of custody | **done** — hash-chained ledger; every action recorded with the hash of what it produced | `acquire/ledger.py` |
 | Reduce analysis time (a PS success criterion) | **measured** - one read of the drive instead of five: a 1 TB drive over the team's USB 2 bridge takes ~11.3 h in one pass, ~56.6 h one read per task, ~21.9 h imaging first (and ~931 GiB free). taps now run in a process each - 2.24x the serial pass in the same run, fast enough that a slow laptop is again limited by the USB 2 drive, not the CPU (PERFORMANCE.md §5) | `docs/PERFORMANCE.md`, `demo/bench_single_pass.py` |
 | Reports | **done** — HTML + JSON, hashed into the ledger; BSA 2023 s.63 certificate drafted from the case (Part A/B, hash report enclosed), wording matching the Gazette word for word (tested) | `report/`, `report/s63.py` |
-| AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence". **Measured** against 287 labelled real frames: the first version found a person in 0 of 57 frames that had one; now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4, fisheye pictures also turned round) 44 of 57, faces 22 of 27, moving vehicles 7 of 12, and parked cars reported once per place as their own lead (all 6 in a night car park, none false on CAVIAR). Checked on CAVIAR footage never used for choosing: 810 of 1,089 people (previous models: 543). **On our own CP Plus cameras** (210 frames, the deciding ones checked by a person, 29 Sep): both people found (was 0), no face false alarms (was 7), but a dog is called a person, and the car parked at night was never reported (0.25-0.47 against a 0.5 threshold); it is now reported as a parked vehicle in 26 of its 35 frames, with no false one (30 Sep) (`VALIDATION_REPORT.md` §8a) - an empty list proves nothing | `analyse/activity.py`, `analytics/` |
+| AI analytics (face, object, motion) | **done as leads** — motion from frame sizes (no dependencies); face and object detection in an optional layer (ffmpeg + ONNX); everything labelled "lead, not evidence". **Measured** against 287 labelled real frames: the first version found a person in 0 of 57 frames that had one; now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4, fisheye pictures also turned round) 44 of 57, faces 22 of 27, moving vehicles 7 of 12, and parked cars reported once per place as their own lead (all 6 in a night car park, none false on CAVIAR). Checked on CAVIAR footage never used for choosing: 810 of 1,089 people (previous models: 543). **On our own CP Plus cameras** (210 frames, the deciding ones checked by a person, 29 Sep): both people found (was 0), no face false alarms (was 7), but a dog is called a person, and the car parked at night was never reported (0.25-0.47 against a 0.5 threshold); it is now reported as a parked vehicle in 26 of its 35 frames, with no false one (30 Sep) (`VALIDATION_REPORT.md` §8a) - an empty list proves nothing. **Face search** by a reference photo (SFace, 30 Sep): candidates for the examiner, never identifications; on LFW faces made recorder-sized the same person passes in 97.8% of pairs with eyes 12 px or more apart and no pair of different people passes; on strangers in 12 real surveillance clips, 1 false candidate, an upside-down head at a fisheye's edge (§8n) | `analyse/activity.py`, `analytics/` |
 | Support 5–6 OEMs | **honest answer**: 3 of the eight decoded from real media (Dahua, CP Plus, Hikvision), plus **HeimVision** - an "other commonly used platform" - decoded from a real NIST image; **Honeywell parsed from published research** (Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430)) as a drop-in plugin, `spec_only`, no media; **Uniview parsed from its own firmware's storage driver** (`spec_only`, no media) and **TP-Link's index read** from its firmware (footage not placed; `detected_not_parsed`); **Matrix parsed from its own documents** (the recording tree; `spec_only`, no media); **Godrej parsed from Qualvision's firmware** (its SeeThru recorders run Qualvision's software; `spec_only`, no media) - so all eight have a plugin. For TP-Link, and any vendor without a plugin, the video can still be recovered with no parser: `carve-annexb` finds raw H.264/H.265 by its parameter sets (no dates or cameras; `synthetic_only`) | `plugins/`, `detect/survey.py`, `recover/annexb.py` |
 
 Named deliverables:
@@ -85,6 +84,8 @@ label-ps                             HIKBTREE index -> cameras for carved PS foo
 extract / extract-carved             footage out, hashed
 timeline                             clock rule, gaps, recurring patterns, coverage
 activity / analyse-video             leads: motion, faces, objects
+face-search                          faces ranked by likeness to an examiner's photo:
+                                     candidates, never identification
 read-osd                             camera titles and the clock from the burned-in picture,
                                      for the streams no index accounts for
 identify-model / record-device       the recorder's model: strings on the platter outside the
@@ -107,7 +108,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 566 tests, no hardware, ~1 minute (568 with ffmpeg on PATH). Parsers against corrupted disks: `python -m validate.fuzz_parsers` (VALIDATION_REPORT §8m).
+`python tests/test_pipeline.py` — 580 tests, no hardware, ~1 minute (582 with ffmpeg on PATH). Parsers against corrupted disks: `python -m validate.fuzz_parsers` (VALIDATION_REPORT §8o).
 
 ## 4. Things learned the hard way
 
