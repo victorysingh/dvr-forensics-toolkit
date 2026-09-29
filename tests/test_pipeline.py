@@ -2458,6 +2458,15 @@ def test_osd_rules() -> None:
     check("the weekday the recorder painted chooses between the two dates",
           p is not None and p["readings"] == [datetime(2026, 5, 1, 13, 20, 26)]
           and not p["ambiguous"] and p["weekday_checked"], str(p))
+    # Clocks from other recorders' own files (VALIDATION_REPORT 8c, 29 Sep).
+    p = R.parse_osd_clock("1080 265  08/ 14/ 2021  07: 11: 22  PM  Swann")
+    check("a Swann clock, spaces after its separators, reads amid the title and logo",
+          p is not None and p["readings"] == [datetime(2021, 8, 14, 19, 11, 22)], str(p))
+    p = R.parse_osd_clock("03-27-2015 SHAD 21:56:12")
+    check("a weekday the OCR cannot read (a Chinese one) does not stop the clock",
+          p is not None and p["readings"] == [datetime(2015, 3, 27, 21, 56, 12)], str(p))
+    check("the full-width strips are tried beside the four corners",
+          R.BANDS["top"] == (0.0, 0.0, 1.0, 0.12) and R.BANDS["bottom"] == (0.0, 0.88, 1.0, 1.0))
     p = R.parse_osd_clock("28-07-2024 Mon 02:07:20")
     check("a weekday that fits no reading is reported, not trusted over the digits",
           p is not None and p["weekday_disagrees"]
@@ -2557,7 +2566,7 @@ def test_osd_reader(tmp: str) -> None:
           str(r["summary"]))
     check("osd.json is written with the rule and the status it may claim",
           os.path.exists(os.path.join(case, "analytics", "osd.json"))
-          and r["rule"] == "osd.tesseract_title_clock.v1"
+          and r["rule"] == "osd.tesseract_title_clock.v2"
           and r["status"] == "lead, not evidence")
 
     # The same picture against a container date 400 s away: a recorder whose

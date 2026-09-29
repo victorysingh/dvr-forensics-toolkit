@@ -3,6 +3,7 @@
     python -m validate.ksy_check                          # synthetic disks, built here
     python -m validate.ksy_check --dahua skyhawk_WWD4A3NX_first20GiB.dd \\
         --ps /dev/sdX --ps-region 0x4C5E000 0x40000000    # real media
+    python -m validate.ksy_check --ps HIKVISION_FILE.mp4 --dav DAHUA_FILE.dav   # vendor-made files
 
 `formats/*.ksy` describe each observed layout for others to reuse
 (docs/TECH_STACK.md); the hand-written parsers are what the tool runs.  This
@@ -16,6 +17,8 @@ says how to rebuild them), and every field both sides read is compared:
                    DHAV frames the parser accepts in the first recordings'
                    clusters (type, number, length, date, ms, extension
                    length, trailer)
+  Dahua .dav       every DHAV frame of an export or carved file, the .ksy's
+                   frame type read on its own against the parser's
   Hikvision PS     each stream recover/pscarve.py carves in the region: the
                    .ksy must parse its whole extent (every length landing on
                    the next start code), with the same number of packs,
@@ -157,6 +160,34 @@ def check_dahua(path: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+def check_dav(path: str) -> dict:
+    """Every DHAV frame of a Dahua `.dav` file - a recorder's own export or a
+    carved stream - read by the .ksy's frame type on its own (no disk around
+    it) and by parsers/dahua.walk_frames."""
+    from kaitaistruct import KaitaiStream
+    from parsers.dahua import walk_frames
+    ksy = _generated("dahua_dhfs41").DahuaDhfs41
+    out: dict = {"file": path, "mismatches": []}
+    bad = out["mismatches"]
+    with BlockDevice(path) as dev:
+        buf = dev.read_at(0, dev.size_bytes)
+    fs = KaitaiStream(io.BytesIO(buf))
+    frames = 0
+    for fr in walk_frames(buf, 0):
+        fs.seek(fr.offset)
+        k = ksy.DhavFrame(fs, None, None)
+        got = (_val(k.type), k.frame_number, k.frame_length, k.date.raw, k.ms_clock,
+               k.ext_length, k.trailer_length)
+        want = (fr.ftype, fr.frame_number, fr.length, fr.date, fr.ms, fr.ext_length, fr.length)
+        if got != want:
+            bad.append(f"frame at {fr.offset}: ksy {got}, parser {want}")
+        frames += 1
+    out["frames_compared"] = frames
+    out["agree"] = not bad and frames > 0
+    return out
+
+
+# ---------------------------------------------------------------------------
 def check_ps(path: str, start: int = 0, length: Optional[int] = None, max_streams: int = 50) -> dict:
     from kaitaistruct import KaitaiStream
     from recover import pscarve
@@ -231,6 +262,8 @@ def main() -> int:
     ap.add_argument("--ps", help="a disk or image holding Hikvision MPEG-PS footage")
     ap.add_argument("--ps-region", nargs=2, metavar=("OFFSET", "LENGTH"),
                     help="carve only this byte range (hex or decimal), e.g. one 1 GiB data block")
+    ap.add_argument("--dav", action="append", default=[],
+                    help="a Dahua .dav file (an export or a carved stream); repeatable")
     ap.add_argument("--out", help="write the result here as JSON")
     a = ap.parse_args()
     try:
@@ -238,7 +271,7 @@ def main() -> int:
     except ImportError:
         print("needs the Kaitai runtime: pip install kaitaistruct", file=sys.stderr)
         return 2
-    if not a.dahua and not a.ps:
+    if not a.dahua and not a.ps and not a.dav:
         with tempfile.TemporaryDirectory() as work:
             res = synthetic(work)
     else:
@@ -248,6 +281,8 @@ def main() -> int:
         if a.ps:
             start, length = (int(a.ps_region[0], 0), int(a.ps_region[1], 0)) if a.ps_region else (0, None)
             res["hikvision_ps"] = check_ps(a.ps, start, length)
+        for f in a.dav:
+            res[f"dav:{os.path.basename(f)}"] = check_dav(f)
     text = json.dumps(res, indent=1, default=str)
     if a.out:
         with open(a.out, "w") as fh:
