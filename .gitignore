@@ -11,3 +11,9 @@ out/
 .DS_Store
 # analytics models are fetched and hash-checked, not committed (see analytics/README.md)
 analytics/models/*.onnx
+
+# the UI's build tooling: Node is needed to BUILD the console, never to run
+# it. The build output in viewer/static/ is committed and is what the .exe
+# ships, so an air-gapped machine needs nothing from here.
+ui/node_modules/
+ui/dist/
