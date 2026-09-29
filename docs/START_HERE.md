@@ -72,7 +72,7 @@ answer is wrong.
 Run this first — it needs no hardware and takes about ten seconds:
 
 ```bash
-python tests/test_pipeline.py     # 536 tests (538 with ffmpeg on PATH), all should pass
+python tests/test_pipeline.py     # 537 tests (539 with ffmpeg on PATH), all should pass
 python demo/tamper_demo.py        # the stage demo, end to end
 ```
 
