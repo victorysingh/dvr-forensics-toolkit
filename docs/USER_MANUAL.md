@@ -495,6 +495,23 @@ python cli.py export-nist --es out/CASE-001/hw-ch00-main-0000.h264 --out out/CAS
   proof that every picture is unchanged. The export is logged in the
   custody ledger.
 
+### 3.4n The recorder's clock from daylight (no unit needed)
+
+When the recorder can't be reached to read its clock against true time
+(SOP 1.2), use an outdoor camera that switches to black-and-white infrared at
+night. Sample days of its footage, then fit:
+
+```bash
+python -m analyse.daylight sample out/CASE-001/carve/streams/*.dav --out series.jsonl --every 120
+python -m analyse.daylight estimate series.jsonl --lat 12.97 --lon 77.59 --zone 330
+```
+
+A `.dav` keeps the recorder's own frame times; any other clip needs `--start`
+(and `--fps` for a raw stream). The result is the recorder's offset from UTC,
+the camera's switch elevation, and each switch's own offset, whose spread is
+the uncertainty. With `--zone` it also states the clock error. It needs at
+least one dusk and one dawn switch.
+
 ### 3.5 Look at the results
 
 ```bash
