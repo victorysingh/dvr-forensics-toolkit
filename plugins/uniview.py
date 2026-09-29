@@ -353,7 +353,10 @@ def walk_gop(dev, off: int, limit: int) -> Optional[dict]:
     trailer = (end + PAGE) & ~(PAGE - 1)
     if trailer > limit:
         return None
-    length, tail = struct.unpack("<II", dev.read_at(trailer - 8, 8))
+    raw = dev.read_at(trailer - 8, 8)
+    if len(raw) < 8:
+        return None
+    length, tail = struct.unpack("<II", raw)
     if tail != GOP_TAIL or length != end - off:
         return None
     return {"offset": off, "sec": sec, "ms": ms, "rectype": rectype, "packets": packets,

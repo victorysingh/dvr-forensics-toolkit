@@ -109,6 +109,8 @@ class ParseResult:
     field_provenance: list[dict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # set when the parser stopped on data it could not handle (see register())
+    stopped: str = ""
 
     @property
     def parsed(self) -> bool:
@@ -142,9 +144,61 @@ class VendorParser:
 REGISTRY: dict[str, type[VendorParser]] = {}
 
 
+def _where(exc: BaseException) -> str:
+    """The exception and the last line of this tool's code it passed through."""
+    import os
+    import traceback
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    frames = [f for f in traceback.extract_tb(exc.__traceback__)
+              if os.path.abspath(f.filename).startswith(root)]
+    at = (f" at {os.path.relpath(frames[-1].filename, root)}:{frames[-1].lineno}"
+          if frames else "")
+    return f"{type(exc).__name__}: {str(exc)[:200]}{at}"
+
+
+def _guard(cls: type[VendorParser]) -> None:
+    """A parser is handed evidence that may be damaged or tampered with, and
+    cli.py catches only device errors - so no parser may end in a traceback.
+    Anything else raised by detect() makes it answer False, and by parse() a
+    result that says where the parser stopped (validation_status
+    detected_not_parsed).  Device errors still propagate: the device, not the
+    data, failed.  validate/fuzz_parsers.py counts these apart, so a stop is
+    found and fixed rather than hidden."""
+    from acquire.device import DeviceError
+    detect, parse = cls.__dict__.get("detect"), cls.__dict__.get("parse")
+    if detect and not getattr(detect, "_guarded", False):
+        def safe_detect(self, dev, *a, **k):
+            try:
+                return bool(detect(self, dev, *a, **k))
+            except DeviceError:
+                raise
+            except Exception as exc:                     # noqa: BLE001
+                self.detect_stopped = _where(exc)
+                return False
+        safe_detect._guarded = True
+        safe_detect.__doc__, safe_detect.__name__ = detect.__doc__, "detect"
+        cls.detect = safe_detect
+    if parse and not getattr(parse, "_guarded", False):
+        def safe_parse(self, dev, *a, **k):
+            try:
+                return parse(self, dev, *a, **k)
+            except DeviceError:
+                raise
+            except Exception as exc:                     # noqa: BLE001
+                where = _where(exc)
+                return ParseResult(vendor=cls.vendor, parser_rule=cls.parser_rule,
+                                   validation_status=VALIDATION_DETECTED, stopped=where,
+                                   errors=[f"the parser stopped on damaged or unexpected data "
+                                           f"and read nothing further: {where}"])
+        safe_parse._guarded = True
+        safe_parse.__doc__, safe_parse.__name__ = parse.__doc__, "parse"
+        cls.parse = safe_parse
+
+
 def register(cls: type[VendorParser]) -> type[VendorParser]:
     if not cls.vendor:
         raise ValueError(f"{cls.__name__} must declare a vendor name")
+    _guard(cls)
     REGISTRY[cls.vendor] = cls
     return cls
 

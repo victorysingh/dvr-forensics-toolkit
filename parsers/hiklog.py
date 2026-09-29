@@ -118,6 +118,9 @@ def find_masters(dev) -> list[int]:
 def read_master(dev, start: int) -> dict:
     raw = _read(dev, start, 0x100)
     out = {"offset": start}
+    if len(raw) < 0x100:                     # the image ends inside it: the rest reads as zeros
+        out["truncated"] = True
+        raw = raw.ljust(0x100, b"\0")
     for name, off, fmt in MASTER_FIELDS:
         if fmt == "str16":
             out[name] = raw[off:off + 16].split(b"\x00", 1)[0].decode("ascii", "replace")

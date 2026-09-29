@@ -2242,6 +2242,70 @@ def test_parked_vehicles() -> None:
           weak["weak"] and not counted(weak) and not strong["weak"] and counted(strong))
 
 
+def test_parser_safety_net() -> None:
+    """No parser may end in a traceback: data a parser cannot handle makes
+    detect() answer False and parse() return a result that says where it
+    stopped; a device error still propagates."""
+    print("\n[parsers: the safety net for damaged data]")
+    from acquire.device import DeviceError
+    from parsers.base import REGISTRY, ParseResult, VendorParser, register
+
+    class Broken(VendorParser):
+        vendor, parser_rule = "Broken-for-test", "test.broken"
+
+        def detect(self, dev, hint_offsets=None):
+            return struct.unpack("<I", b"\x01")[0] == 1          # struct.error
+
+        def parse(self, dev, hint_offsets=None):
+            if getattr(dev, "fail", False):
+                raise DeviceError("the drive went away")
+            return {}["missing"]                                 # KeyError
+
+    try:
+        register(Broken)
+        p = Broken()
+        res = p.parse(object())
+        check("a parser that raises on damaged data returns a result naming where it stopped, "
+              "detected_not_parsed, instead of a traceback",
+              isinstance(res, ParseResult) and res.stopped.startswith("KeyError")
+              and "test_pipeline.py" in res.stopped and res.validation_status == "detected_not_parsed"
+              and res.errors and p.detect(object()) is False
+              and p.detect_stopped.startswith("error"), res.stopped)
+        dev = type("Dev", (), {"fail": True})()
+        try:
+            p.parse(dev)
+            propagated = False
+        except DeviceError:
+            propagated = True
+        check("a device error still propagates: the device failed, not the data", propagated)
+    finally:
+        REGISTRY.pop("Broken-for-test", None)
+
+
+def test_parser_fuzz(tmp: str) -> None:
+    """Every parser against corrupted disks (validate/fuzz_parsers.py, a fixed
+    seed): none crashes, hangs or has to be stopped by the safety net."""
+    print("\n[parsers: fuzzed with corrupted disks]")
+    import random
+    import threading
+    from validate import fuzz_parsers as F
+    for vendor in F._seed_builders():
+        data, reads, _ = F.seed(vendor, tmp)
+        rnd = random.Random(f"{vendor}:test")
+        bad = []
+        for n in range(12):
+            patches, size, what = F.mutate(data, reads, rnd)
+            box: dict = {}
+            t = threading.Thread(target=lambda: box.update(F.run_case(vendor, data, patches, size)),
+                                 daemon=True)
+            t.start()
+            t.join(30)
+            outcome = box.get("outcome", "hang")
+            if outcome not in ("ok", "device-error"):
+                bad.append((n, outcome, box.get("error", box.get("detail", "")), what))
+        check(f"{vendor}: 12 corrupted disks - no crash, hang or safety-net stop", not bad, str(bad[:2]))
+
+
 def test_analytics_apply(tmp: str) -> None:
     """`apply` scores a set sampled earlier under today's rules from its
     stored boxes alone - no video, no frames."""
@@ -4375,6 +4439,8 @@ def main() -> int:
         test_caviar_eval(tmp)
         test_parked_vehicles()
         test_analytics_apply(tmp)
+        test_parser_safety_net()
+        test_parser_fuzz(tmp)
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)

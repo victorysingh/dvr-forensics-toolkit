@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 562 pass, 0 fail: 539 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 572 pass, 0 fail: 549 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -30,6 +30,7 @@ Two different things are validated here, and they must not be confused:
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
+| Parsers against damaged or tampered disks | **9,600 corrupted disks** fed to all 8 vendor parsers (§8m). Before the fixes: 144 crashes and 1 hang in 3,200. After, in all 9,600: **no crash and no hang**. The few cases the safety net caught were fixed at the parser too. A parser can no longer end in a traceback |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
@@ -1599,6 +1600,90 @@ What this does and does not show:
 - **The SIH comparison is on the same public image.** It uses the other
   teams' own published figures. They were not re-run here, because both need
   the 150 GB E01 streamed through their own readers.
+
+## 8m. Parsers against corrupted disks (fuzzing, 30 Sep)
+
+Evidence arrives damaged: bad sectors, a half-overwritten index, a disk cut
+short, or bytes changed on purpose. A parser that crashes on such a disk
+shows the examiner a Python traceback and reads nothing more. Worse, a
+parser that hangs stops the case.
+
+`python -m validate.fuzz_parsers` builds each vendor's synthetic disk (the
+tests' `tests/synth_*.py`) and parses it once cleanly. While it does, it
+records every byte range the parser reads: its structures, not the video.
+It then makes corrupted copies, mostly damaging those ranges:
+- bit flips;
+- a field set to a poison value (0, all ones, the sign bit, just past the
+  disk's end);
+- runs of bytes zeroed, set to 0xFF or randomised;
+- one structure copied over another;
+- the disk cut short inside a structure.
+
+Each case runs `detect()` and `parse()` in a worker process, killed after
+30 s. The test is the contract `cli.py` relies on: `detect()` answers true
+or false, and `parse()` returns a result with any problem in its `errors`.
+Anything else raised, bar a device error, is a crash. Cases are
+reproducible (`--repro VENDOR:CASE` reruns one and, for a hang, shows where
+it is stuck).
+
+**Found: 145 failures in 3,200 cases (400 per parser), in 22 places.**
+
+| Parser | Crashes | Hangs |
+|---|---|---|
+| Dahua | 0 | 0 |
+| Godrej | 0 | 0 |
+| Matrix | 76 | 1 |
+| Hikvision | 22 | 0 |
+| HeimVision | 20 | 0 |
+| Honeywell | 20 | 0 |
+| Uniview | 5 | 0 |
+| TP-Link | 1 | 0 |
+
+What they were:
+- **Structures read past the end of a cut or damaged disk, unpacked without
+  checking the length.** The Hikvision system log's master block,
+  Honeywell's partition header, HeimVision's FAT and recording heads,
+  Uniview's GOP trailer, and the ext2/3/4 reader's inodes, group
+  descriptors and blocks.
+- **A corrupted file size taken at its word.** One ext inode claimed about
+  a terabyte. Reading by it exhausted memory, or, in the "hang", listed
+  about a billion blocks one by one.
+- **The ext reader's own refusal was not caught.** It raises "not read" for
+  what it will not guess at, but Matrix did not catch that for a single
+  damaged file or folder, so one bad file stopped the whole parse.
+- **TP-Link:** SQLite's own error message quoted the damaged bytes, and
+  Python could not decode the message.
+
+**Fixed.**
+- Each place now reads exactly or refuses. A structure past the end of the
+  image is "beyond the image - not read", and a file larger than the whole
+  disk is refused.
+- Matrix skips an unreadable file or folder and lists it in the result's
+  errors, then reads the rest.
+- TP-Link reports such an index as not readable.
+- **A safety net for every parser**, including a drop-in plugin
+  (`parsers/base.py` `_guard`). If a parser still raises on the data,
+  `detect()` answers False and `parse()` returns a result that says where it
+  stopped (`detected_not_parsed`). A device error still propagates: the
+  device, not the data, failed. The fuzzer counts these stops apart, so the
+  net does not hide a bug.
+
+**After the fixes:**
+- The same 3,200 cases: no crash, no hang.
+- 3,200 new ones (another seed): no crash, no hang.
+- 7 stops across both runs, all fixed at the parser (a FAT entry past the
+  image, Matrix's `detect()`, TP-Link's error text). Each of the 7 cases now
+  returns a clean result.
+- A third, fresh 3,200: no crash, no hang. 3 stops (a directory entry cut short, a damaged database header that made SQLite ask for more memory than there is, and a frame header cut short), each fixed at the parser and now a clean result.
+- The test suite runs 12 corrupted disks per parser on a fixed seed, and
+  tests the safety net itself.
+
+**Limits.**
+- The disks are the synthetic ones, built to each vendor's layout, not real
+  damaged recorder disks.
+- The damage is random, aimed at what the parser reads. It is not a proof
+  that no input can crash a parser.
+- The carvers, the E01 reader and the scan engine were not fuzzed here.
 
 ## 9. Vendor format status
 
