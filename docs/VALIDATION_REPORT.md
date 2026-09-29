@@ -18,14 +18,14 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 548 pass, 0 fail: 525 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 549 pass, 0 fail: 526 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
-| Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4): a person in **39 of 57**, faces 12 of 27, vehicles 8 of 12; on CAVIAR **810 of 1,089** labelled people (the previous tiled models: 543). False alarms: 5 frames, all a hand holding a board up to the lens. A lead is worth reviewing; an empty list still proves nothing |
+| Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4, fisheye pictures also looked at turned round): a person in **44 of 57**, faces **22 of 27**, vehicles 8 of 12; on CAVIAR **810 of 1,089** labelled people (the previous tiled models: 543), 837 with its overhead lobby camera turned round. False alarms: 6 person frames, all a hand in the picture, and 1 face frame, a head at the fisheye's edge. A lead is worth reviewing; an empty list still proves nothing |
 | OSD reader (optional) | rules and orchestration tested; **measured** on six recorders' own files, 36 painted clocks: the clock found on 3 of 6 recorders, 5 frames read exactly, 9 wrong, 22 unread; no title right (§8c). A clock reading is a lead to check, not a time source |
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
@@ -616,6 +616,57 @@ tiled classic set: 71 s).
 - Set A has people in only three clips.
 - Neither set is from an Indian recorder, and these models have not been
   run on the team's drives.
+
+### Cameras that look down: rotation (29 Sep)
+
+**Why.** After the model change, the misses were concentrated in one camera:
+16 of set A's 18 missed person frames and 11 of its 15 missed face frames
+were the ceiling fisheye. Seen from above, people lie at every angle round
+the picture, and the detectors were trained on upright people. The man
+looking up into the lens is upside down in it.
+
+**The change.**
+- For a camera that looks down, both models also look at the whole frame
+  turned a quarter, a half and three quarters of a turn. Each box is turned
+  back (`analytics/tiles.py` `unrotate`) and merged with the rest.
+- `analyse-video --rotate auto` (the default) does this for **round fisheye
+  pictures**: a lit disc with nearly black corners (burned-in text in a
+  corner is allowed). On the labelled clips it picked all 98 fisheye frames
+  and none of the 458 frames from other cameras.
+- `--rotate on` is for a ceiling camera that is not a round fisheye; the
+  examiner knows how the camera was mounted. `--rotate off` turns it off.
+- A rotated frame costs about 0.36 s more model time.
+- The idea is established: RAPiD (Duan et al., CVPR Workshops 2020) detects
+  people in overhead fisheye images by rotation-aware boxes. This is its
+  simplest form, with the models the tool already has.
+
+**Measured with the tool** (`analytics_eval sample`, then `score`; and
+`caviar_eval`):
+
+| | Before (people at 0.4) | Rotation `auto` |
+|---|---|---|
+| Set A: person | 39 of 57, 5 false alarms | **44 of 57**, 6 false alarms |
+| Set A: face | 12 of 27, 0 false alarms | **22 of 27**, 1 false alarm |
+| Set A: vehicle | 8 of 12 | 8 of 12 |
+| The fisheye clip: person / face | 23 of 39 / **1 of 12** | 28 of 39 / **11 of 12** |
+| CAVIAR (no round pictures) | 810 of 1,089 | 810 of 1,089 (unchanged) |
+| CAVIAR, lobby turned (`--rotate on` for its 3 clips) | lobby 26 of 189 | **lobby 53 of 189**; all of CAVIAR **837**; under 40 px 109 of 297 (83) |
+
+- **The new false alarms.**
+  - The person one is a hand at the top of the fisheye picture, like the
+    five before it.
+  - The face is a head at the fisheye's top edge, labelled "no face"
+    because it is not turned to the camera.
+  - With the lobby turned, one more CAVIAR frame with nobody labelled has a
+    person reported (3 of 11): the reception desk again, and a plant pot by
+    the window. There are 58 unmatched boxes (51 before).
+- **Why not rotate every camera.** Turning every frame of set A found
+  nothing more on the upright cameras. It did add 6 false face frames on the
+  Swann street camera: a fixed spot read as an upside-down face. Hence
+  `auto` turns only round pictures.
+- **Still missed on the fisheye:** 11 person frames (people on the floor
+  below, small and bent by the lens) and 1 face (the installer upside down
+  and blurred close to the lens).
 
 ### On our own drive (29 Sep - sampled, labels pending)
 

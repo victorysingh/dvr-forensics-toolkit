@@ -33,6 +33,10 @@ about 0.6 s of model time a frame on a laptop CPU.
   footage.
 - `--models classic` is the SSD-MobileNet + UltraFace set measured before
   29 Sep 2026, kept to reproduce those results.
+- `--rotate auto` (the default) also looks at a round fisheye picture turned
+  a quarter, a half and three quarters of a turn. A camera that looks down
+  shows people at every angle. Use `--rotate on` for a ceiling camera that
+  is not a round fisheye, and `--rotate off` to skip it.
 
 Writes `out/CASE/analytics/analytics.json` and thumbnails with boxes drawn,
 records the model hashes in the custody ledger, and adds a section to the
@@ -83,8 +87,8 @@ refused.
   to review in the footage itself.
 - **Not proof of absence.** Scored against 287 frames of real recorder
   footage labelled by eye (`docs/VALIDATION_REPORT.md` §8a), it reports a
-  person in 39 of the 57 frames that had one. The first version found
-  none.
+  person in 44 of the 57 frames that had one, and a face in 22 of 27.
+  The first version found no person.
   - On CAVIAR CCTV footage, which played no part in choosing, it finds 810
     of 1,089 labelled people (`python -m validate.caviar_eval`).
   - It still misses distorted and distant people.
