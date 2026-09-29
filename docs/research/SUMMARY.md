@@ -64,11 +64,11 @@ the final report. "Done" marks what the team has built since the hunts.
 
 | Gap | Status |
 |---|---|
-| G1: read the burned-in clock and camera name as a third, "recorder-claimed" time source | **Built** (OSD reader; weekday/AM-PM clocks in #34); accuracy on real frames still to be measured |
+| G1: read the burned-in clock and camera name as a third, "recorder-claimed" time source | **Built and measured**: on six real recorders' files the clock is found on 3 of 6, 5 of 36 painted clocks read exactly, no title right (VALIDATION_REPORT §8c). A lead, not a time source |
 | G2: older footage left in in-use blocks ("stale tails"; Byun et al. 2026 measured +966% recoverable area on dashcams) | **Done** for Hikvision (#41) and Uniview (#43, `unv-stale-*`) |
 | G3: encryption: detect and label it instead of carving nothing | **Done**: entropy labelling (#40); TP-Link's encrypted index reported as such (#43). No open tool or paper decrypts a DVR disk |
 | G4: a scripted scenario list on the CP Plus unit (record, delete, format, overwrite, clock change, export after each) | open: needs the unit |
-| G5: run the free rival tools on our images, publish the differences | open |
+| G5: run the free rival tools on our images, publish the differences | **Done** on public and generated data (VALIDATION_REPORT §8m): OpenDHFS finds the same Dahua frames as ours but no cameras; the Hikvision tools and dhfs_extractor need our real images for a fair head-to-head |
 | G6: export in the NIST CCTV export profile (NISTIR 8161r1: MP4 + time codes + ClockOffset) | **Done** (`export-nist`); time stamps byte-identical to NIST's reference file (VALIDATION_REPORT §8i) |
 
 ## 4. Papers and standards to add to the references
@@ -162,4 +162,4 @@ builds used for #43 are not.
    file tree** - the #43 route. (Medium each.)
 5. **Download the archive.org Marshall zip and diff its CSV listing against
    the HeimVision plugin.** (2.95 GB; JP's call.)
-6. G5 (rival tools on our images). (Medium.) G6 is done.
+6. ~~G5 (rival tools on our images).~~ Done on public and generated data (VALIDATION_REPORT §8m); the real-image runs are Shrestha's. G6 is done.

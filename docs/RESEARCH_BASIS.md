@@ -153,9 +153,9 @@ goes beyond.
   - Two independent routes to the recorder's clock: the date in the container
     (DHAV packed date, Hikvision `HK` descriptor) and the clock burned into
     the picture. They are cross-checked; three frames were checked by eye, all
-    within 2 s. The OCR route, run on real frames for the first time (28 Sep),
-    read 1 of 5 reference titles and no clock yet (`VALIDATION_REPORT.md`
-    §8c), so the by-eye checks are the evidence today.
+    within 2 s. The OCR route, measured on six real recorders' files
+    (29 Sep), read 5 of 36 painted clocks exactly and no title right
+    (`VALIDATION_REPORT.md` §8c), so the by-eye checks are the evidence today.
   - No UTC is asserted without a stated time zone and a measured clock error.
   - The combined view (PR #8) refuses to put two recorders on one axis unless
     both state a time zone.
