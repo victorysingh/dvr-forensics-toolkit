@@ -401,9 +401,8 @@ def render(case: dict, examiner_notes: str = "") -> str:
             "<b>detection</b> (no identification — there is no face recognition in this "
             "tool) and object detection. Scores are the models' own confidence, not the "
             "probability a detection is correct. Each row is a moment to review in the "
-            "footage itself. On real footage labelled by eye it found a person in fewer "
-            "than half the frames that had one, so <b>an empty list does not mean nobody "
-            "was there</b>.</div>")
+            "footage itself. On real footage labelled by eye it still missed many of the "
+            "people in it, so <b>an empty list does not mean nobody was there</b>.</div>")
         add(table(["Model", "Licence", "SHA-256"],
                   [[m["name"], m["license"], mono(m["sha256"])] for m in an["models"].values()]))
         add(f"<p>{an['clips']} clips, {an['frames_analysed']:,} frames analysed. Frames with: "
@@ -413,6 +412,13 @@ def render(case: dict, examiner_notes: str = "") -> str:
                   [[h["clip"], h["t_s"], ", ".join(f"{d['label']} {d['score']:.2f}"
                                                   for d in h["detections"])]
                    for h in an["top"][:30]]))
+        if an.get("parked"):
+            add("<h3>Parked vehicles (a lead of their own)</h3><p>A car, bus or truck seen in "
+                "the same place through much of a clip: reported once per place, not counted "
+                "above as a moving vehicle.</p>")
+            add(table(["Clip", "Vehicle", "Best score", "Frames seen", "From (s)", "To (s)"],
+                      [[s["clip"], s["label"], f"{s['best']:.2f}", s["frames"], s["first"],
+                        s["last"]] for s in an["parked"][:30]]))
 
     osd = case.get("osd")
     if osd:

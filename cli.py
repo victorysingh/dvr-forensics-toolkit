@@ -389,21 +389,27 @@ def _extract_with_plugin(args, plugin) -> int:
 
 
 def cmd_extract(args) -> int:
-    """Reassemble one recording into playable files, with a hashed manifest.
+    """Reassemble recordings into playable files, each with a hashed manifest.
 
     Output goes to --out, never to the device.  Two files per recording: the
     DHAV stream as stored (`.dav`, which ffmpeg's dhav demuxer reads) and the
     bare video elementary stream (`.h265`/`.h264`, playable directly).  The
     manifest records every cluster read, its hash, and what was left out.
+    Several recording ids may be given: the disk is parsed once and each is
+    reassembled in turn - over USB a whole-drive parse takes minutes, too long
+    to repeat for every hour of footage.
     """
-    from core.contract import SCHEMA_VERSION, to_dict, utc_now
-    from core.hashing import sha256_file
     from parsers import dahua, get_parser
 
+    ids = list(args.recording) if isinstance(args.recording, (list, tuple)) else [args.recording]
     if args.vendor != "Dahua":
         plugin = get_parser(args.vendor)
         if plugin is not None and hasattr(plugin, "extract_recording"):
-            return _extract_with_plugin(args, plugin)
+            rc = 0
+            for rid in ids:
+                rc = _extract_with_plugin(argparse.Namespace(**{**vars(args), "recording": rid}),
+                                          plugin) or rc
+            return rc
         print(f"[!] extract is implemented for Dahua DHFS and plugins that offer it; "
               f"{args.vendor!r} recordings can be listed with `parse` but not reassembled yet.")
         return 1
@@ -411,31 +417,46 @@ def cmd_extract(args) -> int:
     if args.tz_offset is not None:
         parser.tz_offset_min = args.tz_offset
     os.makedirs(args.out, exist_ok=True)
-    print(f"{BANNER} - {args.vendor} extract {args.recording}\n")
+    print(f"{BANNER} - {args.vendor} extract "
+          f"{' '.join(ids) if len(ids) <= 3 else f'{len(ids)} recordings'}\n")
+    failed = 0
     try:
         with BlockDevice(args.device) as dev:
             info = dev.info()
             print(f"  device        {dev.path}  ({human_size(dev.size_bytes)})")
             print(f"  write-block   {info.write_block_method}")
             result = parser.parse(dev)
-            vol, f = parser.file_for(args.recording)
-            if f is None:
-                print(f"[!] no recording {args.recording!r}. Run `parse --vendor "
-                      f"Dahua` to list recording ids.")
-                return 1
-            rec = next(r for r in result.recordings if r.id == args.recording)
-            base = os.path.join(args.out, args.recording)
-            print(f"  recording     {rec.camera_id}  {_when(rec)}  "
-                  f"{len(f.clusters)} clusters")
-            print("  reassembling  ...")
-            with open(base + ".dav", "wb") as dav, open(base + ".es", "wb") as es:
-                stats = dahua.reassemble(dev, vol, f, dav, es)
+            for k, rid in enumerate(ids):
+                if len(ids) > 1:
+                    print(f"\n=== {k + 1}/{len(ids)}  {rid} ===")
+                vol, f = parser.file_for(rid)
+                if f is None:
+                    print(f"[!] no recording {rid!r}. Run `parse --vendor "
+                          f"Dahua` to list recording ids.")
+                    failed += 1
+                    continue
+                rec = next(r for r in result.recordings if r.id == rid)
+                base = os.path.join(args.out, rid)
+                print(f"  recording     {rec.camera_id}  {_when(rec)}  "
+                      f"{len(f.clusters)} clusters")
+                print("  reassembling  ...")
+                with open(base + ".dav", "wb") as dav, open(base + ".es", "wb") as es:
+                    stats = dahua.reassemble(dev, vol, f, dav, es)
+                _extract_outputs(base, info, parser, result, rec, vol, f, stats)
     except PermissionNeeded as exc:
         print(f"[!] {exc}")
         return 2
     except DeviceError as exc:
         print(f"[!] {exc}")
         return 1
+    return 1 if failed else 0
+
+
+def _extract_outputs(base, info, parser, result, rec, vol, f, stats) -> None:
+    """One reassembled recording: the stream renamed by its codec, both files
+    hashed into its manifest, and the summary printed."""
+    from core.contract import SCHEMA_VERSION, dump_json, to_dict, utc_now
+    from core.hashing import sha256_file
 
     codec = stats.get("codec") or "bin"
     es_path = f"{base}.{codec if codec in ('h264', 'h265') else 'es'}"
@@ -470,7 +491,6 @@ def cmd_extract(args) -> int:
             f"disk (counter gaps; not interpolated)",
         ],
     }
-    from core.contract import dump_json
     mpath = base + ".manifest.json"
     dump_json(manifest, mpath)
 
@@ -500,7 +520,6 @@ def cmd_extract(args) -> int:
     if codec in ("h264", "h265"):
         print(f"  play:   ffplay {es_path}      (or: ffmpeg -f dhav -i {base}.dav "
               f"-c copy out.mp4)")
-    return 0
 
 
 def cmd_carve(args) -> int:
@@ -1021,6 +1040,9 @@ def cmd_export_nist(args) -> int:
     from core.hashing import sha256_file
     from report import nist_export as N
 
+    if not os.path.isfile(args.es):
+        print(f"[!] no extracted stream at {args.es} - run `extract-carved` or `extract` first")
+        return 1
     es = open(args.es, "rb").read()
     try:
         start = N._parse_local(args.start)
@@ -1445,10 +1467,14 @@ def cmd_analyse_video(args) -> int:
     out_dir = os.path.join(args.out, "analytics")
     print(f"{BANNER} - video analytics (lead, not evidence)\n")
     print(f"  clips         {len(clips)} from {src}, sampled at {args.fps} fps")
-    print("  tiles         " + (f"{args.tiles} x {args.tiles} and the whole frame"
-                              if args.tiles > 1 else "none (whole frame only)"))
+    from analytics.models import MODEL_SETS
+    tiles = MODEL_SETS[args.models]["tiles"] if args.tiles is None else args.tiles
+    print(f"  models        {args.models}; tiles "
+          + (f"{tiles} x {tiles} and the whole frame" if tiles > 1 else "none (whole frame only)"))
+    print(f"  rotation      {args.rotate} (frames also looked at turned round, for cameras that look down)")
     try:
-        r = run(clips, out_dir, fps=args.fps, log=print, tiles_n=args.tiles)
+        r = run(clips, out_dir, fps=args.fps, log=print, tiles_n=tiles, model_set=args.models,
+                rotate=args.rotate)
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"[!] {exc}")
         return 1
@@ -1476,7 +1502,8 @@ def cmd_analyse_video(args) -> int:
         ledger.case_id = ledger.entries[0].get("case_id", "")
         ledger.append("video_analytics_run", {
             "report": "analytics/analytics.json", "clips": len(clips), "fps": args.fps,
-            "tiles": args.tiles, "rule": r["rule"],
+            "tiles": tiles, "model_set": args.models, "rule": r["rule"],
+            "rotate": args.rotate, "frames_turned": r["rotation"]["frames_turned"],
             "models": {k: v["sha256"] for k, v in r["models"].items()},
             "frames_with": tot, "status": "lead, not evidence"},
             data_hash=sha256_file(path))
@@ -1779,7 +1806,9 @@ def cmd_identify_model(args) -> int:
         print("  no model-numbered string found in what was searched")
     for c in res["candidates"][:15]:
         print(f"  {c['kind']:<9} {c['model']:<26} {c['vendor']:<10} {c['count']:>6}x  "
-              f"first at 0x{c['offsets'][0]:X}")
+              f"first at 0x{c['offsets'][0]:X}"
+              + ("  (possible chance match: short, seen once)"
+                 if c.get("possible_chance_match") else ""))
     ui = res.get("unit_identifiers")
     for r in (ui or {}).get("found", []):
         print(f"  unit's    {r['identifier'] + ' ' + r['value']:<36} {r['form']:<20} "
@@ -2206,10 +2235,12 @@ def main() -> int:
                         "(reads every indexed cluster in the image)")
     p.set_defaults(func=cmd_parse)
 
-    p = sub.add_parser("extract", help="reassemble one recording into playable files")
+    p = sub.add_parser("extract", help="reassemble recordings into playable files")
     p.add_argument("--device", required=True)
     p.add_argument("--vendor", default="Dahua")
-    p.add_argument("--recording", required=True, help="recording id from `parse`")
+    p.add_argument("--recording", required=True, nargs="+",
+                   help="recording id(s) from `parse`; several are reassembled after one "
+                        "parse of the disk")
     p.add_argument("--out", required=True, help="output directory (never the device)")
     p.add_argument("--tz-offset", type=int, default=None)
     p.set_defaults(func=cmd_extract)
@@ -2330,7 +2361,7 @@ def main() -> int:
     p.add_argument("--out", required=True, help="case directory")
     p.add_argument("--label", default="outside_index",
                    help="index label to extract: outside_index (default), CH01.., "
-                        "mixed-evidence, or all")
+                        "mixed-evidence, unlabelled (no index on the source), or all")
     p.add_argument("--ids", default="", help="comma-separated stream ids instead")
     p.add_argument("--format", choices=["auto", "dhav", "ps", "annexb"], default="auto",
                    help="which carve to extract from (auto: DHAV if it found streams, else "
@@ -2357,9 +2388,17 @@ def main() -> int:
     p.add_argument("--out", required=True, help="case directory")
     p.add_argument("--fps", type=float, default=1.0, help="frames analysed per second of video")
     p.add_argument("--ids", default="", help="comma-separated clip ids (default: all extracted)")
-    p.add_argument("--tiles", type=int, default=3,
-                   help="also run the models on each tile of an n x n grid, which finds small "
-                        "people (default 3, about 10x slower; 1 = whole frame only)")
+    p.add_argument("--models", default="yolox", choices=("yolox", "classic"),
+                   help="yolox: YOLOX-S + YuNet (default); classic: SSD-MobileNet + "
+                        "UltraFace, as measured before 29 Sep 2026")
+    p.add_argument("--tiles", type=int, default=None,
+                   help="also run the object model on each tile of an n x n grid, which finds "
+                        "small people (default 2 for yolox, 3 for classic; 1 = whole frame "
+                        "only, about 2-3x faster)")
+    p.add_argument("--rotate", default="auto", choices=("auto", "on", "off"),
+                   help="also look at each frame turned round, for cameras that look down "
+                        "(people lie at every angle): auto = round fisheye pictures (default), "
+                        "on = every frame, for a ceiling camera, off = never")
     p.add_argument("--recount", action="store_true",
                    help="re-apply the static/implausible rules to stored results, no decoding")
     p.set_defaults(func=cmd_analyse_video)

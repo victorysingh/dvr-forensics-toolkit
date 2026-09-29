@@ -134,6 +134,9 @@ python cli.py verify   --out out/CASE-001                          # again, now 
   Without `--tz-offset`, no UTC is asserted at all.
 - To reassemble one indexed recording rather than carved footage:
   `python cli.py extract --device /dev/sdX --vendor Dahua --recording dhfs-v1-c002120 --out clips/`.
+  Several ids can follow `--recording`: the disk is parsed once and each is
+  reassembled in turn, each with its own manifest. Over USB a whole-drive
+  parse takes minutes, so a day of footage goes in one call, not one per hour.
 
 ### 3.4a Motion activity (a lead, not evidence)
 

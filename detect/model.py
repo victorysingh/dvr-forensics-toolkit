@@ -140,6 +140,18 @@ def identify(model: str) -> Optional[dict]:
 VIDEO_INCOMPRESSIBILITY = 0.95
 CONTEXT = 40
 OFFSETS_KEPT = 8
+# A short model-shaped string seen once is what binary data throws up by
+# chance over a whole drive: "HRG" + 3 digits has about a 1-in-3e11 chance at
+# any byte of random data, and the CP Plus drive's search covered 8.2e10 bytes
+# (it found exactly one, HRG745, among compressed bytes).  Real recorder models
+# are longer - CP-UNR-104F1 is 12 characters, DS-7B08HUHI-K1 14 - so a
+# candidate this short, found once, is listed but not used in the check.
+CHANCE_MAX_LEN = 8
+
+
+def possible_chance_match(candidate: dict) -> bool:
+    """Found once and no longer than CHANCE_MAX_LEN characters."""
+    return candidate.get("count", 0) <= 1 and len(candidate.get("model", "")) <= CHANCE_MAX_LEN
 
 
 def select_blocks(blockmap: list[dict], device_size: int, max_bytes: int,
@@ -290,6 +302,8 @@ class ModelSearch:
     def result(self, searched: dict) -> dict:
         rows = sorted(self.found.values(),
                       key=lambda r: (r["kind"] != "recorder", -r["count"], r["model"]))
+        for r in rows:
+            r["possible_chance_match"] = possible_chance_match(r)
         out = {"rule": RULE, "status": "candidate", "searched": searched,
                "candidates": rows,
                "notes": ["a model string on the platter shows the text is on this disk, "
@@ -402,14 +416,20 @@ def check(observations: list[dict], platter: Optional[dict],
                                   + ". To be explained: the disk was formatted or used by "
                                   "another recorder, or the unit is built by another vendor"})
 
-    cands = [c for c in (platter or {}).get("candidates", []) if c["kind"] == "recorder"]
+    listed = [c for c in (platter or {}).get("candidates", []) if c["kind"] == "recorder"]
+    chance = [c for c in listed if possible_chance_match(c)]
+    cands = [c for c in listed if not possible_chance_match(c)]
     if platter is None:
         out.append({"check": "model strings on the platter", "verdict": "not determined",
                     "detail": "not searched (identify-model)"})
     elif not cands:
         out.append({"check": "model strings on the platter", "verdict": "not determined",
                     "detail": f"no recorder model string in the "
-                              f"{platter['searched']['bytes']:,} bytes searched"})
+                              f"{platter['searched']['bytes']:,} bytes searched"
+                              + ("; " + ", ".join(f"{c['model']} (1x, {len(c['model'])} "
+                                                  f"characters)" for c in chance[:5])
+                                 + " listed as a possible chance match - a short string seen "
+                                   "once turns up by chance in binary data" if chance else "")})
     elif obs:
         same = [c for c in cands if c["model"].upper() == obs["model"].upper()]
         out.append({"check": "model strings on the platter vs the unit",

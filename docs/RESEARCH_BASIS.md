@@ -207,13 +207,41 @@ goes beyond.
   manufacturer against the unit it was seized from, and we treat a mismatch
   as evidence.
 
-### D9. AI that knows it is a lead
+### D9. AI leads on recovered footage, with accuracy measured, not claimed
 
-- **What.** Motion activity from compressed frame sizes, with no decoding.
-  Faces and objects are an optional layer. Every output is labelled "lead,
-  not evidence". Detections fixed in place through a clip (a steel pot
-  scored as a face at 0.99) and face boxes spanning most of the frame are
-  flagged and not counted.
+- **What.** The AI runs on footage the tool recovered from the disk itself,
+  including footage the recorder's own index no longer lists. It needs no
+  recorder and no vendor software, and runs offline.
+  - Every model file is pinned by SHA-256 and recorded in the custody
+    ledger.
+  - Every output is labelled "lead, not evidence".
+  - Nobody is identified: the tool detects faces but does not recognise
+    them.
+  - Motion activity comes from compressed frame sizes, with no decoding.
+- **Measured, including what it gets wrong** (`VALIDATION_REPORT.md` §8a).
+  - On 287 frames of real recorder footage labelled by eye, the first
+    version found a person in 0 of 57 frames. The tool now finds 44 of 57,
+    faces in 22 of 27 and moving vehicles in 7 of 12, and reports parked
+    cars once per place (all 6 in a night car park, none false on CAVIAR).
+  - Every false alarm is listed: six hands in the picture, and one head at
+    a fisheye's edge.
+  - It is checked on CAVIAR footage that played no part in any choice: 810
+    of 1,089 labelled people (543 before the model change).
+  - `validate/analytics_eval.py` and `validate/caviar_eval.py` let anyone
+    re-measure it on their own footage.
+- **Built for CCTV.**
+  - Small, distant people: the frame is also searched in tiles.
+  - Ceiling fisheye cameras: the frame is also turned round, because people
+    seen from above lie at every angle.
+  - A detection fixed in place through a clip is flagged and not counted
+    (a steel pot scored as a face at 0.99), and so is a face box spanning
+    most of the frame.
+- **What is not new, and is credited.** The models are public: YOLOX
+  (Megvii) and YuNet (OpenCV Zoo). Tiling is SAHI (Akyon et al., ICIP 2022),
+  and rotation for overhead fisheye is RAPiD's idea (Duan et al., CVPR
+  Workshops 2020). What is ours is putting them on footage recovered from a
+  raw DVR disk, tied to the evidence chain, with the accuracy measured on
+  held-out footage and published.
 - **Beyond what.** Compressed-domain motion detection is established. Poppe et
   al. (2009) detect moving objects in H.264 surveillance video from the size
   of the coded data rather than from motion vectors. We use the coarsest form of
