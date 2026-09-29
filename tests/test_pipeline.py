@@ -3342,6 +3342,114 @@ def test_matrix(tmp: str) -> None:
           and row["parser_status"] == "spec_only", str(row))
 
 
+def test_nist_export(tmp: str) -> None:
+    """The NIST CCTV Export Profile (NISTIR 8161r1 Level 0): per-frame MISB
+    time stamps in UTC, a timesource record, the ClockOffset box - with the
+    pictures untouched, and no UTC asserted without a stated zone."""
+    print("\n[NIST CCTV export profile (NISTIR 8161r1 Level 0)]")
+    import random
+    import re
+    import subprocess
+    import xml.etree.ElementTree as ET
+    from datetime import datetime, timedelta, timezone
+    from report import nist_export as N
+
+    rnd = random.Random(5)
+    # a real SPS/PPS (NIST's WEB3.mp4, High 1280x720) and made-up slices
+    sps = bytes.fromhex("6764001facb402802dd808800001f480007530733000098968000393875ef706"
+                        "660001312d00007270ebdee03c60ca80")
+    pps = bytes.fromhex("68ee3cb0")
+    sc = b"\x00\x00\x00\x01"
+    es = bytearray()
+    for f in range(30):
+        if f % 10 == 0:
+            es += sc + sps + sc + pps + sc + b"\x65\x88" + rnd.randbytes(400)
+        else:
+            es += sc + b"\x41\x9a" + rnd.randbytes(120)
+    t0 = datetime(2024, 9, 21, 18, 58, 0)
+    times = [t0 + timedelta(seconds=k / 25) for k in range(30)]
+    out = os.path.join(tmp, "nist.mp4")
+    res = N.export(bytes(es), out, times, tz_offset_min=330, drift_s=-38.0,
+                   clock_reading=(datetime(2024, 9, 21, 19, 0, 27), datetime(2024, 9, 21, 19, 1, 5)))
+    back = N.read_back(out)
+    check("an MP4 of 30 pictures, each with a MISB time stamp and a timesource record",
+          res["pictures"] == 30 and back["samples"] == 30 and len(back["stamps"]) == 30
+          and back["timesource_seis"] == 30 and res["level0"], str(res["not_level0_because"]))
+    check("UTC = recorder clock - measured error - zone: 18:58:00 IST, 38 s slow -> 13:28:38Z",
+          res["first_utc"] == "2024-09-21T13:28:38.000000Z"
+          and back["stamps"][1][1] - back["stamps"][0][1] == 40_000
+          and all(st == N.STATUS_UNLOCKED for st, _ in back["stamps"]), res["first_utc"])
+    check("the pictures are untouched: input NAL units = the MP4's, less the added SEI "
+          "(read back from the file)", res["pictures_unchanged"] and res["keyframes"] == 3)
+    root = ET.fromstring(back["xmp"].split(b"?>", 1)[1].rsplit(b"<?xpacket", 1)[0])
+    vals = {el.tag.split("}")[1] + ":" + (el.text or ""): 1 for el in root.iter()
+            if el.tag.startswith("{" + N.NS_TIME)}
+    check("the ClockOffset XMP is well-formed, in NIST's namespaces, times in UTC-offset form",
+          "ExportSystemTimeModeSourceCode:0B" in vals and "ExternalReferenceTimeModeSourceCode:0F"
+          in vals and "TimeValue:2024-09-21T19:00:27+05:30" in vals, str(sorted(vals)))
+
+    jump = times[:15] + [t - timedelta(seconds=30) for t in times[15:]]
+    rj = N.export(bytes(es), os.path.join(tmp, "nist_jump.mp4"), jump, tz_offset_min=0)
+    st = [s for s, _ in N.read_back(os.path.join(tmp, "nist_jump.mp4"))["stamps"]]
+    check("a clock that jumps back is marked in that frame's status (discontinuity, reverse)",
+          rj["discontinuities"] == 1 and st[15] == 0xFF and st[14] == N.STATUS_UNLOCKED)
+    rn = N.export(bytes(es), os.path.join(tmp, "nist_nozone.mp4"), times)
+    check("no stated zone: no UTC time stamp and no ClockOffset - marked not Level 0",
+          not rn["level0"] and rn["time_stamps"] == 0 and not rn["clock_offset_box"]
+          and rn["pictures_unchanged"])
+    try:
+        N.export(sc + b"\x40\x01" + rnd.randbytes(20) + sc + b"\x42\x01" + rnd.randbytes(40),
+                 os.path.join(tmp, "nist_h265.mp4"), times)
+        refused = False
+    except ValueError as exc:
+        refused = "H.265" in str(exc)
+    check("H.265 is refused, not re-encoded (Level 0 is H.264)", refused)
+
+    web3 = os.path.join(os.environ.get("VENDOR_SAMPLES", ""), "WEB3.mp4")
+    if os.path.isfile(web3):
+        buf = open(web3, "rb").read()
+        ref = N.read_back(web3)
+        stbl = N._find(buf, [b"moov", b"trak", b"mdia", b"minf", b"stbl"], 0, len(buf))
+        bx = {k: (a, b) for k, a, b in N._walk(buf, *stbl)}
+        n = struct.unpack(">I", buf[bx[b"stsz"][0] + 8:bx[b"stsz"][0] + 12])[0]
+        sizes = struct.unpack(f">{n}I", buf[bx[b"stsz"][0] + 12:bx[b"stsz"][0] + 12 + 4 * n])
+        offs = struct.unpack(f">{n}I", buf[bx[b"stco"][0] + 8:bx[b"stco"][0] + 8 + 4 * n])
+        raw, nist_misb = bytearray(), []
+        for o, s in zip(offs, sizes):
+            p = o
+            while p < o + s:
+                ln = struct.unpack(">I", buf[p:p + 4])[0]
+                nal = buf[p + 4:p + 4 + ln]
+                p += 4 + ln
+                if nal[0] & 0x1F == 6 and N.read_misb(nal):
+                    nist_misb.append(nal)
+                elif not (nal[0] & 0x1F == 6 and nal[3:13] == b"timesource"):
+                    raw += sc + nal
+        wt = [datetime.fromtimestamp(us / 1e6, tz=timezone.utc).replace(tzinfo=None)
+              for _, us in ref["stamps"]]
+        mine = os.path.join(tmp, "web3_again.mp4")
+        rw = N.export(bytes(raw), mine, wt, tz_offset_min=0, clock_set="auto-nonnetwork")
+        mb = open(mine, "rb").read()
+        ours = [mb[m.start() - 3:m.start() + 29] for m in re.finditer(b"MISPmicrosectime", mb)]
+        check("against NIST's own reference file (WEB3.mp4): every MISB time stamp SEI "
+              "byte-identical, pictures unchanged",
+              rw["pictures"] == 355 and ours == nist_misb and rw["pictures_unchanged"],
+              f"{len(ours)} {len(nist_misb)}")
+        ffmpeg = os.environ.get("FFMPEG") or shutil.which("ffmpeg")
+        if ffmpeg:
+            def md5s(path):
+                r = subprocess.run([ffmpeg, "-v", "error", "-i", path, "-fps_mode", "passthrough",
+                                    "-f", "framemd5", "-"], capture_output=True, text=True)
+                return [ln.rsplit(",", 1)[-1].strip() for ln in r.stdout.splitlines()
+                        if ln and not ln.startswith("#")], r.stderr
+            a, err = md5s(mine)
+            b, _ = md5s(web3)
+            check("ffmpeg decodes our export to the same 355 pictures as NIST's, with no error",
+                  a == b and len(a) == 355 and not err.strip(), err[:200])
+    else:
+        print("  [NIST WEB3.mp4] skipped - put WEB3.mp4 in VENDOR_SAMPLES")
+
+
 def test_s63_certificate(tmp: str) -> None:
     """The s.63 certificate draft: the Schedule's wording, the case's own
     hashes and device facts, and nothing said on a person's behalf."""
@@ -3755,6 +3863,7 @@ def main() -> int:
         test_tplink(tmp)
         test_ext4(tmp)
         test_matrix(tmp)
+        test_nist_export(tmp)
         test_s63_certificate(tmp)
         test_real_media_tools(tmp)
         test_ewf(tmp)

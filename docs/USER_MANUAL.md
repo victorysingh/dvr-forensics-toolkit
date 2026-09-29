@@ -276,41 +276,6 @@ and the platter's model strings against the unit. A disagreement is a finding
 to explain, not an error: a Hikvision unit whose disk carries Dahua
 structures is a disk that another recorder formatted.
 
-### 3.4g Uniview, TP-Link and Matrix (plugins)
-
-All three are `plugins/` files, loaded like Honeywell's. Uniview and TP-Link
-rest on the vendors' firmware (VALIDATION_REPORT §8f), Matrix on its own
-documents (§8h). No real disk from any of them has been read yet.
-
-```bash
-# Uniview: recordings per block, with camera and recorder-clock times
-python cli.py parse --vendor Uniview --device /dev/sdb --out out/CASE-001
-python cli.py extract --vendor Uniview --device /dev/sdb --out out/CASE-001 \
-    --recording unv-b00012                     # the block's video, GOPs checked
-python cli.py parse --vendor Uniview --device /dev/sdb --remnants   # GOPs with no index
-
-# TP-Link: scan first, so the index header's offset is passed as a hint
-python cli.py parse --vendor TP-Link --device /dev/sdb --out out/CASE-001
-
-# Matrix: the recording tree on the disk's ext filesystem
-python cli.py parse --vendor Matrix --device /dev/sdb --out out/CASE-001
-python cli.py extract --vendor Matrix --device /dev/sdb --out out/CASE-001 \
-    --recording mtx-camera01-20180421-144719-s1  # the .stm and sidecars as stored
-```
-
-- **Uniview.** Each recording is one 256 MiB block of one camera. `--remnants`
-  walks every block for GOPs by their own trailers, index or not; runs past
-  a block's write position are named `unv-stale-*` (older footage).
-- **TP-Link.** The summary says whether the index was read, or found and not
-  readable (encrypted). When read: recordings per camera and the recorder's
-  system log, as the index states them. No footage is placed on the disk -
-  use `carve-annexb` (§3.4f).
-- **Matrix** (from Matrix's documents, VALIDATION_REPORT §8h). One recording
-  per `.stm` file, with camera, date and times from the recorder's own folder
-  and file names. The `.stm` is extracted as stored - its format is not
-  published; Matrix's Device Player converts it. The summary names any
-  filesystem it could not read (XFS, a striped RAID member).
-
 ### 3.4f Footage from a recorder we have no parser for
 
 When detection names a vendor with no parser (Godrej), or
@@ -462,6 +427,66 @@ report's section 6d lists them, with the log's power, disk and user records.
 ```bash
 python cli.py timeline --out out/CASE-001 && python cli.py report --out out/CASE-001
 ```
+
+### 3.4l Uniview, TP-Link and Matrix (plugins)
+
+All three are `plugins/` files, loaded like Honeywell's. Uniview and TP-Link
+rest on the vendors' firmware (VALIDATION_REPORT §8f), Matrix on its own
+documents (§8h). No real disk from any of them has been read yet.
+
+```bash
+# Uniview: recordings per block, with camera and recorder-clock times
+python cli.py parse --vendor Uniview --device /dev/sdb --out out/CASE-001
+python cli.py extract --vendor Uniview --device /dev/sdb --out out/CASE-001 \
+    --recording unv-b00012                     # the block's video, GOPs checked
+python cli.py parse --vendor Uniview --device /dev/sdb --remnants   # GOPs with no index
+
+# TP-Link: scan first, so the index header's offset is passed as a hint
+python cli.py parse --vendor TP-Link --device /dev/sdb --out out/CASE-001
+
+# Matrix: the recording tree on the disk's ext filesystem
+python cli.py parse --vendor Matrix --device /dev/sdb --out out/CASE-001
+python cli.py extract --vendor Matrix --device /dev/sdb --out out/CASE-001 \
+    --recording mtx-camera01-20180421-144719-s1  # the .stm and sidecars as stored
+```
+
+- **Uniview.** Each recording is one 256 MiB block of one camera. `--remnants`
+  walks every block for GOPs by their own trailers, index or not; runs past
+  a block's write position are named `unv-stale-*` (older footage).
+- **TP-Link.** The summary says whether the index was read, or found and not
+  readable (encrypted). When read: recordings per camera and the recorder's
+  system log, as the index states them. No footage is placed on the disk -
+  use `carve-annexb` (§3.4f).
+- **Matrix** (from Matrix's documents, VALIDATION_REPORT §8h). One recording
+  per `.stm` file, with camera, date and times from the recorder's own folder
+  and file names. The `.stm` is extracted as stored - its format is not
+  published; Matrix's Device Player converts it. The summary names any
+  filesystem it could not read (XFS, a striped RAID member).
+
+### 3.4m Export in NIST's CCTV profile (NISTIR 8161 Level 0)
+
+For exchange with other agencies and tools: an extracted H.264 stream as an
+MP4 with UTC time stamps in every frame and the clock offset in the file
+(VALIDATION_REPORT §8i). Nothing is re-encoded.
+
+```bash
+python cli.py export-nist --es out/CASE-001/hw-ch00-main-0000.h264 --out out/CASE-001 \
+    --start "2024-09-21 18:58:00" --fps 25 \
+    --tz-offset 330 --clock-observed "2024-09-21 19:00:27" \
+    --clock-reference "2024-09-21 19:01:05" --clock-set manual-unknown
+```
+
+- `--start` is the first picture's time on the recorder's clock (from the
+  parse or extract manifest); `--times FILE` gives one time per picture
+  instead of `--fps`.
+- `--tz-offset` and the two clock readings come from the field visit (SOP
+  1.2). Without `--tz-offset`, no UTC time stamp is written and the file is
+  marked **not Level 0**: the tool does not guess a zone.
+- `--clock-set` is how the recorder's clock was set, from its time settings
+  screen: `auto-network` if it uses NTP, otherwise `manual-*`.
+- The manifest beside the MP4 records the input's hash, the clock rule, and
+  proof that every picture is unchanged. The export is logged in the
+  custody ledger.
 
 ### 3.5 Look at the results
 
