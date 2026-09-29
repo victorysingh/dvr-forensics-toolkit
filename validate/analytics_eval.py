@@ -1,6 +1,7 @@
 """How often the analytics layer is right, on real footage, against labels.
 
-    python -m validate.analytics_eval sample CLIP [CLIP ...] --out DIR [--frames 200 | --fps 2] [--tiles 3]
+    python -m validate.analytics_eval sample CLIP [CLIP ...] --out DIR [--frames 200 | --fps 2]
+                                            [--models yolox|classic] [--tiles N]
     #   ... fill in DIR/labels.csv: person, face, vehicle as y or n ...
     python -m validate.analytics_eval score DIR
     python -m validate.analytics_eval sweep DIR     # would another threshold do better?
@@ -19,11 +20,11 @@ this frame" when someone is?
           recording, day and night - keeps --frames of them evenly (or, with
           --fps, takes every clip at that rate: short clips have few
           keyframes), and runs both detectors exactly as the tool does: the
-          same tiling (--tiles; the object model on a 1920 x 1080 decode,
-          the face model on 640 x 360), the same thresholds, and the same
-          static and implausible-box rules (analytics/static.py), applied
-          per clip.  It also keeps every box down to the lowest thresholds
-          in SWEEP, for `sweep`.
+          same models, decode size, tiling and thresholds (--models,
+          --tiles; analytics/models.py), and the same static and
+          implausible-box rules (analytics/static.py), applied per clip.
+          It also keeps every box down to the lowest thresholds in SWEEP,
+          for `sweep`.
           It writes frames/NNN.jpg (the plain frame, no boxes drawn, so the
           labelling is not led by the detector), sheets/SS.jpg (4 x 4 contact
           sheets of those frames, in order, left to right), detections.json,
@@ -119,18 +120,21 @@ def keyframes(clip: str, every: int = 1, w: int | None = None, h: int | None = N
 
 
 def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=print,
-           tiles: int | None = None) -> dict:
+           tiles: int | None = None, model_set: str | None = None) -> dict:
     """Frames from one clip or several, both detectors run on each, as the
-    tool runs them (`tiles` x `tiles` tiles, by default the tool's).  With
+    tool runs them (`model_set` and `tiles`, by default the tool's).  With
     `fps`, every clip is sampled at that rate; without, keyframes are spread
     evenly to `frames` per clip."""
     from analytics import detect
     clips = [clips] if isinstance(clips, str) else list(clips)
-    models = detect.load_models()
-    tiles = detect.TILES if tiles is None else tiles
-    scale = detect.OBJECT_SCALE if tiles > 1 else 1
+    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS
+    model_set = model_set or DEFAULT_SET
+    models = detect.load_models(model_set)
+    ms = MODEL_SETS[model_set]
+    tiles = ms["tiles"] if tiles is None else tiles
+    scale = detect.scale_for(model_set, tiles)
     w, h = detect.DECODE_W * scale, detect.DECODE_H * scale
-    tool = (detect.FACE_MIN, detect.OBJECT_MIN)
+    tool = (ms["faces_min"], ms["objects_min"])
     low = (min(SWEEP["face"]), min(SWEEP["objects"]))
     os.makedirs(os.path.join(out, "frames"), exist_ok=True)
     rows, hits, per_clip, n = [], [], [], 0
@@ -157,11 +161,8 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
             name = f"{n:03d}.jpg"
             rgb = detect.shrink(big, scale)
             detect._thumbnail(rgb, [], os.path.join(out, "frames", name))
-            try:                    # every box down to SWEEP's lowest; the tool's are a subset
-                detect.FACE_MIN, detect.OBJECT_MIN = low
-                any_score = detect.detect_frame(models, rgb, big, tiles)
-            finally:
-                detect.FACE_MIN, detect.OBJECT_MIN = tool
+            # every box down to SWEEP's lowest; the tool's are a subset
+            any_score = detect.detect_frame(models, rgb, big, tiles, low)
             dets = [dict(d) for d in any_score
                     if d["score"] >= (tool[0] if d["label"] == "face" else tool[1])]
             x = {"frame": n, "clip": ci, "index": idx, "detections": dets, "any_score": any_score}
@@ -194,11 +195,11 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
         wr.writeheader()
         wr.writerows(rows)
     res = {"clips": per_clip, "frames": n,
-           "models": {k: m["sha256"] for k, m in detect.MODELS.items()},
-           "thresholds": {"face": detect.FACE_MIN, "objects": detect.OBJECT_MIN},
+           "model_set": model_set,
+           "models": {job: MODELS[ms[job]]["sha256"] for job in ("faces", "objects")},
+           "thresholds": {"faces": tool[0], "objects": tool[1]},
            "any_score_down_to": {"face": low[0], "objects": low[1]},
-           "tiles": tiles, "decoded_at": {"objects": f"{w} x {h}",
-                                          "faces": f"{detect.DECODE_W} x {detect.DECODE_H}"},
+           "tiles": tiles, "decoded_at": f"{w} x {h}",
            "detections": hits}
     with open(os.path.join(out, "detections.json"), "w", encoding="utf-8") as fh:
         json.dump(res, fh, indent=1)
@@ -332,15 +333,17 @@ def main() -> int:
     s.add_argument("--frames", type=int, default=200, help="keyframes kept per clip")
     s.add_argument("--fps", type=float, default=None,
                    help="sample every clip at this rate instead (short clips)")
+    s.add_argument("--models", default=None, choices=("yolox", "classic"),
+                   help="model set as the tool runs it (default the tool's)")
     s.add_argument("--tiles", type=int, default=None,
-                   help="n x n tiles as the tool runs them (default the tool's; 1 = untiled)")
+                   help="n x n tiles as the tool runs them (default the set's; 1 = untiled)")
     sc = sub.add_parser("score")
     sc.add_argument("out")
     sw = sub.add_parser("sweep")
     sw.add_argument("out")
     a = ap.parse_args()
     if a.cmd == "sample":
-        sample(a.clip, a.out, a.frames, a.fps, tiles=a.tiles)
+        sample(a.clip, a.out, a.frames, a.fps, tiles=a.tiles, model_set=a.models)
         return 0
     if a.cmd == "sweep":
         res = sweep(a.out)

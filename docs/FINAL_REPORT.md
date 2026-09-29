@@ -75,7 +75,7 @@ that holds media for two or three. So the project was built around one rule:
 | **Confidence, never yes/no** | CP Plus units are commonly Dahua-built; a disk has evidence that scores, not a vendor | `detect/engine.py` |
 | **Split, never guess** | carved footage whose camera cannot be told apart is split, never merged | `recover/carver.py`, `recover/annexb.py` |
 | **No UTC without stated inputs** | recorders keep local time on unaudited clocks | `analyse/timeline.py::ClockModel`, `analyse/combined.py` |
-| **Analytics are leads, not evidence** | a detector scored a steel pot as a face at 0.99; scored against 287 labelled real frames it found a person in 0 of 57 untiled, 24 of 57 tiled (1 false alarm) | `analytics/`, `analyse/activity.py` |
+| **Analytics are leads, not evidence** | a detector scored a steel pot as a face at 0.99; scored against 287 labelled real frames it first found a person in 0 of 57; now in 32 of 57, and 777 of 1,089 people on CAVIAR footage never used for choosing | `analytics/`, `analyse/activity.py` |
 | **Stdlib-only forensic core** | auditable, and runs air-gapped on a bare Python install | `TECH_STACK.md` |
 
 ## 3. Architecture
@@ -147,7 +147,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 539 in all: 516 on generated data with known ground
+- **Automated tests:** 544 in all: 521 on generated data with known ground
   truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -341,16 +341,19 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   share the same settings. That is this tool's limit, not the field's:
   CARVE (DFRWS APAC 2026) does it by OCR of the painted camera label or by
   PRNU sensor noise.
-- **The analytics still miss over half the people.** Scored against 287
-  frames of real recorder footage labelled by eye, the tool first reported a
-  person in 0 of the 57 frames that had one. The object model shrinks each
-  picture to 300 x 300, so small people vanish. It now also runs on a 3 x 3
-  grid of tiles and finds a person in 24 of 57, faces in 11 of 27 and
-  vehicles in 5 of 12. That costs 1 false alarm in 230 frames and about 9
-  times the model time. It still misses distorted and distant people, and
-  the static rule, which removes a steel pot or a shrub, also removes a
-  person who sits still. A lead is worth reviewing; an empty list proves
-  nothing (`VALIDATION_REPORT.md` §8a).
+- **The analytics still miss people.** Scored against 287 frames of real
+  recorder footage labelled by eye, the first version reported a person in 0
+  of the 57 frames that had one.
+  - It now runs YOLOX-S on the whole frame and a 2 x 2 grid of tiles, and
+    YuNet for faces. It finds a person in 32 of 57, faces in 12 of 27 and
+    vehicles in 8 of 12.
+  - On CAVIAR CCTV footage that played no part in any choice, it finds 777
+    of 1,089 labelled people, against 543 for the previous tiled models.
+  - Its 5 false alarms are all one moment: a hand holding a board up to the
+    lens.
+  - It still misses distorted and distant people.
+  - A lead is worth reviewing; an empty list proves nothing
+    (`VALIDATION_REPORT.md` §8a).
 - **On fast media the single pass is CPU-bound.**
 - **The 23 Sep gaps on drive 1** may be the team's own handling of the unit
   (the 21 Sep gap is a restart the unit's own log records).

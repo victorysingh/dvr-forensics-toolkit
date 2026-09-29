@@ -18,14 +18,14 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 539 pass, 0 fail: 516 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 544 pass, 0 fail: 521 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
-| Analytics (optional) | scored against 487 frames labelled by eye (§8a). Untiled, **no false alarm** in any class, but a person reported in **0 of the 57 frames** that had one. Tiled (now the default): a person in **24 of 57**, faces 11 of 27, vehicles 5 of 12, for 1 false alarm in 230 frames (a shrub) and about 9 times the model time. A lead is worth reviewing; an empty list still proves nothing |
+| Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles): a person in **32 of 57**, faces 12 of 27, vehicles 8 of 12; on CAVIAR **777 of 1,089** labelled people (the previous tiled models: 543). False alarms: 5 frames, all a hand holding a board up to the lens. A lead is worth reviewing; an empty list still proves nothing |
 | OSD reader (optional) | rules and orchestration tested (§8c); **OCR accuracy not measured** — never yet run on a rendered frame |
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
@@ -492,6 +492,116 @@ differ), and scores 0 of 57 people again. For triage of long footage, use
 contain people. The 24 people found come from two clips. This measures
 the direction and rough size of the gain; it does not predict recall on
 other cameras.
+
+### Better models, checked on footage never used for choosing (29 Sep)
+
+**Why.** SSD-MobileNet v1 (2017) and UltraFace are small, old models. Even
+tiled, the tool found a person in 24 of 57 frames. And every choice so far
+(the tiling, the resolution) was made on the same 287 frames it was scored
+on.
+
+**What was tried**, with the same frames, labels and rules:
+- For objects: YOLOX-S and YOLOX-Tiny (Megvii, Apache-2.0), on the whole
+  frame and with 2 x 2 and 3 x 3 tiles.
+- For faces: YuNet (OpenCV Zoo, MIT), on the 640 x 360 frame and on the
+  1920 x 1080 frame.
+- Every model file is pinned by SHA-256 (`analytics/models.py`), and
+  `analytics/fetch_models.py` fetches and checks them.
+
+**A second test set: CAVIAR.**
+- Six clips of real CCTV from the EC-funded CAVIAR project (IST 2001 37540,
+  CC BY-SA, https://homepages.inf.ed.ac.uk/rbf/CAVIAR/):
+  - three from the INRIA lobby, a wide-angle camera looking down
+  - three from a shopping-centre corridor
+- Every person is boxed by hand in CAVIAR's own ground truth.
+- One frame a second: 269 frames with 1,089 labelled people.
+- **It played no part in any choice**; it only checks them.
+- `python -m validate.caviar_eval DIR` reproduces it.
+
+Results as the tool reports them (static and implausible rules applied),
+threshold 0.5. Each set-A cell gives frames found, then false alarms:
+
+| Model set | Set A: person (of 57) | face (of 27) | vehicle (of 12) | CAVIAR: people found (of 1,089) | by height: under 40 px / 40-80 / 80+ | CAVIAR: person in a frame with nobody labelled | Model time per frame |
+|---|---|---|---|---|---|---|---|
+| Classic, untiled (28 Sep) | 0 · 0 | 3 · 0 | 4 · 0 | 341 | 0 / 134 / 207 | 1 of 11 | 0.05 s |
+| Classic, 3 x 3 tiles (above) | 24 · 1 | 11 · 0 | 5 · 0 | 543 | 19 / 297 / 227 | 4 of 11 | 0.40 s |
+| **YOLOX-S + YuNet, 2 x 2 tiles (new default)** | **32 · 5** | **12 · 0** | **8 · 0** | **777** | **74 / 465 / 238** | 2 of 11 | 0.62 s |
+| YOLOX-S + YuNet, whole frame (`--tiles 1`) | 10 · 4 | 12 · 0 | 8 · 0 | 752 | 68 / 446 / 238 | 0 of 11 | 0.24 s |
+
+(The height bins hold 297, 536 and 256 people.) The model times are from the
+comparison run on the team's laptop CPU.
+
+Variants tried and not adopted:
+- YOLOX-S with 3 x 3 tiles: 22 of 57 people, with 37 vehicle false alarms.
+- YOLOX-Tiny with 3 x 3 tiles: 31 of 57 people, with 6 person and 6
+  vehicle false alarms; 745 people on CAVIAR.
+- YuNet on 640 x 360: at most 11 of 27 faces, and none above 0.8.
+
+What the numbers say:
+- **On CAVIAR, YOLOX-S finds 777 of 1,089 people, against 543.** The gain
+  is in small and mid-sized people: 74 against 19 under 40 px, and 465
+  against 297 at 40-80 px. Even untiled it finds 752, in 0.24 s a frame.
+- **On set A** it finds people in 32 of 57 frames (24 before), vehicles in
+  8 of 12 (5) and faces in 12 of 27 (11).
+  - The seated Amcrest pair is found in 14 of 15 frames (4 before). YOLOX's
+    boxes on them vary enough from frame to frame that the static rule no
+    longer removes them.
+  - The fisheye: 18 of 39 (20 before).
+- The roadside shrub is no longer taken for a person.
+- **The 5 false alarms on set A are one moment:** a hand holding a test
+  board up to the Swann lens (4.0-5.0 s). YOLOX boxes the arm as a person.
+  By the labelling rule a hand alone is not a person, so these count
+  against the tool, although a person is there.
+- **A false alarm on CAVIAR:** the INRIA reception desk with its armchairs
+  is boxed as a person in some frames, including 2 of the 11 frames with
+  nobody labelled.
+  - Its box changes size enough to escape the static rule.
+  - Loosening the rule does not catch it, and it drops the seated pair on
+    set A (32 found becomes 22). So the rule is unchanged.
+- **Boxes that match no labelled person on CAVIAR:** 40, against 14 for the
+  tiled classic set. Looked at by eye, most are real people:
+  - a head boxed separately when a tile edge cuts a person
+  - someone CAVIAR did not label, e.g. a head entering at the bottom edge
+
+  The rest are the reception desk.
+- **Faces:** YuNet finds about as many as tiled UltraFace (12 against 11 of
+  27, with no false alarm), but it is cleaner before any rule.
+  - At its threshold, YuNet said "face" in no frame without one. UltraFace
+    did in 58 frames (the fisheye's bright centre), which the
+    implausible-box rule then removes.
+  - On the second drive UltraFace boxed floors and buckets as faces (§8a
+    above). YuNet has not been run there.
+
+**Thresholds.**
+- Objects stay at 0.5, the tool's standing value.
+- YuNet's 0.7 was chosen on set A, the only set with face labels (0.6: 13
+  found and 1 false alarm; 0.8: 10 found).
+- YOLOX's person false alarms do not rise as the threshold falls: 5 from
+  0.2 to 0.5, the hand again. At 0.4 the tool would find 39 of 57 people on
+  set A and 810 of 1,089 on CAVIAR, with no more frames falsely flagged on
+  either.
+- Vehicles at 0.4 raise 5 false alarms on set A. **A per-class threshold
+  (people at 0.4) is the next step**, and both sets support it.
+
+**Reproducing.**
+- `python -m validate.analytics_eval sample ... --models yolox`, then
+  `score`, gives set A.
+- `--models classic --tiles 3` gives the tiled result above on 286 of 287
+  frames identically. The 287th is the last frame of `dav-sample.dav`, which
+  is damaged ("error while decoding MB 75 25"). ffmpeg conceals the damage
+  differently on every decode (5 decodes gave 5 different pictures), so its
+  boxes move slightly.
+- `python -m validate.caviar_eval DIR` gives CAVIAR.
+
+**Cost.** The whole 287-frame run took 138 s including decoding (the
+tiled classic set: 71 s).
+
+**Limits.**
+- CAVIAR is 2004 footage at 384 x 288, upscaled, and its labels miss some
+  people.
+- Set A has people in only three clips.
+- Neither set is from an Indian recorder, and these models have not been
+  run on the team's drives.
 
 ### On our own drive (29 Sep - sampled, labels pending)
 
