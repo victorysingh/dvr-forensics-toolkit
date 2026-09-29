@@ -18,14 +18,14 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 531 pass, 0 fail: 508 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 539 pass, 0 fail: 516 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
-| Analytics (optional) | scored against 487 frames labelled by eye (§8a): **no false alarm** in any class, but a person reported in **0 of the 57 frames** that had one; faces 3 of 27, vehicles 4 of 12. A lead is worth reviewing; an empty list proves nothing |
+| Analytics (optional) | scored against 487 frames labelled by eye (§8a). Untiled, **no false alarm** in any class, but a person reported in **0 of the 57 frames** that had one. Tiled (now the default): a person in **24 of 57**, faces 11 of 27, vehicles 5 of 12, for 1 false alarm in 230 frames (a shrub) and about 9 times the model time. A lead is worth reviewing; an empty list still proves nothing |
 | OSD reader (optional) | rules and orchestration tested (§8c); **OCR accuracy not measured** — never yet run on a rendered frame |
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
@@ -396,6 +396,102 @@ What this shows:
 **What changed:** the report's analytics section (§6b) and the notes in
 `analytics.json` now state that an empty list does not mean nobody was there.
 The static note no longer claims that static flags only objects.
+
+### Small people found by tiling (29 Sep)
+
+**Why the people were missed.** The object model shrinks every picture it is
+given to 300 x 300. A person 60 pixels tall in a 1080p picture is then 17
+pixels tall, and the fisheye clip's people are smaller still.
+
+**The change** (`analytics/tiles.py`, `analytics/detect.py`):
+- Each model runs on the whole frame, as before, and also on each tile of a
+  3 x 3 grid of overlapping tiles. Each tile shares a fifth of its width or
+  height with its neighbour.
+- The boxes are mapped back to the whole frame. Where two tiles box the same
+  object (same label, overlap 0.5 or more), the stronger box is kept.
+- The object model reads a 1920 x 1080 decode (3 x 640 x 360). The face
+  model reads the 640 x 360 frame, the mean of each 3 x 3 pixel block.
+- The thresholds and both rules are unchanged.
+
+**How it was chosen**, on the same 287 frames, labels, models, thresholds
+and rules (native resolution is capped at 1920 wide). Each cell gives
+frames found, then false alarms:
+
+| Variant | Person (of 57) | Face (of 27) | Vehicle (of 12) |
+|---|---|---|---|
+| Untiled, 640 x 360 (above) | 0 · 0 | 3 · 0 | 4 · 0 |
+| 3 x 3 tiles, 640 x 360 | 13 · 0 | 11 · 0 | 5 · 0 |
+| 2 x 2 tiles, native resolution | 15 · 0 | 10 · **27** | 4 · 0 |
+| 3 x 3 tiles, 1280 x 720 | 22 · 0 | 10 · 6 | 5 · 1 |
+| 3 x 3 tiles, native resolution | 25 · 0 | 13 · 5 | 5 · 0 |
+| **Chosen: objects 1920 x 1080, faces 640 x 360, 3 x 3** | **24 · 1** | **11 · 0** | **5 · 0** |
+
+- Resolution helps the object model: 13 people at 640 x 360, 25 at native
+  resolution.
+- It hurts the face model: at higher resolution, tiled faces raised false
+  alarms (5 to 27).
+- The chosen row was measured with the tool itself (`sample`, then
+  `score`). The others were measured with an experiment script using the same
+  models, frames and rules.
+- The grid and the two resolutions were picked on these labels, so the
+  chosen row is somewhat optimistic. No threshold was changed.
+
+**The score as the tool now reports it:**
+
+| Class | Frames found (recall) | False alarms | Precision |
+|---|---|---|---|
+| Person | **24 of 57** (42%) | 1 of 230 | 24 of 25 |
+| Face | 11 of 27 (41%) | 0 of 260 | 11 of 11 |
+| Vehicle | 5 of 12 (42%) | 0 of 275 | 5 of 5 |
+
+What was found, and what still is not:
+- **Fisheye, people seen from above:** 20 of 39 frames, up from 0. Still
+  missed: heads at the picture's edge, a head seen from directly above, and
+  the people on the floor below, small and distorted.
+- **Amcrest studio:** faces in 11 of 15 frames, up from 3; people in 4. The
+  model boxes the seated pair in 4 more frames, and **the static rule still
+  removes them because they sit still**.
+- **Lorex, the driver behind the truck's side window:** still missed. The
+  only "person" in those frames is the roadside shrub, flagged static.
+- **Faces in the fisheye:** the man looking up into the lens still gets no
+  box on his face.
+- **Vehicles:** the passing truck is found in 5 of 6 frames, up from 4. The
+  parked cars at night are still missed in all 6.
+- **The one false alarm** is the same roadside shrub. The static rule
+  removes it in the Swann clip's other frames, but in this frame (a
+  whiteboard held up to the lens) its box sat in a different place.
+
+**Lower thresholds.** `sweep` now scores the boxes that `sample` kept at low
+scores. These are exactly the boxes the tool would report at each threshold:
+a box is only ever dropped for a stronger one. The sweep no longer re-runs
+the models on JPEG copies; the sweep above agreed with the original decode
+on 251 of 287 frames. Tiled, as reported:
+
+| Person threshold | Found | False alarms |
+|---|---|---|
+| 0.3 (the model returns nothing lower) | 42 of 57 | 6 |
+| 0.4 | 35 of 57 | 0 |
+| **0.5 (the tool's)** | **24 of 57** | **1** |
+| 0.6 | 19 of 57 | 13 |
+
+At 0.4 the tool would find 35 people with no false alarm. **The threshold
+was left at 0.5.** Choosing 0.4 on the same labels it would be judged by is
+fitting the test. It needs a second labelled set first.
+
+Faces at 0.7 find 12 of 27 with 4 false alarms. Vehicles at 0.4 find 7 of
+12 with 5 false alarms. Both keep their thresholds.
+
+**Cost.** Tiling costs about 9 times the model time per frame: 2.2 s against
+0.24 s on the team's laptop CPU, measured while other work was running.
+`analyse-video --tiles 1` is the untiled tool, box for box. On these 287
+frames it reproduces the earlier run's detections exactly (0 of 287 frames
+differ), and scores 0 of 57 people again. For triage of long footage, use
+`--tiles 1` or a lower `--fps`, then run tiled on the stretches that matter.
+
+**Limits.** Six clips, labelled by one person, and only three of them
+contain people. The 24 people found come from two clips. This measures
+the direction and rough size of the gain; it does not predict recall on
+other cameras.
 
 ## 8b. Second drive: Hikvision footage under a Dahua-family format
 

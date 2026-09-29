@@ -11,6 +11,10 @@ runs two small ONNX models on each sampled frame:
   * UltraFace RFB-320 - face DETECTION. It finds that a face is present and
     where. It does not identify anyone; there is no recognition here.
   * SSD-MobileNet v1 (COCO) - people, vehicles and carried objects.
+Each runs on the whole frame and on each tile of a 3 x 3 grid of overlapping
+tiles (analytics/tiles.py): the object model on a 1920 x 1080 decode, the
+face model on a 640 x 360 one. Without the tiles the object model saw a
+person in none of 57 labelled frames that had one.
 
 Everything it outputs is a LEAD, NOT EVIDENCE: a ranked list of moments for
 an examiner to watch. Detector confidence is the model's score, not a
@@ -31,6 +35,7 @@ import onnxruntime as ort
 
 from analytics.static import (STATIC_IOU, STATIC_MIN_FRAMES, STATIC_SHARE, counted,
                               flag_implausible, flag_static)
+from analytics.tiles import TILE_OVERLAP, TILES, merge, tiles, to_frame
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS = {
@@ -52,7 +57,12 @@ COCO = {1: "person", 2: "bicycle", 3: "car", 4: "motorcycle", 6: "bus", 8: "truc
 FACE_MIN = 0.8
 OBJECT_MIN = 0.5
 DECODE_W, DECODE_H = 640, 360
-ANALYTICS_RULE = "analytics.ultraface_ssdmobilenet.v1"
+# With tiles, the object model reads a decode this many times the size of
+# the 640 x 360 one (1920 x 1080): on the labelled frames it found people in
+# nearly twice as many frames from it as from 640 x 360 tiles.  Faces stay on
+# the 640 x 360 frame, where tiled faces raised no false alarm.
+OBJECT_SCALE = 3
+ANALYTICS_RULE = "analytics.ultraface_ssdmobilenet.v2"      # v2: tiled
 
 
 def sha256_file(path: str) -> str:
@@ -81,23 +91,34 @@ def load_models() -> dict:
     return out
 
 
-def decode(path: str, fps: float, codec: str = "hevc"):
-    """Yield (seconds from the first decoded frame, RGB frame) at `fps`."""
+def decode(path: str, fps: float, codec: str = "hevc", scale: int = 1):
+    """Yield (seconds from the first decoded frame, RGB frame) at `fps`, the
+    frame `scale` times DECODE_W x DECODE_H."""
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg not found - install it to use the analytics layer")
     fmt = ["-f", codec] if codec else []          # PS: let ffmpeg detect the container
+    w, h = DECODE_W * scale, DECODE_H * scale
     cmd = ["ffmpeg", "-v", "quiet", *fmt, "-i", path,
-           "-vf", f"fps={fps},scale={DECODE_W}:{DECODE_H}",
+           "-vf", f"fps={fps},scale={w}:{h}",
            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-    n = DECODE_W * DECODE_H * 3
+    n = w * h * 3
     with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
         i = 0
         while True:
             buf = p.stdout.read(n)
             if len(buf) < n:
                 break
-            yield i / fps, np.frombuffer(buf, np.uint8).reshape(DECODE_H, DECODE_W, 3)
+            yield i / fps, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
             i += 1
+
+
+def shrink(rgb: np.ndarray, k: int) -> np.ndarray:
+    """The frame 1/k the size, each pixel the mean of a k x k block."""
+    if k == 1:
+        return rgb
+    h, w = rgb.shape[0] // k, rgb.shape[1] // k
+    rows = rgb[:h * k, :w * k].reshape(h, k, w * k, 3).sum(axis=1, dtype=np.uint16)
+    return (rows.reshape(h, w, k, 3).sum(axis=2, dtype=np.uint16) // (k * k)).astype(np.uint8)
 
 
 def _nms(boxes: np.ndarray, scores: np.ndarray, iou: float = 0.3) -> list[int]:
@@ -144,6 +165,31 @@ def objects(sess, rgb: np.ndarray) -> list[dict]:
     return out
 
 
+def _tiled(detector, sess, rgb: np.ndarray, n: int) -> list[dict]:
+    """`detector` on the whole frame and on each tile of an n x n grid, boxes
+    in whole-frame coordinates."""
+    out = detector(sess, rgb)
+    if n > 1:
+        h, w = rgb.shape[:2]
+        for t in tiles(w, h, n, TILE_OVERLAP):
+            x, y, tw, th = t
+            for d in detector(sess, np.ascontiguousarray(rgb[y:y + th, x:x + tw])):
+                d["box"] = to_frame(d["box"], t, w, h)
+                out.append(d)
+    return out
+
+
+def detect_frame(models: dict, small: np.ndarray, big: Optional[np.ndarray] = None,
+                 n: int = TILES) -> list[dict]:
+    """Faces in `small` (DECODE_W x DECODE_H) and objects in `big` (the same
+    frame, larger; by default `small`), each on the whole frame and, with
+    n > 1, on each tile of an n x n grid, the same object boxed in two
+    overlapping tiles merged.  With n = 1 this is the untiled tool, exactly."""
+    big = small if big is None else big
+    found = _tiled(faces, models["face"], small, n) + _tiled(objects, models["objects"], big, n)
+    return found if n == 1 else merge(found)
+
+
 def _thumbnail(rgb: np.ndarray, dets: list[dict], path: str) -> None:
     """Frame with boxes drawn, as JPEG via ffmpeg (PPM in, no image library)."""
     img = rgb.copy()
@@ -164,14 +210,16 @@ def _thumbnail(rgb: np.ndarray, dets: list[dict], path: str) -> None:
 
 
 def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
-                 max_thumbs: int = 6, codec: str = "hevc") -> dict:
+                 max_thumbs: int = 6, codec: str = "hevc", tiles_n: int = TILES) -> dict:
     frames = 0
     hits = []
-    for t, rgb in decode(path, fps, codec):
+    scale = OBJECT_SCALE if tiles_n > 1 else 1
+    for t, rgb in decode(path, fps, codec, scale):
         frames += 1
-        dets = faces(models["face"], rgb) + objects(models["objects"], rgb)
+        small = shrink(rgb, scale)
+        dets = detect_frame(models, small, rgb, tiles_n)
         if dets:
-            hits.append({"t_s": round(t, 2), "detections": dets, "_rgb": rgb})
+            hits.append({"t_s": round(t, 2), "detections": dets, "_rgb": small})
     flag_static(hits, frames)
     flag_implausible(hits)
     counts: dict[str, int] = {}
@@ -202,13 +250,14 @@ def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
             "detections": hits, "thumbnails": thumbs}
 
 
-def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print) -> dict:
+def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
+        tiles_n: int = TILES) -> dict:
     models = load_models()
     thumbs = os.path.join(out_dir, "thumbnails")
     results = []
     for i, c in enumerate(clips):
         codec = "h264" if c.endswith(".h264") else ("" if c.endswith(".ps") else "hevc")
-        r = analyse_clip(models, c, fps, thumbs, codec=codec)
+        r = analyse_clip(models, c, fps, thumbs, codec=codec, tiles_n=tiles_n)
         results.append(r)
         log(f"  [{i + 1}/{len(clips)}] {r['clip']}  {r['frames_analysed']} frames  "
             + (", ".join(f"{k} {v}" for k, v in sorted(r["frames_with"].items())) or "nothing"))
@@ -224,6 +273,12 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print) -> dict:
         "models": {k: {x: m[x] for x in ("name", "source", "license", "sha256")}
                    for k, m in MODELS.items()},
         "thresholds": {"face": FACE_MIN, "objects": OBJECT_MIN},
+        "tiling": ({"grid": f"{tiles_n} x {tiles_n} tiles and the whole frame",
+                    "overlap": TILE_OVERLAP,
+                    "objects_decoded_at": f"{DECODE_W * OBJECT_SCALE} x {DECODE_H * OBJECT_SCALE}",
+                    "faces_decoded_at": f"{DECODE_W} x {DECODE_H}"}
+                   if tiles_n > 1 else
+                   {"grid": "none, the whole frame only", "decoded_at": f"{DECODE_W} x {DECODE_H}"}),
         "sample_fps": fps, "clips": results, "frames_with_totals": totals,
         "static_totals": static_totals,
         "static_rule": f"same label, box IoU >= {STATIC_IOU}, in >= {STATIC_MIN_FRAMES} frames "
@@ -238,9 +293,9 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print) -> dict:
             "recorder timestamp.",
             "Every detection is a lead for an examiner to review in the footage itself.",
             "An empty result does not mean nobody was there. Scored against 287 frames "
-            "of real recorder footage labelled by eye, the tool raised no false alarm but "
-            "reported a person in none of the 57 frames that had one "
-            "(docs/VALIDATION_REPORT.md section 8a).",
+            "of real recorder footage labelled by eye, the tool reported a person in 24 "
+            "of the 57 frames that had one, tiled, with 1 false alarm in 230; untiled, "
+            "in none (docs/VALIDATION_REPORT.md section 8a).",
             "Detections that stay in the same place through most of a clip are flagged "
             "'static' and not counted: on real footage a steel pot was repeatedly detected "
             "as a face. Static means the box did not move - usually an object mistaken for "
