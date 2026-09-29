@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 531 pass, 0 fail: 510 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 7 on vendor-made files: 5 from other recorders (§8g) and 2 on NIST's reference export (§8i) |
+| Automated tests | 534 pass, 0 fail: 512 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 7 on vendor-made files: 5 from other recorders (§8g) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -643,6 +643,13 @@ places every `00 00 01` in the 806 written files by the parser.
   measured on real media, but the streams it made here are not any one
   camera's footage.
 
+**Named by a scan** (29 Sep). The disk carries no brand string, so until
+now a scan reported no vendor for it although the parser read it. The plugin
+now declares signatures for the recorder's own structures, all in the first
+11 MB: its system partition's mount point `/root/rec/a1` (ext3 superblock)
+and the schemas of its event log and recording index. A scan of the first
+16 MiB names **HeimVision at 98-99.5%**, with its parser available.
+
 **Checked against FTK Imager's own reading of the disk** (29 Sep,
 `python -m validate.ftk_listing IMAGE.E01 LISTING.csv`). The image ships with
 the file listing FTK Imager 4.3.1.1 made when it was acquired
@@ -931,6 +938,48 @@ With this, all eight named OEMs have a plugin. Three are read from real media
 Three come from the vendors' own firmware (Uniview; TP-Link's index; Godrej
 via Qualvision) and one from the vendor's own documents (Matrix). Only the
 first three are observed; none is `validated`.
+
+## 8k. Dress rehearsal from the packaged executable (29 Sep)
+
+The whole workflow, run as an examiner would run it: from `ps26150-dvr.exe`
+(built from this branch; no Python on the path), on two real inputs.
+
+**A. NIST HeimVision image (E01, 139.74 GB)**
+
+| Step | Result |
+|---|---|
+| `scan --max-mb 4096` (triage) | MD5/SHA-256 of the range, Merkle map; vendor **HeimVision 99.5%, parser available**; no high-entropy region without video |
+| `parse --vendor HeimVision` | 806 files, 4 cameras, 24 h recorder-local; zone setting UTC+8 measured, not applied |
+| `extract` (camera 2) | 1,296,105 frames, 615 MB, SHA-256 in its manifest, 58 s |
+| `timeline` | 4 camera lanes, 24.0 h each, 0 gaps; "recorder-local, not converted" |
+| `report`, `case-export` | HTML/JSON report and CASE/UCO JSON-LD, each hash in the custody ledger |
+| `certificate --part B --records both` | drafted, Gazette wording; refuses to certify a whole-drive hash from a triage pass, as it should |
+| `verify` | custody chain intact; Merkle root **MATCH** |
+
+**B. A real Dahua recording (`.dav`, 2017, H.264; samples.ffmpeg.org, §8g)**
+
+| Step | Result |
+|---|---|
+| `scan --carve` | Dahua 95.5%; the DHAV carver, in its own process, found 2,042 frames, 1 stream |
+| `extract-carved` | `.dav` and `.h264`, hashed |
+| `export-nist` | a valid MP4 (ffmpeg: H.264 High, 2592x1520, 15 fps, 49.8 s); Level 0 declared **not** met, because no zone was stated |
+| `report`, `certificate`, `verify` | drive and footage hashes in the draft; Merkle MATCH |
+
+**What the rehearsal found, now fixed:**
+- **A scan never named HeimVision.** Its only signature was a brand string
+  that is not on the disk, spelled `Heimvision`. The plugin now carries
+  structural signatures (§8e).
+- **`scan --carve` did nothing in the executable.** The carver runs in a
+  worker process, and a packaged Windows build starts that process by
+  re-running the executable, whose command-line parser rejected the
+  worker's arguments. The scan reported it ("inline carve disabled ...
+  hashing continues unaffected") and carried on without carving. `cli.py`
+  now calls `multiprocessing.freeze_support()` first. The packaging check of
+  28 Sep ran `scan` without `--carve`, so it missed this.
+- **The certificate missed footage extracted into a subfolder.** USER_MANUAL
+  §3.4 extracts to `--out clips/`, and the certificate looked only at the
+  case folder's top level. It now looks one folder down, and it leaves out
+  (and says so) any footage whose manifest names another device.
 
 ## 9. Vendor format status
 
