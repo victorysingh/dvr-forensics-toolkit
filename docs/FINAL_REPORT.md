@@ -147,10 +147,10 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 491 in all: 473 on generated data with known ground
-  truth, 13 on real media (9 on the CP Plus drive's image, 4 on the
-  HeimVision E01), and 5 on vendor-made files from other recorders
-  (`VALIDATION_REPORT.md` §1).
+- **Automated tests:** 493 in all: 474 on generated data with known ground
+  truth, 14 on real media (9 on the CP Plus drive's image, 5 on the
+  HeimVision E01 and its FTK listing), and 5 on vendor-made files from other
+  recorders (`VALIDATION_REPORT.md` §1).
   They cover the Merkle tree, the custody chain, bad sectors, device loss,
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the
@@ -181,6 +181,10 @@ Full account: `VALIDATION_REPORT.md`.
     vendor's file (463/463, 215/215 frames), and the `HK` time equals the
     painted clock, trails it by a constant 1 s, or equals the recorder's own
     file-name start.
+  - on NIST's HeimVision image, FTK Imager's own file listing and our
+    reading agree on all 17,154 FAT32 files (size, write time) and the
+    recorder's 4 ext3 files, and FTK's times give the same UTC+8 zone
+    setting (§8e).
   None of it raises a status.
 - **The route to `validated`** is built (`validate-export`, USER_MANUAL
   §3.4d). The evidence drives must not go back into their recorders, so the
