@@ -48,49 +48,62 @@ const KIND_COLOR = {
   bad: "var(--color-danger)",
 };
 
-export default function PlatterMap({ c, highlight, onPick }) {
+/* `orient` follows where the map is put, not the other way round. Down a
+   pinned column it reads as a drive stood on end; across a full-width
+   section it reads as the strip UI_PLAN §6.2 describes, and a tall narrow
+   column there would waste the width and say nothing extra. */
+export default function PlatterMap({ c, highlight, onPick, orient = "horizontal" }) {
   const size = Number(c.scan?.device?.size_bytes || c.in_progress?.size_bytes || 0);
   const read = Number(c.scan?.stats?.bytes_read || 0);
   const marks = useMemo(() => collectMarks(c), [c]);
 
   if (!size) return null;
 
+  const vertical = orient === "vertical";
   const pctOf = (n) => `${Math.max(0, Math.min(100, (n / size) * 100))}%`;
   // A stream a few hundred KiB long on a 150 GB drive is invisible at true
   // scale, so marks get a floor of 0.6% and stay findable. The label always
   // states the real length, so nothing is overstated by the drawing.
-  const heightOf = (len) => `${Math.max(0.6, (len / size) * 100)}%`;
+  const spanOf = (len) => `${Math.max(0.6, (len / size) * 100)}%`;
 
   const lit = (m) => !highlight || highlight.length === 0 || highlight.includes(m.kind);
   const anyHighlight = highlight && highlight.length > 0;
+
+  // the axis the offset runs along, and the one the drive is thick along
+  const at = (n) => (vertical ? { top: pctOf(n) } : { left: pctOf(n) });
+  const span = (len) => (vertical ? { height: spanOf(len) } : { width: spanOf(len) });
+  const across = vertical ? "left-0 right-0" : "top-0 bottom-0";
+  const driveBox = vertical
+    ? { width: "3.5rem", height: "clamp(320px, 58vh, 620px)" }
+    : { width: "100%", height: "5rem" };
 
   return (
     <figure className="m-0 select-none">
       <figcaption className="micro mb-2">The platter &middot; {bytes(size)}</figcaption>
 
-      <div className="flex gap-2">
+      <div className={vertical ? "flex gap-2" : "block"}>
         {/* the drive itself */}
-        <div className="relative w-14 shrink-0 panel overflow-hidden"
-          style={{ height: "clamp(320px, 58vh, 620px)" }}>
+        <div className="relative shrink-0 panel overflow-hidden" style={driveBox}>
 
-          {/* what the scan actually read: a triage pass covers only the top */}
-          <div className="absolute inset-x-0 top-0"
+          {/* what the scan actually read: a triage pass stops partway */}
+          <div className={`absolute ${across} ${vertical ? "top-0" : "left-0"}`}
             style={{
-              height: pctOf(read || size),
+              ...span(read || size),
               background: "color-mix(in srgb, var(--color-ink) 7%, transparent)",
             }} />
           {read > 0 && read < size && (
-            <div className="absolute inset-x-0 border-t border-dashed"
-              style={{ top: pctOf(read), borderColor: "var(--color-ink-dim)" }} />
+            <div className={`absolute ${across} border-dashed ${
+              vertical ? "border-t" : "border-l"}`}
+              style={{ ...at(read), borderColor: "var(--color-ink-dim)" }} />
           )}
 
           {marks.map((m) => (
             <button key={m.id} title={`${m.label}\n${hex(m.at)} · ${bytes(m.len)}`}
               onClick={() => onPick && onPick(m)}
-              className="absolute inset-x-0 cursor-pointer transition-opacity"
+              className={`absolute ${across} cursor-pointer transition-opacity`}
               style={{
-                top: pctOf(m.at),
-                height: heightOf(m.len),
+                ...at(m.at),
+                ...span(m.len),
                 background: KIND_COLOR[m.kind] || "var(--color-ink-dim)",
                 opacity: anyHighlight ? (lit(m) ? 1 : 0.15) : 0.85,
               }} />
@@ -98,17 +111,26 @@ export default function PlatterMap({ c, highlight, onPick }) {
         </div>
 
         {/* the ruler */}
-        <div className="relative text-[9.5px] mono-t dim w-16 shrink-0"
-          style={{ height: "clamp(320px, 58vh, 620px)" }}>
+        <div className={`relative text-[9.5px] mono-t dim ${
+          vertical ? "w-16 shrink-0" : "w-full h-4 mt-1"}`}
+          style={vertical ? { height: "clamp(320px, 58vh, 620px)" } : undefined}>
           {[0, 0.25, 0.5, 0.75, 1].map((f) => (
-            <div key={f} className="absolute left-0" style={{ top: `${f * 100}%` }}>
-              <span className="block -translate-y-1/2">{hex(Math.round(size * f))}</span>
+            <div key={f} className="absolute"
+              style={vertical ? { top: `${f * 100}%`, left: 0 }
+                              : { left: `${f * 100}%` }}>
+              <span className={`block ${
+                vertical ? "-translate-y-1/2"
+                  : f === 0 ? "" : f === 1 ? "-translate-x-full" : "-translate-x-1/2"}`}>
+                {hex(Math.round(size * f))}
+              </span>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="micro mt-3 leading-relaxed">
+      {/* the key sits in a row when the map lies flat, a column when it stands */}
+      <div className={`micro mt-3 leading-relaxed ${
+        vertical ? "" : "flex flex-wrap items-center gap-x-5 gap-y-1"}`}>
         {[["indexed", "in the index"], ["outside", "not in the index"],
           ["raw", "raw stream"], ["bad", "bad sector"]]
           .filter(([k]) => marks.some((m) => m.kind === k))
@@ -121,8 +143,13 @@ export default function PlatterMap({ c, highlight, onPick }) {
             </div>
           ))}
         {read > 0 && read < size && (
-          <div className="mt-1.5 normal-case tracking-normal">
+          <div className={`normal-case tracking-normal ${vertical ? "mt-1.5" : ""}`}>
             dashed line: the scan read to here
+          </div>
+        )}
+        {marks.length === 0 && (
+          <div className="normal-case tracking-normal">
+            nothing positioned on the platter yet
           </div>
         )}
       </div>
