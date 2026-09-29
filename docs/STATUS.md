@@ -160,7 +160,7 @@ real media; the rest is open, and there is new work that fits it.
 2. ~~**Datasets.**~~ **Done for CFReDS Heimvision:** the E01 reader
    reproduced its stored MD5 and SHA-1 over 150 GB, and its layout became
    `plugins/heimvision.py` - 24 h on 4 cameras recovered, attributed and
-   dated, the recorder's zone (UTC-8) measured from its own disk
+   dated in recorder-local time, its zone setting (UTC+8) measured from its own disk
    (`VALIDATION_REPORT.md` §8e). Any other labelled DVR image is the next one.
 3. ~~**Camera attribution from the burned-in text (OCR).**~~ **Built, and it
    needs the one thing this machine could not do.** `cli.py read-osd`
