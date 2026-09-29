@@ -69,7 +69,7 @@ the final report. "Done" marks what the team has built since the hunts.
 | G3: encryption: detect and label it instead of carving nothing | **Done**: entropy labelling (#40); TP-Link's encrypted index reported as such (#43). No open tool or paper decrypts a DVR disk |
 | G4: a scripted scenario list on the CP Plus unit (record, delete, format, overwrite, clock change, export after each) | open: needs the unit |
 | G5: run the free rival tools on our images, publish the differences | open |
-| G6: export in the NIST CCTV export profile (NISTIR 8161r1: MP4 + time codes + ClockOffset) | open |
+| G6: export in the NIST CCTV export profile (NISTIR 8161r1: MP4 + time codes + ClockOffset) | **Done** (`export-nist`); time stamps byte-identical to NIST's reference file (VALIDATION_REPORT §8i) |
 
 ## 4. Papers and standards to add to the references
 
@@ -162,4 +162,4 @@ builds used for #43 are not.
    file tree** - the #43 route. (Medium each.)
 5. **Download the archive.org Marshall zip and diff its CSV listing against
    the HeimVision plugin.** (2.95 GB; JP's call.)
-6. G5 (rival tools on our images) and G6 (NIST export profile). (Medium.)
+6. G5 (rival tools on our images). (Medium.) G6 is done.
