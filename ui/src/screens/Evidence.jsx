@@ -15,7 +15,7 @@ export default function Evidence({ c }) {
       <Card>
         <h3 className="dim text-[13px] uppercase font-semibold mb-2.5">Acquisition in progress</h3>
         <div className="panel-2 h-1.5 rounded-full overflow-hidden">
-          <i className="block h-full bg-teal-500 rounded-full"
+          <i className="block h-full bg-accent rounded-full"
             style={{ width: pct(c.in_progress.fraction) }} />
         </div>
         <p className="dim text-[12.5px] mt-2">

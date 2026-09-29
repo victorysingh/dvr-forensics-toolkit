@@ -114,7 +114,7 @@ function TopBar({ cases, caseId, screen, c }) {
     <header className="panel rounded-none border-0 border-b flex items-center gap-3.5 px-4 h-13
       min-h-[52px]">
       <div className="flex items-center gap-2 font-semibold whitespace-nowrap">
-        <span className="text-teal-500 text-lg">&#9703;</span>
+        <span className="text-accent text-lg">&#9703;</span>
         <span>AnokhiDrishti<span className="dim font-normal text-[11px] hidden sm:inline">
           &nbsp;&middot; DVR/NVR forensics</span></span>
       </div>
@@ -143,7 +143,7 @@ function TopBar({ cases, caseId, screen, c }) {
         <a href={api.reportUrl(c.id)} target="_blank" rel="noopener"
           className="hidden md:inline-flex"><Badge>Report &#8599;</Badge></a>
       )}
-      <ThemeToggle />
+      <LookSwitcher />
     </header>
   );
 }
@@ -169,18 +169,36 @@ function Badge({ children, tone, title }) {
   );
 }
 
-function ThemeToggle() {
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
-  const flip = () => {
-    const now = !dark;
-    setDark(now);
-    document.documentElement.classList.toggle("dark", now);
-    try { localStorage.setItem("anokhidrishti-theme", now ? "dark" : "light"); } catch { /* ignore */ }
-  };
+/* Three looks, switchable live. This is evaluation scaffolding: once a
+   direction is chosen the other two go, and this becomes one line in
+   index.html. Keeping it here means the comparison is made on real screens
+   with real case data rather than on mockups. */
+export const LOOKS = [
+  { id: "instrument", label: "Instrument" },
+  { id: "dossier", label: "Dossier" },
+  { id: "platter", label: "Platter" },
+];
+
+export function setLook(id) {
+  document.documentElement.dataset.look = id;
+  try { localStorage.setItem("anokhidrishti-look", id); } catch { /* ignore */ }
+}
+
+function LookSwitcher() {
+  const [look, setL] = useState(
+    () => document.documentElement.dataset.look || LOOKS[0].id);
+  const pick = (id) => { setL(id); setLook(id); };
   return (
-    <button onClick={flip} title="Toggle theme (t)"
-      className="hairline border rounded-lg w-8 h-8 dim hover:text-teal-500
-        hover:border-teal-500 cursor-pointer">&#9681;</button>
+    <div className="hairline border rounded-[var(--radius-panel)] flex overflow-hidden"
+      title="Visual direction (press l to cycle)">
+      {LOOKS.map((l) => (
+        <button key={l.id} onClick={() => pick(l.id)}
+          className={`px-2.5 py-1 text-[11px] cursor-pointer micro
+            ${l.id === look ? "bg-accent/15 text-accent" : "dim"}`}>
+          {l.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -195,7 +213,7 @@ function Sidebar({ caseId, screen }) {
           <a key={s.id} href={linkTo(caseId, s.id)}
             className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13.5px]
               justify-center xl:justify-start
-              ${on ? "bg-teal-500/15 text-teal-500" : "dim hover:panel-2 hover:text-current"}`}>
+              ${on ? "bg-accent/15 text-accent" : "dim hover:panel-2 hover:text-current"}`}>
             <span className="w-[18px] text-center shrink-0">{s.ico}</span>
             <span className="hidden xl:inline">{s.label}</span>
             <span className="hidden xl:inline ml-auto font-mono text-[10.5px] opacity-50">
@@ -237,9 +255,9 @@ function Stepper({ c, caseId }) {
       aria-label="Pipeline stages">
       {stages.map(([t, to, d, cls]) => (
         <button key={t} onClick={() => go(caseId, to)}
-          className={`panel border-l-[3px] rounded-lg px-2.5 py-1.5 text-left flex-1
-            min-w-[120px] basis-[130px] cursor-pointer hover:border-teal-500
-            ${edge[cls] || "border-l-slate-500/40"}`}>
+          className={`panel border-l-[3px] px-2.5 py-1.5 text-left flex-1
+            min-w-[120px] basis-[130px] cursor-pointer hover:border-accent
+            ${edge[cls] || "border-l-line"}`}>
           <div className="text-[12.5px] font-semibold">{t}</div>
           <div className="dim text-[11px]">{d}</div>
         </button>
@@ -271,7 +289,7 @@ function CasesHome({ cases }) {
       <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(290px,1fr))]">
         {cases.map((c) => (
           <a key={c.id} href={linkTo(c.id, "dashboard")}
-            className="panel p-4 hover:border-teal-500 block">
+            className="panel p-4 hover:border-accent block">
             <div className="text-[17px] font-semibold">{c.id}</div>
             <div className="dim font-mono text-[12px] mt-0.5 mb-2.5 break-all">
               {c.device || "—"}</div>
@@ -279,7 +297,7 @@ function CasesHome({ cases }) {
             {!c.complete && (
               <div className="mt-2.5">
                 <div className="panel-2 h-1.5 rounded-full overflow-hidden">
-                  <i className="block h-full bg-teal-500 rounded-full"
+                  <i className="block h-full bg-accent rounded-full"
                     style={{ width: pct(c.progress) }} />
                 </div>
                 <div className="dim text-[11px] mt-1">acquiring &mdash; {pct(c.progress)}</div>
@@ -306,10 +324,10 @@ function useKeyboard(screens, caseId) {
     const on = (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
       if (["input", "select", "textarea"].includes(tag) || e.metaKey || e.ctrlKey) return;
-      if (e.key === "t") {
-        const now = !document.documentElement.classList.contains("dark");
-        document.documentElement.classList.toggle("dark", now);
-        try { localStorage.setItem("anokhidrishti-theme", now ? "dark" : "light"); } catch { /* ignore */ }
+      if (e.key === "l") {
+        const cur = document.documentElement.dataset.look || LOOKS[0].id;
+        const i = LOOKS.findIndex((x) => x.id === cur);
+        setLook(LOOKS[(i + 1) % LOOKS.length].id);
         return;
       }
       if (e.key === "/") {

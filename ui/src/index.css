@@ -1,17 +1,76 @@
 @import "tailwindcss";
 
-/* Dark is the default and is driven by a class on <html>, set before first
-   paint in index.html and toggled by the shell. */
+/* ── Type ────────────────────────────────────────────────────────────────
+   Bundled, not fetched. Vite emits these into assets/ and the @font-face
+   rules point at local files, so UI_PLAN §1 ("no external calls of any
+   kind") still holds with the network off. All OFL/Apache licensed.
+   The looks below pick from these; none of them is system-ui, which is
+   what every other Tailwind build renders in.
+
+   The @font-face rules are written out by hand rather than importing the
+   packages' own CSS, because those pull every subset - Cyrillic, Greek,
+   Vietnamese - for every family. That was 1.2 MB across 72 files, all of it
+   shipped inside the executable. Latin alone is what this interface needs. */
+@font-face {
+  font-family: "JetBrains Mono Variable"; font-style: normal;
+  font-weight: 100 800; font-display: swap;
+  src: url("@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Newsreader Variable"; font-style: normal;
+  font-weight: 200 800; font-display: swap;
+  src: url("@fontsource-variable/newsreader/files/newsreader-latin-wght-normal.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Newsreader Variable"; font-style: italic;
+  font-weight: 200 800; font-display: swap;
+  src: url("@fontsource-variable/newsreader/files/newsreader-latin-wght-italic.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Space Grotesk Variable"; font-style: normal;
+  font-weight: 300 700; font-display: swap;
+  src: url("@fontsource-variable/space-grotesk/files/space-grotesk-latin-wght-normal.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400;
+  font-display: swap;
+  src: url("@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono"; font-style: normal; font-weight: 600;
+  font-display: swap;
+  src: url("@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400;
+  font-display: swap;
+  src: url("@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600;
+  font-display: swap;
+  src: url("@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+}
+/*
+
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ---------------------------------------------------------------- theme
-   The status colours are not decoration: each one names how strong the
-   evidence behind a claim is, and the same colour means the same thing on
-   every screen.  --color-lead is reserved for anything a model produced.
-*/
+/* ── Semantic tokens ─────────────────────────────────────────────────────
+   Nothing below this line names a colour directly. A "look" is a complete
+   redefinition of these, which is why the three of them can share every
+   component without a single conditional in the JSX.
+
+   The status colours are not decoration: each names how strong the evidence
+   behind a claim is, and means the same thing on every screen. --lead is
+   reserved for anything a model produced and is never used for anything
+   else.                                                                  */
 @theme {
-  --color-ink: #16202b;
-  --color-ink-dim: #5b6b7c;
+  --color-bg: #0b0f14;
+  --color-surface: #121821;
+  --color-surface-2: #172030;
+  --color-line: #1f2a37;
+  --color-ink: #e6edf3;
+  --color-ink-dim: #8b98a5;
 
   --color-validated: #22c55e;
   --color-spec: #3b82f6;
@@ -19,60 +78,212 @@
   --color-detected: #94a3b8;
   --color-lead: #a78bfa;
   --color-danger: #ef4444;
+  --color-accent: #2dd4bf;
 
-  --color-accent: #0d9488;
-  --color-accent-dark: #2dd4bf;
+  --color-cam-1: #2dd4bf; --color-cam-2: #3b82f6;
+  --color-cam-3: #a78bfa; --color-cam-4: #f59e0b;
+  --color-cam-5: #22c55e; --color-cam-6: #f472b6;
+  --color-cam-7: #38bdf8; --color-cam-8: #fb923c;
 
-  /* one hue per camera lane, stable across screens */
-  --color-cam-1: #2dd4bf;
-  --color-cam-2: #3b82f6;
-  --color-cam-3: #a78bfa;
-  --color-cam-4: #f59e0b;
-  --color-cam-5: #22c55e;
-  --color-cam-6: #f472b6;
-  --color-cam-7: #38bdf8;
-  --color-cam-8: #fb923c;
+  --font-display: "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
 
-  /* System stacks only - an air-gapped machine has no font CDN to ask. */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  /* shape */
+  --radius-panel: 10px;
+  --tracking-micro: 0.04em;
 }
 
-/* ---------------------------------------------------------------- base */
+/* ════════════════════════════════════════════════════════════════════════
+   LOOK 1 — INSTRUMENT
+   Lab equipment, not a web app. Near-black, monospace throughout, hairline
+   rules and square corners, one signal colour. Dense and precise: the
+   readout is the interface.
+   ════════════════════════════════════════════════════════════════════════ */
+[data-look="instrument"] {
+  --color-bg: #06080a;
+  --color-surface: #0b0e12;
+  --color-surface-2: #11161c;
+  --color-line: #1c242e;
+  --color-ink: #d6e2e6;
+  --color-ink-dim: #6b7d86;
+
+  --color-accent: #c6f24e;          /* signal green, not teal */
+  --color-validated: #8ed04a;
+  --color-spec: #4aa8d0;
+  --color-synthetic: #e0a33a;
+  --color-detected: #6b7d86;
+  --color-lead: #b98cf0;
+  --color-danger: #ff5a4d;
+
+  --font-display: "IBM Plex Mono", ui-monospace, monospace;
+  --font-body: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --radius-panel: 0px;              /* nothing is rounded */
+  --tracking-micro: 0.16em;         /* wide, stencilled labels */
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   LOOK 2 — DOSSIER
+   The output of this tool is a court document, so the console reads like
+   one: warm black rather than blue-black, a serif for display, generous
+   measure, rules instead of boxes, citations in the margin. Dark, but
+   nothing about it says "dashboard".
+   ════════════════════════════════════════════════════════════════════════ */
+[data-look="dossier"] {
+  --color-bg: #14120f;              /* warm, not blue */
+  --color-surface: #1b1815;
+  --color-surface-2: #23201b;
+  --color-line: #332e26;
+  --color-ink: #ece5d7;             /* bone */
+  --color-ink-dim: #9a9083;
+
+  --color-accent: #c8a45c;          /* gold leaf */
+  --color-validated: #7fa860;
+  --color-spec: #6f8fb8;
+  --color-synthetic: #c98f45;
+  --color-detected: #8b8073;
+  --color-lead: #a98ec4;
+  --color-danger: #c05a4c;
+
+  --font-display: "Newsreader Variable", Georgia, serif;
+  --font-body: "Newsreader Variable", Georgia, serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --radius-panel: 2px;
+  --tracking-micro: 0.1em;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   LOOK 3 — PLATTER
+   Built around the object under examination. Deep blue-black, a geometric
+   grotesk, and a duotone signal so the disk map can carry two dimensions
+   at once. Softer shapes than Instrument, but far from the default.
+   ════════════════════════════════════════════════════════════════════════ */
+[data-look="platter"] {
+  --color-bg: #080b16;
+  --color-surface: #0f1426;
+  --color-surface-2: #161d33;
+  --color-line: #232c48;
+  --color-ink: #e6e9f5;
+  --color-ink-dim: #7d87a8;
+
+  --color-accent: #00e5ff;
+  --color-validated: #3ddc97;
+  --color-spec: #5b8cff;
+  --color-synthetic: #ffb45b;
+  --color-detected: #7d87a8;
+  --color-lead: #ff5ecb;            /* the duotone partner */
+  --color-danger: #ff4d6d;
+
+  --font-display: "Space Grotesk Variable", system-ui, sans-serif;
+  --font-body: "Space Grotesk Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --radius-panel: 14px;
+  --tracking-micro: 0.06em;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────── */
 @layer base {
-  html { color-scheme: light; }
-  html.dark { color-scheme: dark; }
+  html { color-scheme: dark; }
 
   body {
-    @apply bg-slate-100 text-slate-900 font-sans antialiased;
-    /* counts, offsets and durations line up column to column */
-    font-variant-numeric: tabular-nums;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    font-variant-numeric: tabular-nums;   /* columns of figures line up */
+    -webkit-font-smoothing: antialiased;
   }
-  html.dark body { @apply bg-[#0b0f14] text-slate-100; }
 
-  :focus-visible { @apply outline-2 outline-offset-2 outline-teal-500 rounded; }
+  /* Dossier sets prose in a serif, so its figures want old-style off and
+     a slightly larger body to keep the serif readable. */
+  [data-look="dossier"] body { font-size: 15px; line-height: 1.6; }
+  [data-look="instrument"] body { font-size: 13px; line-height: 1.45; }
 
-  /* Sticky table headers need an opaque backdrop in both themes. */
-  th { @apply bg-slate-200; }
-  html.dark th { @apply bg-[#172030]; }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* Table headers stick while the body scrolls, so they need an opaque
+     backdrop or the rows show through them. */
+  thead th {
+    background: var(--color-surface-2);
+    font-family: var(--font-mono);
+    letter-spacing: var(--tracking-micro);
+  }
+  [data-look="instrument"] thead th {
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-accent);
+  }
+  [data-look="dossier"] thead th {
+    background: var(--color-bg);
+    font-family: var(--font-body);
+    font-variant: small-caps;
+    letter-spacing: 0.02em;
+    text-transform: none;
+  }
 }
 
+/* ── Semantic utilities ──────────────────────────────────────────────────
+   Components use these rather than naming colours, so a look can change
+   the shape of a surface and not only its palette.                       */
 @layer utilities {
-  /* Surfaces used often enough that repeating the pair everywhere hurts. */
-  .panel { @apply bg-white border border-slate-300 rounded-xl; }
-  html.dark .panel { @apply bg-[#121821] border-[#1f2a37]; }
+  .panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-panel);
+  }
+  /* Instrument draws no filled cards at all - only rules. */
+  [data-look="instrument"] .panel { background: transparent; }
+  /* Dossier: a leading rule instead of a box. */
+  [data-look="dossier"] .panel {
+    background: transparent;
+    border: 0;
+    border-top: 1px solid var(--color-line);
+    border-radius: 0;
+  }
 
-  .panel-2 { @apply bg-slate-100; }
-  html.dark .panel-2 { @apply bg-[#172030]; }
+  .panel-2 { background: var(--color-surface-2); }
+  [data-look="instrument"] .panel-2 { background: var(--color-surface); }
 
-  .hairline { @apply border-slate-300; }
-  html.dark .hairline { @apply border-[#1f2a37]; }
+  .hairline { border-color: var(--color-line); }
+  .dim { color: var(--color-ink-dim); }
 
-  .dim { @apply text-slate-500; }
-  html.dark .dim { @apply text-slate-400; }
+  /* The small uppercase label above a value. */
+  .micro {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-micro);
+    color: var(--color-ink-dim);
+  }
+  [data-look="dossier"] .micro {
+    font-family: var(--font-body);
+    font-variant: small-caps;
+    text-transform: none;
+    font-size: 12px;
+  }
+
+  /* A headline number. */
+  .figure {
+    font-family: var(--font-display);
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.1;
+  }
+  [data-look="instrument"] .figure { font-weight: 500; font-size: 24px; }
+  [data-look="dossier"] .figure { font-weight: 400; font-size: 32px; }
+
+  .display { font-family: var(--font-display); }
+  .mono-t { font-family: var(--font-mono); }
+
+  /* Prose that should not run the full width of a 1080p screen. */
+  .measure { max-width: 68ch; }
 }
 
-/* Motion is a nicety; a viewer who asked for less gets none of it. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;

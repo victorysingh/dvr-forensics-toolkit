@@ -69,7 +69,7 @@ export default function Custody({ c, reload, toast }) {
             </div>
             <button onClick={reverify} title="Re-fetch the case and re-run the check"
               className="ml-auto hairline border rounded-lg px-3 py-1.5 text-[12.5px] dim
-                hover:text-teal-500 hover:border-teal-500 cursor-pointer">
+                hover:text-accent hover:border-accent cursor-pointer">
               Re-verify
             </button>
           </div>

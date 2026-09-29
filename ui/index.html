@@ -1,19 +1,20 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en" data-look="instrument">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AnokhiDrishti — DVR/NVR Forensics</title>
 <!-- The mark is an inline data: URI, not a file: a favicon is a request like
      any other, and on an air-gapped workstation nothing may leave the page. -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0f14'/%3E%3Crect x='7' y='8' width='18' height='16' rx='2' fill='none' stroke='%232dd4bf' stroke-width='2.5'/%3E%3Crect x='7' y='8' width='9' height='16' fill='%232dd4bf'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2306080a'/%3E%3Crect x='7' y='8' width='18' height='16' rx='2' fill='none' stroke='%23c6f24e' stroke-width='2.5'/%3E%3Crect x='7' y='8' width='9' height='16' fill='%23c6f24e'/%3E%3C/svg%3E">
 <script>
-  // Theme before first paint, so a dark console never flashes white.
-  // Wrapped because localStorage throws in a locked-down profile.
+  // Pick the look before first paint, so the page never flashes one
+  // direction and settles into another. Wrapped because localStorage
+  // throws in a locked-down profile.
   try {
-    const t = localStorage.getItem("anokhidrishti-theme");
-    document.documentElement.classList.toggle("dark", t !== "light");
-  } catch (e) { /* keep the dark default */ }
+    const l = localStorage.getItem("anokhidrishti-look");
+    if (l) document.documentElement.dataset.look = l;
+  } catch (e) { /* keep the default in the html attribute */ }
 </script>
 </head>
 <body>
