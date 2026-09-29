@@ -34,7 +34,9 @@ Error generating stack: `+a.message+`
          survives a different manufacturer's recorder reformatting the drive.
          Where frames carry no camera number, streams are separated by
          continuity and are split rather than merged: a stream whose camera
-         cannot be told apart is never silently joined to another.`:r?`Everything carved matches an index record. That is the ordinary case,
+         cannot be told apart is never silently joined to another. Run beside
+         the newest open DHFS tool on a disk of known contents, both found the
+         same frames and only this one separated the three cameras.`:r?`Everything carved matches an index record. That is the ordinary case,
            and it is worth stating plainly rather than leaving blank.`:null,figures:T?[{value:X(T.streams),label:"streams outside the index",tone:"synthetic"},{value:X(T.frames),label:"frames"},{value:Ue(T.bytes),label:"recovered"}]:r?[{value:X(r.stats?.streams_kept),label:"streams carved"},{value:X(r.stats?.frames),label:"frames"}]:[],strength:r?{status:r.validation_status,note:`Carved by frame structure, not by trusting any index. ${X(r.stats?.joined_by_contiguity||0)} frames joined by contiguity, ${X(r.stats?.ambiguous_splits||0)} ambiguous splits.`}:null,cites:r?[{file:"carve/carve_report.json",hash:r.sha256}]:[],marks:["outside"],detail:"recovered",absent:r?null:`Run cli.py carve --device <dev> --out ${f.id}`});const M=D?.counts||{};E.push({id:"when",rail:"When",emphasis:!0,title:D?"These times are the recorder's own clock, and are not converted.":"No timeline has been built.",lead:D?`${ng(D.clock?.rule)||"The recorder's zone was not stated, so no UTC is asserted."}
          A recorder keeps local time on a clock nobody audits, and a tool that
          silently prints UTC is inventing the one fact a court is most likely to

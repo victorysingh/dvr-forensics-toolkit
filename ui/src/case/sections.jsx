@@ -155,7 +155,9 @@ export function buildSections(c) {
          survives a different manufacturer's recorder reformatting the drive.
          Where frames carry no camera number, streams are separated by
          continuity and are split rather than merged: a stream whose camera
-         cannot be told apart is never silently joined to another.`
+         cannot be told apart is never silently joined to another. Run beside
+         the newest open DHFS tool on a disk of known contents, both found the
+         same frames and only this one separated the three cameras.`
       : carve
         ? `Everything carved matches an index record. That is the ordinary case,
            and it is worth stating plainly rather than leaving blank.`
