@@ -33,6 +33,7 @@ import subprocess
 from bisect import bisect_right
 from typing import Optional
 
+from core import proc
 from parsers.dahua import DHAV_HDR, DHAV_TAIL, TYPE_I, walk_frames
 
 RULE = "analytics.decode-check.counter-gap.v1"
@@ -69,7 +70,10 @@ def probe(es_path: str, codec: str) -> tuple[list[int], list[int]]:
     cmd = ["ffprobe", "-v", "error", "-f", fmt, "-i", es_path,
            "-show_packets", "-show_frames", "-select_streams", "v:0",
            "-show_entries", "packet=pos:frame=pkt_pos", "-of", "csv"]
-    out = subprocess.run(cmd, capture_output=True, text=True).stdout
+    r = proc.run(cmd, timeout=proc.STREAM_S, capture_output=True, text=True)
+    if r.timed_out:
+        raise RuntimeError(f"ffprobe did not finish {es_path} within {proc.STREAM_S} s")
+    out = r.stdout
     packets, decoded = [], []
     for line in out.splitlines():
         kind, _, val = line.partition(",")

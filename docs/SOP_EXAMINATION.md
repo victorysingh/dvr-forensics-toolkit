@@ -40,6 +40,7 @@ text before they appear in a report; they are not asserted here.
 | 2.3 | Install the adapter write-block rule for the evidence adapter (`writeblock-rule --usb-id`) | the tool refuses an adapter that holds the workstation's own disk |
 | 2.4 | Run `python tests/test_pipeline.py` | all pass; record the count and the tool's git commit |
 | 2.5 | Check free space: about 50 MB per drive for the scan, plus footage to extract | `df -h` |
+| 2.6 | The custody seal key: `~/.ps26150/ledger_seal.key` is made on the first case. Back it up with the examiner's records, never inside a case folder: without it the seal cannot be checked | `verify` on a case says "seal intact (key ...)" |
 
 ## Phase 3 — Acquisition
 

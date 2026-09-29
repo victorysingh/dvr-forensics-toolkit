@@ -38,6 +38,7 @@ from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, keep_threshold, ma
 from analytics.static import (STATIC_IOU, STATIC_MIN_FRAMES, STATIC_SHARE, counted,
                               flag_implausible, flag_static, parked_spots)
 from analytics.tiles import ROTATIONS, TILE_OVERLAP, merge, tiles, to_frame, unrotate
+from core import proc
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # COCO ids that matter for surveillance: SSD-MobileNet emits 1-based ids of
@@ -99,13 +100,8 @@ def decode(path: str, fps: float, codec: str = "hevc", scale: int = 1):
            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     n = w * h * 3
     with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
-        i = 0
-        while True:
-            buf = p.stdout.read(n)
-            if len(buf) < n:
-                break
+        for i, buf in enumerate(proc.read_chunks(p, n)):    # a decoder silent too long is stopped
             yield i / fps, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-            i += 1
 
 
 def shrink(rgb: np.ndarray, k: int) -> np.ndarray:
@@ -321,8 +317,8 @@ def _thumbnail(rgb: np.ndarray, dets: list[dict], path: str) -> None:
             img[Y1:Y2, min(w - 1, X1 + t)] = c
             img[Y1:Y2, max(0, X2 - t)] = c
     ppm = b"P6 %d %d 255\n" % (w, h) + img.tobytes()
-    subprocess.run(["ffmpeg", "-v", "quiet", "-y", "-f", "image2pipe", "-c:v", "ppm",
-                    "-i", "-", "-q:v", "4", path], input=ppm, check=True)
+    proc.run(["ffmpeg", "-v", "quiet", "-y", "-f", "image2pipe", "-c:v", "ppm",
+              "-i", "-", "-q:v", "4", path], timeout=proc.IMAGE_S, input=ppm, check=True)
 
 
 def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],

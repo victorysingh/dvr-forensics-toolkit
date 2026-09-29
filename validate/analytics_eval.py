@@ -5,6 +5,7 @@
     #   ... fill in DIR/labels.csv: person, face, vehicle as y or n ...
     python -m validate.analytics_eval score DIR
     python -m validate.analytics_eval sweep DIR     # would another threshold do better?
+    python -m validate.analytics_eval apply DIR     # today's rules on a set sampled earlier
 
 A clip is a raw H.264/H.265 stream (as extracted) or any container ffmpeg
 reads (.mp4, .avi, .dav, .ps ...).  Several clips go into one labelled set;
@@ -61,6 +62,7 @@ import os
 import subprocess
 import sys
 
+from core import proc
 from analytics.static import counted, flag_implausible, flag_static
 
 CLASSES = {"person": {"person"}, "face": {"face"},
@@ -90,13 +92,8 @@ def at_rate(clip: str, fps: float, w: int | None = None, h: int | None = None):
            "-vf", f"fps={fps},scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     n = w * h * 3
     with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
-        k = 0
-        while True:
-            buf = p.stdout.read(n)
-            if len(buf) < n:
-                break
+        for k, buf in enumerate(proc.read_chunks(p, n)):    # a decoder silent too long is stopped
             yield k, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-            k += 1
 
 
 def keyframes(clip: str, every: int = 1, w: int | None = None, h: int | None = None):
@@ -110,13 +107,8 @@ def keyframes(clip: str, every: int = 1, w: int | None = None, h: int | None = N
            "-fps_mode", "vfr", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     n = w * h * 3
     with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
-        k = 0
-        while True:
-            buf = p.stdout.read(n)
-            if len(buf) < n:
-                break
+        for k, buf in enumerate(proc.read_chunks(p, n)):    # a decoder silent too long is stopped
             yield k * every, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-            k += 1
 
 
 def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=print,
@@ -185,7 +177,7 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
         if not clip_hits:
             log(f"  no frame decoded from {clip}")
     os.makedirs(os.path.join(out, "sheets"), exist_ok=True)
-    subprocess.run(["ffmpeg", "-nostdin", "-v", "quiet", "-y", "-start_number", "0",
+    proc.run(["ffmpeg", "-nostdin", "-v", "quiet", "-y", "-start_number", "0",
                     "-i", os.path.join(out, "frames", "%03d.jpg"),
                     "-vf", f"tile={SHEET}x{SHEET}:margin=4:padding=4",
                     # numbered from 00, as labels.csv's `sheet` column is
@@ -334,6 +326,47 @@ def sweep(out: str, log=print) -> dict:
     return res
 
 
+def apply(out: str, model_set: str | None = None, log=print) -> dict:
+    """The tool's current thresholds and rules (weak boxes, static and
+    implausible, parked vehicles) applied again to the boxes `sample` kept at
+    low scores, so a set sampled earlier can be scored under today's rules
+    without its video or its frames - detections.json and labels.csv are
+    enough.  The original is kept as detections.sampled.json.  Standard
+    library only."""
+    from analytics.models import DEFAULT_SET, keep_threshold, mark_weak, thresholds
+    from analytics.static import parked_spots
+    path = os.path.join(out, "detections.json")
+    with open(path, encoding="utf-8") as fh:
+        det = json.load(fh)
+    stored = sorted(det["detections"], key=lambda x: x["frame"])
+    if any("any_score" not in x for x in stored):
+        raise SystemExit("detections.json keeps no low-score boxes (sampled before 29 Sep 2026)"
+                         " - run sample again")
+    keep = os.path.join(out, "detections.sampled.json")
+    if not os.path.exists(keep):
+        with open(keep, "w", encoding="utf-8") as fh:
+            json.dump(det, fh, indent=1)
+    model_set = model_set or det.get("model_set") or DEFAULT_SET
+    for x in stored:
+        x["detections"] = mark_weak(model_set, [dict(d) for d in x["any_score"]
+                                                if d["score"] >= keep_threshold(model_set, d["label"])])
+    clips = det.get("clips") or [{}]
+    for ci, c in enumerate(clips):
+        mine = [x for x in stored if x.get("clip", 0) == ci]
+        hits = [x for x in mine if x["detections"]]
+        flag_static(hits, len(mine))
+        flag_implausible(hits)
+        c["parked_vehicles"] = parked_spots(hits, key="frame")
+    det.update({"detections": stored, "clips": clips, "model_set": model_set,
+                "thresholds": thresholds(model_set), "rules_applied": "validate.analytics_eval apply"})
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(det, fh, indent=1)
+    n = sum(len(c["parked_vehicles"]) for c in clips)
+    log(f"{len(stored)} frames: {model_set} thresholds and rules applied again; "
+        f"{n} parked vehicle(s); the sampled original is detections.sampled.json")
+    return det
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -352,10 +385,16 @@ def main() -> int:
     sc.add_argument("out")
     sw = sub.add_parser("sweep")
     sw.add_argument("out")
+    ap_ = sub.add_parser("apply", help="today's thresholds and rules on stored boxes, no video")
+    ap_.add_argument("out")
+    ap_.add_argument("--models", default=None, choices=("yolox", "classic"))
     a = ap.parse_args()
     if a.cmd == "sample":
         sample(a.clip, a.out, a.frames, a.fps, tiles=a.tiles, model_set=a.models,
                rotate=a.rotate)
+        return 0
+    if a.cmd == "apply":
+        apply(a.out, a.models)
         return 0
     if a.cmd == "sweep":
         res = sweep(a.out)

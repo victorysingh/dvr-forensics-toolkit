@@ -1,0 +1,41 @@
+# The regression suite on every push and pull request, on the two systems the
+# team examines on: Linux (acquisition, write-blocking) and Windows (the .exe).
+# The suite needs only the Python standard library; ffmpeg is installed on
+# Linux so that the two tests which decode video run there too.
+name: tests
+
+on:
+  push:
+    branches: [setup, staging]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    name: suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: ffmpeg, for the two tests that decode
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: regression suite
+        run: python tests/test_pipeline.py
+
+  kaitai:
+    name: format definitions (.ksy) against the parsers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install kaitaistruct==0.11
+      - run: python -m validate.ksy_check

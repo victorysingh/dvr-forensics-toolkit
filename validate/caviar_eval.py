@@ -42,6 +42,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
+from core import proc
 from analytics.static import _iou, counted, flag_implausible, flag_static, parked_spots
 
 SIZE = (384, 288)                            # CAVIAR's picture
@@ -115,8 +116,7 @@ def run(folder: str, model_set: str | None = None, tiles: int | None = None,
                "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
         mine = []
         with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
-            k = 0
-            while len(buf := p.stdout.read(w * h * 3)) == w * h * 3:
+            for k, buf in enumerate(proc.read_chunks(p, w * h * 3)):
                 if k * every in gt:
                     big = np.frombuffer(buf, np.uint8).reshape(h, w, 3)
                     rot = "on" if clip in rotate_clips else rotate
@@ -124,7 +124,6 @@ def run(folder: str, model_set: str | None = None, tiles: int | None = None,
                                                rotate=rot)
                     mine.append({"clip": clip, "frame": k * every, "gt": gt[k * every],
                                  "detections": dets})
-                k += 1
         hits = [{"detections": f["detections"]} for f in mine if f["detections"]]
         flag_static(hits, len(mine))
         flag_implausible(hits)
