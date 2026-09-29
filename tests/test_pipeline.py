@@ -559,6 +559,39 @@ def test_dahua_parser(tmp: str) -> None:
           res.recordings[0].start_utc == "2026-09-03T04:30:00.000Z",
           str(res.recordings[0].start_utc))
 
+    # extract: several recordings after one parse - what a day of footage over USB needs
+    import argparse
+    import cli
+    ids = [r.id for r in res.recordings]
+
+    def ns(rec, out):
+        return argparse.Namespace(device=img, vendor="Dahua", recording=rec, out=out,
+                                  tz_offset=None)
+
+    def outputs(d):
+        got = {}
+        for fn in sorted(os.listdir(d)):
+            path = os.path.join(d, fn)
+            if fn.endswith(".manifest.json"):
+                with open(path, encoding="utf-8") as fh:
+                    m = json.load(fh)
+                m.pop("generated_utc", None)
+                got[fn] = m
+            else:
+                with open(path, "rb") as fh:
+                    got[fn] = hashlib.sha256(fh.read()).hexdigest()
+        return got
+    one, many, bad = (os.path.join(tmp, d) for d in ("x_one", "x_many", "x_bad"))
+    rcs = [cli.cmd_extract(ns(rid, one)) for rid in ids]
+    rc_many = cli.cmd_extract(ns(ids, many))
+    rc_bad = cli.cmd_extract(ns([ids[0], "dhfs-v9-c999999"], bad))
+    check("extract: three recordings after one parse give exactly what three calls give; "
+          "an unknown id among them is refused without stopping the rest",
+          rcs == [0, 0, 0] and rc_many == 0 and outputs(one) == outputs(many)
+          and len(outputs(many)) == 3 * len(ids) and rc_bad == 1
+          and os.path.exists(os.path.join(bad, ids[0] + ".dav")),
+          f"{rcs} {rc_many} {rc_bad} {sorted(outputs(many))[:4]}")
+
 
 class _BytesSink(_Sink):
     def __init__(self):
