@@ -221,8 +221,9 @@ CPU-bound (26.7 MiB/s measured), and `TECH_STACK.md` records the planned fix.
   2023 s.63 carries it forward. `cli.py certificate` drafts Part A or Part B
   from the case's own hashes and device record, with the hash report
   enclosed. It never ticks ownership, never makes the "working properly"
-  statement, and never signs. Its wording is to be checked against the
-  Gazette before use.
+  statement, and never signs. Its wording matches the Schedule word for
+  word as printed in the Gazette (No. 55 of 25 Dec 2023, pp. 46-47), and a
+  test holds it there.
 - **What the courts now ask for.**
   - *Pune Bar Association v. Union of India* (SC, 22 May 2026) upheld
     s.63(4): the hash is "an electronic fingerprint", and Part B may come
@@ -338,7 +339,6 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   CARVE (DFRWS APAC 2026) does it by OCR of the painted camera label or by
   PRNU sensor noise.
 - **On fast media the single pass is CPU-bound.**
-- **The s.63 certificate wording has not been checked against the Gazette.**
 - **The 23 Sep gaps on drive 1** may be the team's own handling of the unit
   (the 21 Sep gap is a restart the unit's own log records).
   This is to be confirmed and recorded.
