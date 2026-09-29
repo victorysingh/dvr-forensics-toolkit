@@ -96,6 +96,7 @@ from typing import Iterator, Optional
 from core.contract import STATE_ACTIVE, Provenance, Recording, TimestampClaim
 from core.hashing import sha256_file
 from detect.engine import parse_partitions
+from detect.signatures import SPEC_ONLY, Signature
 from parsers.base import (SOURCE_OBSERVED, FieldSpec, ParseResult, VendorParser,
                           register, weakest_source)
 from parsers.ext3 import Ext, ExtError
@@ -139,6 +140,29 @@ FIELDS = [FieldSpec(n, o, f, d, SOURCE_OBSERVED, IMAGE) for n, o, f, d in (
                                        "start_time, end_time) per file"),
 )]
 SYSTEM_FILES = ("dvr_log.db", "search.db", "pbversion", "manual_rec_status.bin")
+
+# The disk carries no brand string, so a scan finds the recorder by its own
+# structures, all observed on the NIST image and all in the first 11 MB -
+# inside even a triage pass: the system partition's mount point in its ext3
+# superblock (at 1 MiB), and the schemas of the recorder's event log and
+# recording index (~5.2 and ~10.6 MB).  ident.bin's text is in the FAT data.
+SIGNATURES = [
+    Signature(id="heimvision.ext3_mount", vendor="HeimVision", pattern=b"/root/rec/a1",
+              description="the recorder's system partition, mounted at /root/rec/a1 "
+                          "(ext3 superblock 'last mounted on')",
+              source=IMAGE, validation_status=SPEC_ONLY, weight=3.0),
+    Signature(id="heimvision.dvr_log_schema", vendor="HeimVision",
+              pattern=b"CREATE TABLE [dvr_log]([id] integer PRIMARY KEY AUTOINCREMENT",
+              description="schema of the recorder's event log, dvr_log.db",
+              source=IMAGE, validation_status=SPEC_ONLY, weight=6.0),
+    Signature(id="heimvision.search_schema", vendor="HeimVision",
+              pattern=b"[folder] int,[file] int,[fs_index] int",
+              description="schema of the recorder's recording index, search.db (DETAIL)",
+              source=IMAGE, validation_status=SPEC_ONLY, weight=6.0),
+    Signature(id="heimvision.ident", vendor="HeimVision", pattern=b"ok1ormated",
+              description="ident.bin on the FAT32 video partition",
+              source=IMAGE, validation_status=SPEC_ONLY, weight=4.0),
+]
 
 
 def _local(t: float) -> Optional[str]:

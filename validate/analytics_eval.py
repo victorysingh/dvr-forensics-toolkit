@@ -187,6 +187,8 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
     subprocess.run(["ffmpeg", "-nostdin", "-v", "quiet", "-y", "-start_number", "0",
                     "-i", os.path.join(out, "frames", "%03d.jpg"),
                     "-vf", f"tile={SHEET}x{SHEET}:margin=4:padding=4",
+                    # numbered from 00, as labels.csv's `sheet` column is
+                    "-start_number", "0",
                     os.path.join(out, "sheets", "%02d.jpg")], check=False)
     with open(os.path.join(out, "labels.csv"), "w", newline="", encoding="utf-8") as fh:
         wr = csv.DictWriter(fh, fieldnames=list(rows[0]))
