@@ -262,6 +262,14 @@ disk shows this unit wrote to it. Finding none shows nothing - many recorders
 never write their identity to the disk. It searches the non-video blocks up to
 `--max-gb` (4 GiB by default); raise it to cover a whole drive.
 
+The pattern matching runs in worker processes (`--workers`, by default one per
+core, up to 8, for searches over 64 blocks). One process matches only about
+6 MiB/s, so a whole drive's non-video blocks took hours; spread over processes
+it keeps up with the drive. On 29 Sep the CP Plus drive read at 42 MiB/s over
+USB 2 with 12 workers. The result is the one a single process gives: the same
+matches, offsets and context, applied in block order (tested, and checked on
+768 MiB of the Hikvision drive's head image against the single-process code).
+
 `identify-model` reads only blocks the scan did not classify as video, plus
 both ends of the disk — minutes, not another full pass — and lists every
 model-shaped string (`CP-UNR-…`, `DS-7…`, `DH-XVR…`, `VIGI NVR…`, `SATATYA…`)
