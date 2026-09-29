@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 505 pass, 0 fail: 486 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 5 on vendor-made files from other recorders (§8g) |
+| Automated tests | 514 pass, 0 fail: 493 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 7 on vendor-made files: 5 from other recorders (§8g) and 2 on NIST's reference export (§8i) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
@@ -565,6 +565,36 @@ tests). The disks have two cameras, H.264 and H.265 recordings split into
 fragments, sidecars, and a stray file. They come in four layouts: plain,
 RAID 1 member, RAID 0 member and XFS. As with Uniview, only a real Matrix
 disk can show whether its filesystem is ext4 at all.
+
+## 8i. Export in NIST's CCTV profile (NISTIR 8161 Rev. 1, Level 0)
+
+NIST wrote an export profile for CCTV at the FBI's request (NISTIR 8161r1,
+2019). It asks for:
+- an MP4 holding one H.264 stream;
+- in every frame, two SEI messages: a MISB ST 0604 precision time stamp
+  (UTC, microseconds) and a "timesource" code saying how the recorder's clock
+  was set;
+- at the end of the file, an XMP packet with the **ClockOffset**: the
+  recorder's clock and a reference clock, read at the same moment.
+
+This is the "no UTC without a stated zone" rule (§8) in a standard,
+machine-readable form. `cli.py export-nist` writes it from an extracted
+H.264 stream (`report/nist_export.py`, USER_MANUAL §3.4m).
+
+| Check | Result |
+|---|---|
+| Against **NIST's own reference file** (`WEB3.mp4`, biometrics.nist.gov/cs_links/DVR_Standards/) | its stream re-exported with its own times: **all 355 MISB time-stamp SEI messages byte-identical** to NIST's; the pictures unchanged |
+| Decoded by ffmpeg | **the same 355 pictures** as NIST's file (MD5 per frame), and no decoder error. NIST's own file draws "SEI type 5 size 13 truncated": it declares 13 bytes for an 11-byte "timesource" record; ours declares 11 |
+| ClockOffset XMP | well-formed, in NIST's two namespaces, codes and elements as in `ClockOffset.xsd` and `TimeValueset.xsd`. NIST's published example is not well-formed |
+| Pictures untouched | proven on every export: the SHA-256 of the input's NAL units equals that of the MP4's video NAL units read back from the written file, less the added SEI |
+| UTC | only with a stated zone; the recorder's measured clock error is applied and the rule recorded. Without a zone, no time stamp is written and the file is marked not Level 0 |
+| H.265 | refused: Level 0 is H.264, and re-encoding would alter the evidence |
+
+What it does not claim: the export is a derived copy for exchange and
+playback, not the evidence. Its per-frame times come from the recorder's
+clock, via the plugin's frame times or a start time and frame rate. The MISB
+status bit 7 is set ("lock unknown"), because a recorder's clock is not
+known to be locked to true time.
 
 ## 8c. OSD reader (optional layer — first real run 28 Sep: 1 of 5 reference titles, no clock)
 

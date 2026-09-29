@@ -1009,6 +1009,72 @@ def cmd_case_export(args) -> int:
     return 0
 
 
+def cmd_export_nist(args) -> int:
+    """An extracted H.264 stream as a NIST CCTV Export Profile Level 0 MP4
+    (NISTIR 8161r1): per-frame MISB precision time stamps in UTC, the
+    recorder's clock-set source, and the ClockOffset from the examiner's
+    reading of the recorder's clock against a reference.  Not re-encoded."""
+    from datetime import timedelta
+
+    from analyse.timeline import ClockModel
+    from core.contract import SCHEMA_VERSION, utc_now
+    from core.hashing import sha256_file
+    from report import nist_export as N
+
+    es = open(args.es, "rb").read()
+    try:
+        start = N._parse_local(args.start)
+        if args.times:
+            with open(args.times, encoding="utf-8") as fh:
+                times = [N._parse_local(line) for line in fh if line.strip()]
+        else:
+            n = len(N.access_units(N.split_nals(es)))
+            times = [start + timedelta(seconds=k / args.fps) for k in range(n + 1)]
+        clock = ClockModel.from_observation(args.tz_offset, args.clock_observed,
+                                            args.clock_reference)
+        reading = None
+        if args.clock_observed and args.clock_reference:
+            reading = (N._parse_local(args.clock_observed), N._parse_local(args.clock_reference))
+        os.makedirs(args.out, exist_ok=True)
+        path = os.path.join(args.out, os.path.splitext(os.path.basename(args.es))[0] + ".nist.mp4")
+        res = N.export(es, path, times, tz_offset_min=args.tz_offset,
+                       drift_s=clock.drift_s if clock.drift_source else None,
+                       clock_set=args.clock_set, clock_reading=reading,
+                       recorder_clock_source=args.recorder_clock_source,
+                       reference_source=args.reference_source)
+    except (ValueError, OSError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    manifest = {"schema_version": SCHEMA_VERSION, "generated_utc": utc_now(),
+                "tool": "ps26150-forensics export-nist", "input": os.path.abspath(args.es),
+                "input_sha256": sha256_file(args.es), "clock": clock.to_dict(),
+                "frame_times": ("one per picture from " + os.path.basename(args.times)
+                                if args.times else f"first picture {args.start}, then "
+                                f"{args.fps:g} per second (recorder clock)"),
+                "output": res}
+    mpath = path + ".manifest.json"
+    with open(mpath, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2)
+    print(f"{BANNER} - NIST CCTV export (NISTIR 8161r1 Level 0)\n")
+    print(f"  [+] {res['file']}  {human_size(res['bytes'])}  {res['pictures']} pictures, "
+          f"{res['width']}x{res['height']}  sha256 {res['sha256'][:16]}...")
+    print(f"  pictures      {'unchanged' if res['pictures_unchanged'] else 'CHANGED - do not use'}"
+          f" (input NAL units = output NAL units without the added SEI)")
+    if res["first_utc"]:
+        print(f"  time stamps   {res['time_stamps']}, {res['first_utc']} -> {res['last_utc']}; "
+              f"{clock.rule()}")
+    print(f"  Level 0       {'yes' if res['level0'] else 'no'}")
+    for why in res["not_level0_because"]:
+        print(f"    - {why}")
+    ledger = _case_ledger(args.out)
+    if ledger:
+        ledger.append("nist_export", {"file": res["file"], "level0": res["level0"],
+                                      "input_sha256": manifest["input_sha256"]},
+                      data_hash=res["sha256"])
+    print(f"  [+] {os.path.basename(mpath)}")
+    return 0 if res["pictures_unchanged"] else 1
+
+
 def cmd_ewf_info(args) -> int:
     """What an E01 image holds, and - with --verify - whether this reader
     reproduces the MD5/SHA-1 the image stores for its own media."""
@@ -2191,6 +2257,37 @@ def main() -> int:
                        help="the case as CASE/UCO JSON-LD (the forensic exchange standard)")
     p.add_argument("--out", required=True, help="case directory")
     p.set_defaults(func=cmd_case_export)
+
+    p = sub.add_parser("export-nist",
+                       help="an extracted H.264 stream as a NIST CCTV Export Profile "
+                            "(NISTIR 8161r1 Level 0) MP4: UTC time stamps in every frame, "
+                            "ClockOffset metadata; not re-encoded")
+    p.add_argument("--es", required=True, help="the H.264 elementary stream (from extract)")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--start", required=True,
+                   help="the first picture's time on the recorder's clock, "
+                        "'YYYY-MM-DD HH:MM:SS[.ffffff]'")
+    p.add_argument("--fps", type=float, default=25.0, help="frames per second (default 25)")
+    p.add_argument("--times", default="",
+                   help="instead of --fps: a file with one recorder-clock time per picture")
+    p.add_argument("--tz-offset", type=int, default=None,
+                   help="recorder zone, minutes east of UTC; without it no UTC time stamp "
+                        "is written")
+    p.add_argument("--clock-observed", default="",
+                   help="what the recorder displayed, 'YYYY-MM-DD HH:MM:SS'")
+    p.add_argument("--clock-reference", default="",
+                   help="trusted time at that instant, same zone")
+    p.add_argument("--clock-set", default="manual-unknown",
+                   choices=("auto-network", "auto-nonnetwork", "auto-unknown", "manual-network",
+                            "manual-nonnetwork", "manual-unknown"),
+                   help="how the recorder's clock was set (NISTIR 8161 Table 5), from its "
+                        "time settings screen")
+    p.add_argument("--recorder-clock-source", default="unknown",
+                   choices=("network", "nonnetwork", "unknown"))
+    p.add_argument("--reference-source", default="network",
+                   choices=("network", "nonnetwork", "unknown"),
+                   help="how the reference clock was set (a phone: network)")
+    p.set_defaults(func=cmd_export_nist)
 
     p = sub.add_parser("ewf-info",
                        help="an E01 image's segments, geometry and stored hashes; --verify "
