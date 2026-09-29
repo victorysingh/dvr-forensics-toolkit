@@ -44,6 +44,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
+from core import proc
+
 RULE = "analyse.daylight.v1"
 MONO_MAX = 4.0          # mean chroma (max-min of R,G,B, 0-255) at or below: infrared picture
 MIN_RUN = 3             # samples a mode must hold to count (a headlight flash does not)
@@ -200,7 +202,9 @@ def sample(clip: str, every: int = 60, start: Optional[str] = None,
     cmd = [ffmpeg, "-hide_banner", "-nostdin", "-copyts", *fmt, *rate, "-i", clip,
            "-vf", f"fps=1/{every},scale={w}:{h},showinfo", "-f", "rawvideo",
            "-pix_fmt", "rgb24", "-"]
-    p = subprocess.run(cmd, capture_output=True)
+    p = proc.run(cmd, timeout=proc.STREAM_S, capture_output=True)
+    if p.timed_out:
+        raise RuntimeError(f"ffmpeg did not finish sampling {clip} within {proc.STREAM_S} s")
     times = [float(m) for m in re.findall(rb"pts_time:(-?[0-9.]+)", p.stderr)]
     size = w * h * 3
     frames = [p.stdout[i:i + size] for i in range(0, len(p.stdout) - size + 1, size)]

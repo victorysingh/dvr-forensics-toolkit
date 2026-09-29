@@ -38,15 +38,18 @@ import subprocess
 import sys
 from datetime import datetime
 
+from core import proc
+
 
 def _frames(clip: str, out_dir: str, stem: str, window_s: float) -> list[str]:
     """The frames read-osd samples (the same -t window and fps), whole."""
     from analytics import osd
     fmt = ["-f", osd.codec_of(clip)] if osd.codec_of(clip) else []
     pattern = os.path.join(out_dir, f"{stem}_%d.jpg")
-    subprocess.run(["ffmpeg", "-nostdin", "-v", "quiet", "-y", "-t", str(window_s), *fmt,
+    proc.run(["ffmpeg", "-nostdin", "-v", "quiet", "-y", "-t", str(window_s), *fmt,
                     "-i", clip, "-vf", f"fps={osd.FRAMES / float(window_s)},scale=960:-2",
-                    "-frames:v", str(osd.FRAMES), "-start_number", "0", pattern], check=False)
+                    "-frames:v", str(osd.FRAMES), "-start_number", "0", pattern],
+             timeout=proc.CLIP_S)
     return sorted((f for f in os.listdir(out_dir) if f.startswith(stem + "_")),
                   key=lambda f: int(f.rsplit("_", 1)[1].split(".")[0]))
 

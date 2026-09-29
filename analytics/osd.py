@@ -36,6 +36,7 @@ import tempfile
 from datetime import datetime, timedelta
 from typing import Optional
 
+from core import proc
 from analytics.osd_rules import (BANDS, CLOCK_CHARS, CLOCK_TOL_S, OSD_RULE, TITLE_CHARS,
                                  clock_check, normalise_title, parse_osd_clock, pick_band,
                                  resolve_against, summarise, vote_title)
@@ -119,7 +120,7 @@ def sample(clip: str, band: tuple[float, float, float, float], out_dir: str,
     cmd = ["ffmpeg", "-v", "quiet", "-t", str(window_s), *fmt, "-i", clip,
            "-vf", filters(band, fps, mode), "-frames:v", str(frames),
            os.path.join(out_dir, "f%03d.pgm")]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    proc.run(cmd, timeout=proc.CLIP_S, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir)
                   if f.endswith(".pgm"))
 
@@ -131,9 +132,9 @@ def ocr(image: str, chars: str) -> str:
     rules module: `tessedit_char_whitelist` is honoured by the legacy engine
     but quietly ignored by the LSTM engine in Tesseract 4 and 5, so relying on
     the flag alone would silently do nothing on a modern install."""
-    r = subprocess.run(["tesseract", image, "stdout", "--psm", "7",
-                        "-c", f"tessedit_char_whitelist={chars}"],
-                       capture_output=True, text=True, check=False)
+    r = proc.run(["tesseract", image, "stdout", "--psm", "7",
+                  "-c", f"tessedit_char_whitelist={chars}"],
+                 timeout=proc.IMAGE_S, capture_output=True, text=True)
     return (r.stdout or "").strip()
 
 

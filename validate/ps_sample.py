@@ -34,6 +34,7 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+from core import proc
 from acquire.device import BlockDevice
 from recover import pscarve
 
@@ -52,8 +53,11 @@ def psm_times(data: bytes) -> list[Optional[str]]:
 
 
 def _md5s(ffmpeg: str, args: list[str]) -> list[str]:
-    r = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-v", "quiet", *args,
-                        "-map", "0:v", "-f", "framemd5", "-"], capture_output=True, text=True)
+    r = proc.run([ffmpeg, "-hide_banner", "-nostdin", "-v", "quiet", *args,
+                  "-map", "0:v", "-f", "framemd5", "-"],
+                 timeout=proc.STREAM_S, capture_output=True, text=True)
+    if r.timed_out:
+        raise RuntimeError(f"ffmpeg did not finish within {proc.STREAM_S} s")
     return [line.rsplit(",", 1)[1].strip() for line in r.stdout.splitlines()
             if line and not line.startswith("#")]
 
@@ -108,9 +112,9 @@ def check(path: str, out: str, ffmpeg: str = "", osd_box: Optional[tuple] = None
                          "common": common}
         kdir = os.path.join(out, "keyframes")
         os.makedirs(kdir, exist_ok=True)
-        subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-v", "quiet", "-f", "mpeg",
+        proc.run([ffmpeg, "-hide_banner", "-nostdin", "-v", "quiet", "-f", "mpeg",
                         "-i", cpath, "-vf", "select=eq(pict_type\\,I)", "-vsync", "vfr",
-                        os.path.join(kdir, "key_%03d.png"), "-y"], check=False)
+                  os.path.join(kdir, "key_%03d.png"), "-y"], timeout=proc.STREAM_S)
         keys = sorted(os.listdir(kdir))
         rep["keyframes"] = keys
         try:
