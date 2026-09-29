@@ -46,14 +46,34 @@ MODELS = {
 # Thresholds: 0.5 for objects is the tool's standing value, not tuned. The
 # YuNet threshold, 0.7, was chosen on the only frames with face labels (set A:
 # 0.6 finds 13 of 27 with 1 false alarm, 0.7 finds 12 with none, 0.8 finds 10).
+# class_min overrides objects_min for one class.  YOLOX people at 0.4: on set A
+# 39 of 57 found (32 at 0.5) and on CAVIAR 810 of 1,089 (777), with no more
+# frames falsely flagged on either; vehicles at 0.4 would add 5 false alarms on
+# set A, so they stay at 0.5 (docs/VALIDATION_REPORT.md section 8a).
 MODEL_SETS = {
     "yolox": {"objects": "yolox", "faces": "yunet", "objects_min": 0.5, "faces_min": 0.7,
+              "class_min": {"person": 0.4},
               "tiles": 2, "rule": "analytics.yolox_yunet.v3",
               "how": "YOLOX-S on the whole 1920 x 1080 frame and on each tile of an n x n "
                      "grid; YuNet on the whole 1920 x 1080 frame"},
     "classic": {"objects": "objects", "faces": "face", "objects_min": 0.5, "faces_min": 0.8,
+                "class_min": {},
                 "tiles": 3, "rule": "analytics.ultraface_ssdmobilenet.v2",
                 "how": "SSD-MobileNet on the whole frame and each tile of an n x n grid of a "
                        "1920 x 1080 decode; UltraFace likewise on the 640 x 360 frame"},
 }
 DEFAULT_SET = "yolox"
+
+
+def threshold(model_set: str, label: str) -> float:
+    """The score a detection of `label` needs to be reported by this set."""
+    s = MODEL_SETS[model_set]
+    if label == "face":
+        return s["faces_min"]
+    return s["class_min"].get(label, s["objects_min"])
+
+
+def thresholds(model_set: str) -> dict:
+    """The set's thresholds as recorded in its output."""
+    s = MODEL_SETS[model_set]
+    return {"faces": s["faces_min"], "objects": s["objects_min"], **s["class_min"]}

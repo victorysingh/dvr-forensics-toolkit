@@ -86,7 +86,7 @@ produce reliable and legally defensible forensic results.
 | Recovery | `parsers/dahua.py` remnants; `recover/carver.py`; `recover/pscarve.py`; `recover/annexb.py` (vendors with no parser) | Dahua remnants + indexless DHAV carver, and an MPEG-PS carver for Hikvision footage (recovered from under a reformatted drive, dated), both on real media (`spec_only`) and run inside the acquisition pass |
 | Timeline Analysis | `analyse/timeline.py` | working: zone + measured clock error, gaps, cross-camera correlation |
 | Reporting | `report/`, `viewer/` | working: HTML + JSON report, dependency-free viewer |
-| Machine Learning | `analyse/activity.py` | motion activity from compressed frame sizes (lead, not evidence); face and object detection built as leads in the optional layer (ffmpeg + ONNX, `analytics/`), measured against 487 frames labelled by eye: the first version found a person in 0 of the 57 frames that had one; now (YOLOX-S + YuNet) 32 of 57, faces 12 of 27, vehicles 8 of 12, and 777 of 1,089 people on CAVIAR footage never used for choosing |
+| Machine Learning | `analyse/activity.py` | motion activity from compressed frame sizes (lead, not evidence); face and object detection built as leads in the optional layer (ffmpeg + ONNX, `analytics/`), measured against 487 frames labelled by eye: the first version found a person in 0 of the 57 frames that had one; now (YOLOX-S + YuNet) 39 of 57, faces 12 of 27, vehicles 8 of 12, and 810 of 1,089 people on CAVIAR footage never used for choosing |
 
 ## Named deliverables
 

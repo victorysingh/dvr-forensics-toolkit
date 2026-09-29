@@ -2099,7 +2099,7 @@ def test_analytics_models() -> None:
     """The model sets: every model pinned, with a licence that allows use and a
     source to fetch it from; each set's thresholds are ones the sweep scores."""
     print("\n[analytics: model sets]")
-    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS
+    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, threshold
     from validate.analytics_eval import SWEEP
     check("every model is pinned by SHA-256, with an https source and an MIT or Apache-2.0 licence",
           all(len(m["sha256"]) == 64 and int(m["sha256"], 16) >= 0 and m["url"].startswith("https://")
@@ -2110,7 +2110,13 @@ def test_analytics_models() -> None:
               for s in MODEL_SETS.values()) and DEFAULT_SET == "yolox")
     check("each set's thresholds are among the sweep's, so the sweep reports the tool's own row",
           all(s["faces_min"] in SWEEP["face"] and s["objects_min"] in SWEEP["objects"]
+              and all(v in SWEEP["objects"] for v in s["class_min"].values())
               for s in MODEL_SETS.values()))
+    check("a class threshold overrides the objects one for that class only: YOLOX people at 0.4, "
+          "vehicles and bags at 0.5, faces at 0.7; the classic set unchanged",
+          (threshold("yolox", "person"), threshold("yolox", "car"), threshold("yolox", "backpack"),
+           threshold("yolox", "face"), threshold("classic", "person"), threshold("classic", "face"))
+          == (0.4, 0.5, 0.5, 0.7, 0.5, 0.8))
 
 
 def test_caviar_eval(tmp: str) -> None:

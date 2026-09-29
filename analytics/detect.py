@@ -34,7 +34,7 @@ from typing import Optional
 import numpy as np
 import onnxruntime as ort
 
-from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS
+from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, threshold, thresholds
 from analytics.static import (STATIC_IOU, STATIC_MIN_FRAMES, STATIC_SHARE, counted,
                               flag_implausible, flag_static)
 from analytics.tiles import TILE_OVERLAP, merge, tiles, to_frame
@@ -253,18 +253,22 @@ def detect_frame(models: dict, small: np.ndarray, big: Optional[np.ndarray] = No
     DECODE_W x DECODE_H, `big` the same frame larger, by default `small`),
     objects on an n x n grid of tiles as well as the whole frame, the same
     object boxed in two overlapping tiles merged.  `low` = (faces, objects)
-    minimum scores, by default the set's thresholds.  With the classic set
+    minimum scores; by default each detection must reach its class's
+    threshold in the set (analytics.models.threshold).  With the classic set
     and n = 1 this is the untiled tool of 28 Sep, exactly."""
     s = MODEL_SETS[models["set"]]
     n = s["tiles"] if n is None else n
-    low_f, low_o = low or (s["faces_min"], s["objects_min"])
+    low_f, low_o = low or (s["faces_min"], min([s["objects_min"], *s["class_min"].values()]))
     big = small if big is None else big
     if models["set"] == "classic":
         found = (_tiled(ultraface, models["faces"], small, n, low_f)
                  + _tiled(ssd, models["objects"], big, n, low_o))
     else:
         found = yunet(models["faces"], big, low_f) + _tiled(yolox, models["objects"], big, n, low_o)
-    return found if n == 1 else merge(found)
+    found = found if n == 1 else merge(found)
+    if low is None:          # per class; merging is per label, so the order does not matter
+        found = [d for d in found if d["score"] >= threshold(models["set"], d["label"])]
+    return found
 
 
 def _thumbnail(rgb: np.ndarray, dets: list[dict], path: str) -> None:
@@ -352,7 +356,7 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
         "rule": s["rule"], "status": "lead, not evidence", "model_set": model_set,
         "models": {job: {x: MODELS[s[job]][x] for x in ("name", "source", "license", "sha256")}
                    for job in ("faces", "objects")},
-        "thresholds": {"faces": s["faces_min"], "objects": s["objects_min"]},
+        "thresholds": thresholds(model_set),
         "tiling": {"grid": (f"{n} x {n} tiles and the whole frame" if n > 1
                             else "none, the whole frame only"),
                    "overlap": TILE_OVERLAP if n > 1 else None,
@@ -373,8 +377,8 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
             "recorder timestamp.",
             "Every detection is a lead for an examiner to review in the footage itself.",
             "An empty result does not mean nobody was there. Scored against 287 frames of "
-            "real recorder footage labelled by eye, the tool reported a person in 32 of the "
-            "57 frames that had one; on CAVIAR footage it found 777 of 1,089 labelled "
+            "real recorder footage labelled by eye, the tool reported a person in 39 of the "
+            "57 frames that had one; on CAVIAR footage it found 810 of 1,089 labelled "
             "people (docs/VALIDATION_REPORT.md section 8a).",
             "Detections that stay in the same place through most of a clip are flagged "
             "'static' and not counted: on real footage a steel pot was repeatedly detected "
