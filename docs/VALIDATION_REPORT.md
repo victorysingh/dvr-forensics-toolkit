@@ -1462,7 +1462,7 @@ The whole workflow, run as an examiner would run it: from `ps26150-dvr.exe`
   case folder's top level. It now looks one folder down, and it leaves out
   (and says so) any footage whose manifest names another device.
 
-**Re-run on 29 Sep evening, from `staging` (`e9a7527`).** The executable was
+**Re-run on 29 Sep evening, from `staging` (`a7cfb41`; `e9a7527` before the 30 Sep history rewrite).** The executable was
 rebuilt with the permanent build environment. It ran with no Python on the
 path, into fresh folders; the demo copies were not touched.
 
