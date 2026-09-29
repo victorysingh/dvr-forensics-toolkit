@@ -493,19 +493,101 @@ contain people. The 24 people found come from two clips. This measures
 the direction and rough size of the gain; it does not predict recall on
 other cameras.
 
-### On our own drive (29 Sep - sampled, labels pending)
+### On our own drive (29 Sep): 210 frames of the CP Plus cameras
 
-The runs above are public clips. The same measurement on the team's own
-cameras is set up: `analytics_eval` sampled 35 keyframes evenly from each of
-six indexed drive-1 recordings - *Road View 1*, *Road View 2* and *Parking*,
-at 17:00 and at 22:00 on 3 Sep 2026 (`out/realchecks/analytics_eval/`, 210
-frames). It ran before tiling was merged, so it must be re-sampled with the
-current detector before the labels are scored. One result needs no labels:
-on all 35 night frames of *Parking*, where a car is parked in full view, the
-object model said *suitcase* and never *car* - the same miss as the parked
-cars in the Hikvision night clip above. Evenly sampled quiet hours hold few
-people, so person recall from this set must be reported with its count.
+The runs above are public clips. This is the same measurement on the team's
+own cameras. `analytics_eval sample --frames 35` took six indexed drive-1
+recordings - *Road View 1*, *Road View 2* and *Parking*, at 17:00 and at
+22:00 on 3 Sep 2026 - with the tool's 3 x 3 tiling
+(`out/realchecks/drive1_recall/`: `labels.csv` SHA-256 `7295e5ef…cab81f`,
+`detections.json` `8505aeef…fb132cb`).
 
+**Who labelled it: Claude, an AI model, at the user's request - not a
+person.** Every frame was viewed at its stored size. Distant areas were
+enlarged on every frame, and candidates at 4-6x. A change map against each
+camera's median frame, independent of the detector, pointed at small
+movers. The per-frame detections were not read until every label was
+written (`LABELS.md` beside the labels). A person then checked the frames
+the scores turn on (below); the other frames are the model's labels only.
+
+What the 210 frames hold:
+- a person in 3: one about 14 px tall beside a cow in a far field, and two
+  walkers on *Road View 2*, one partly behind a tree;
+- no face;
+- a vehicle in 100:
+  - the car parked in *Parking* at night, in full view (35 frames);
+  - a small car at the far end of *Road View 1* (5);
+  - a red car parked past the gate on *Road View 2*, partly hidden by a tree
+    (60, marked borderline).
+
+| Class | Found, as the tool reports | False alarms | Found, as the models said (before the rules) |
+|---|---|---|---|
+| Person | **0 of 3** (0 of 2 without the borderline frame) | **2 of 207** - the *dog* in frame 59 (0.75), and a smear in a corrupted frame (0.54) | 0 of 3 |
+| Face | none to find | **7 of 210** - one patch of grass between branches on *Road View 1*, 0.81-0.95, in 7 of 35 frames | - |
+| Vehicle | **1 of 100** (0 of 40 without the red car) | 0 of 110 | 15 of 100 (14 of 40) |
+
+What this adds to the public-clip results:
+- **The static rule has a gap.** The 7 "faces" sit on one fixed patch of grass.
+  They recur in 7 of 35 frames, under the rule's 25% share (`STATIC_SHARE`),
+  so every one is
+  reported. On the public clips no false alarm got through; here 7 of 210
+  frames carry one.
+- **The one vehicle "found" is the right frame, the wrong place.** Frame 68
+  holds the red car, but the box is on a small grey lump at the roadside,
+  there in other frames too. By object, the tool found none of the vehicles.
+- **Parked vehicles are removed by design.** The model sees the *Parking* car
+  in 14 of 35 night frames after tiling (0 before it: it said *suitcase*).
+  The static rule then removes every one, as on the public clips.
+- **No person was found**, and one of the two person reports is a dog. The
+  people here are small or partly hidden; the sweep finds none at any
+  threshold down to 0.2, where the false alarms rise to 10.
+- **The sweep:** vehicles as the models said rise to 50 of 100 at 0.2-0.3,
+  with no false alarm, and 22 of 100 remain after the rules. These are
+  frame-level: a box anywhere in the frame counts, so some may be boxes on
+  something else, as in frame 68. Faces at 0.5 give 14 false alarms.
+
+**Checked by a person (Shrestha, 29 Sep).** The review covered 22 frames:
+the 20 the scores turn on, plus 2 controls. They were shuffled and shown plain,
+with neither the labels nor the detector's boxes, and a 4x magnifier on hover
+(`out/realchecks/drive1_recall_review/`, `review_labels.shrestha.csv`
+SHA-256 `c90d8b3b…fb0`).
+
+The person agreed on **12 of 22 frames**, and by class on:
+- person, 21 of 22;
+- face, 21 of 22;
+- vehicle, 14 of 22.
+
+| Confirmed by the person | Different reading |
+|---|---|
+| All 7 face false alarms: no face (11, 12, 13, 18, 19, 22, 26) | Frame 1: no person (the ~14 px figure beside a cow, marked borderline) |
+| Both person false alarms: no person (6, the corrupted frame; 59, the dog) | Frame 48: **a face** - the walker faces the camera; the head is ~5 px and in shadow |
+| Both walkers: a person (48, 51) | The far car (30, 32, 34): no vehicle - a ~19 x 9 px dark shape |
+| The *Parking* car (control 190), the empty control (90), the infrared frame with no car visible (150), and the red car in 48 and 68 | The half-hidden red car in 35, 51, 59, 142, 162: no vehicle (marked borderline) |
+
+Every difference is an object at the edge of what the frame shows at its
+size: the person looked at 1.25x with a magnifier, the labels were made at
+4-6x. On the person's reading - no far car, no borderline frames, and a face
+in frame 48 - the tool reports:
+
+| Class | Found, as the tool reports | False alarms |
+|---|---|---|
+| Person | **0 of 2** | 2 of 207 |
+| Face | **0 of 1** | 7 of 209 |
+| Vehicle | **0 of 35**, the parked *Parking* car; 14 of 35 before the static rule | 0 of 110 |
+
+No conclusion above changes. The false alarms the findings rest on are
+confirmed by a person, and the tool found none of the people or vehicles on
+any of the three readings.
+
+Before any label, re-sampling the same 210 keyframes before and after tiling
+showed what tiling changes:
+
+| Clip | Before tiling (models said) | With tiling (models said) | With tiling, reported |
+|---|---|---|---|
+| *Parking*, 22:00 (a car parked in full view in every frame) | *suitcase* 35 of 35, *car* 0 | *car* 14, *suitcase* 23, *backpack* 1 | *backpack* 1 - every *car* flagged static |
+| *Road View 1*, 17:00 | *person* 1 | *person* 1, *face* 7 | the same |
+| *Road View 2*, 17:00 | *person* 1 | *person* 2, *car* 1 | *person* 1, *car* 1 |
+| the other three | nothing | *suitcase* 1 (*Road View 2*, 22:00) | the same |
 
 ## 8b. Second drive: Hikvision footage under a Dahua-family format
 
@@ -1188,5 +1270,5 @@ tool's own parser reads, field by field.
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
 - ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** ~~Still to run on the real images.~~ **Run 29 Sep: agree on both drives' images and on five vendor-made files (§9a).**
 - ~~The ffmpeg cross-check on drive 1's own `.dav` files.~~ **Run 29 Sep (§8g):** 719,097 of 719,097 emitted frames identical. It found one thing to fix: after a frame-counter gap the DHAV date and millisecond counter can disagree by up to ~3 s (6 files, 227 frames). Frames after such a gap should carry that wider time uncertainty in the timeline and report; today they do not.
-- Analytics recall on our own cameras: 210 drive-1 frames sampled (§8a), to be re-sampled with tiling, then labelled and scored.
+- Analytics recall on our own cameras: 210 drive-1 frames sampled with tiling, labelled by Claude (an AI model), the 20 deciding frames checked by a person (§8a): person 0 of 2, face 0 of 1 with 7 false alarms, vehicle 0 of 35 as reported. Open: the static rule's 25% share lets an intermittent fixed false alarm through.
 - ~~Drive 2 `label-ps` re-run on the drive.~~ **Run 29 Sep (§8b):** 440 `stale_tail`, 55 `outside_index`; index unchanged since 26 Sep.
