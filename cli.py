@@ -2447,4 +2447,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # A packaged build (packaging/) starts the scan's parallel workers
+    # (acquire/parallel.py, spawn) by re-running this executable; this hands
+    # those runs to multiprocessing instead of the command-line parser.  A no-op
+    # when run from source.
+    import multiprocessing
+    multiprocessing.freeze_support()
     raise SystemExit(main())

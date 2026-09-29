@@ -811,6 +811,14 @@ def test_heimvision(tmp: str) -> None:
           found and v["files"] == 4 and v["files_written"] == 3 and v["ident"] == "ok1ormated"
           and res.validation_status == "spec_only"
           and all(f["source"] == "observed_real_media" for f in res.field_provenance), str(v))
+    from detect.engine import SignatureScanner
+    sc = SignatureScanner()
+    sc.scan_block(0, open(img, "rb").read(), 0, "")
+    dets = {d.vendor: d for d in sc.detections()}
+    check("a scan names the recorder from its own structures (the disk carries no brand "
+          "string), with its parser available",
+          "HeimVision" in dets and dets["HeimVision"].parser_available
+          and dets["HeimVision"].confidence > 0.8, str({k: d.confidence for k, d in dets.items()}))
     check("the recorder's zone setting measured: display clock UTC+8 against its own "
           "system clock (FAT times), on every file",
           v["recorder_zone_minutes"] == 480 and v["recorder_zone_agreement"] == "3/3 files")
@@ -968,6 +976,15 @@ def test_heimvision(tmp: str) -> None:
               rep["identical"] and rep["fat"]["in_both"] == 17154
               and rep["fat"]["written_per_ftk"] == 808 and len(rep["ext3"]["compared"]) == 4
               and rep["zone_setting_minutes_from_ftk_times"] == 480, str(rep["fat"]))
+    sc = SignatureScanner()
+    with BlockDevice(path) as dev:
+        for k in range(2):
+            sc.scan_block(k << 23, dev.read_at(k << 23, 8 << 20), k, "")
+    dets = {d.vendor: d for d in sc.detections()}
+    check("real image: the first 16 MiB are enough for a scan to name HeimVision - its "
+          "system partition's mount point and its log and index schemas - parser available",
+          "HeimVision" in dets and dets["HeimVision"].confidence > 0.9
+          and dets["HeimVision"].parser_available, str({k: d.confidence for k, d in dets.items()}))
 
 
 def test_godrej(tmp: str) -> None:
@@ -3586,6 +3603,28 @@ def test_s63_certificate(tmp: str) -> None:
           and led.verify()["valid"])
 
 
+def test_s63_footage_folders(tmp: str) -> None:
+    """Footage extracted into a subfolder (USER_MANUAL 3.4: `extract --out clips/`)
+    is still certified; footage from another device is not."""
+    print("\n[s.63 certificate: where the footage was extracted to]")
+    from report import s63
+    case = os.path.join(tmp, "s63_case")                    # made by test_s63_certificate
+    with open(os.path.join(case, "scan_report.json"), encoding="utf-8") as fh:
+        device = json.load(fh)["device"]["path"]
+    for folder, src, sha in (("clips", device, "11" * 32), ("other", "/dev/sdz", "22" * 32)):
+        os.makedirs(os.path.join(case, folder), exist_ok=True)
+        with open(os.path.join(case, folder, f"{folder}.manifest.json"), "w", encoding="utf-8") as fh:
+            json.dump({"source_device": src, "output": {"file": f"{folder}.h265", "bytes": 10,
+                                                        "sha256": sha}}, fh)
+    cert = s63.build(case, "B", records="footage")
+    vals = {v["record"]: v["value"] for v in cert["fields"]["hash_values"]}
+    check("footage extracted into a subfolder of the case is certified with its path; footage "
+          "whose manifest names another device is left out, and the draft says why",
+          vals.get("clips/clips.h265") == "11" * 32 and "other/other.h265" not in vals
+          and any("other/other.manifest.json" in n and "not certified" in n
+                  for n in cert.get("notes", [])), str(sorted(vals))[:300])
+
+
 def test_real_media_tools(tmp: str) -> None:
     """The pieces of the real-media run: the decode check's classes, the
     head-image model search, and the carver coverage score."""
@@ -3932,6 +3971,7 @@ def main() -> int:
         test_matrix(tmp)
         test_nist_export(tmp)
         test_s63_certificate(tmp)
+        test_s63_footage_folders(tmp)
         test_real_media_tools(tmp)
         test_ewf(tmp)
         test_parallel_taps(tmp)

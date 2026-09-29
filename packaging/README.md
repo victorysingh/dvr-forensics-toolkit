@@ -43,6 +43,14 @@ Put a `plugins\` folder next to the executable and drop the plugin file in
   It is listed under plugin errors, so evidence is never parsed by a file
   that silently replaced a shipped parser.
 
+## Worker processes
+
+`scan --carve` / `--carve-ps` / `--activity` run each tap in its own
+process. A packaged build starts those by re-running the executable, so
+`cli.py` calls `multiprocessing.freeze_support()` before anything else.
+Without it the taps fail and the scan carries on without them (found in
+the rehearsal of 29 Sep, VALIDATION_REPORT §8k).
+
 ## What is left out
 
 - **The analytics layer** (numpy, onnxruntime, the ONNX models) is hundreds of
