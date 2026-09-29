@@ -224,7 +224,11 @@ class MatrixParser(VendorParser):
         fss, _ = self.filesystems(dev)
         for _, fs, _ in fss:
             for _, cam in self._cameras(fs):
-                if any(_date(e["name"]) for e in fs.listdir(cam["number"]) if e["kind"] == "dir"):
+                try:
+                    entries = fs.listdir(cam["number"])
+                except ExtError:
+                    continue
+                if any(_date(e["name"]) for e in entries if e["kind"] == "dir"):
                     return True
         return False
 
@@ -235,6 +239,7 @@ class MatrixParser(VendorParser):
         result.field_provenance = [dict(f.__dict__, status=f.status) for f in FIELDS]
         fss, notes = self.filesystems(dev)
         recs, other, volumes = [], 0, []
+        self.skipped = []
         for start, fs, via in fss:
             cams = self._cameras(fs)
             volumes.append({"offset": start, "kind": fs.kind, "via": via, "label": fs.label,
@@ -244,6 +249,10 @@ class MatrixParser(VendorParser):
                 r, o = self._camera(fs, path, cam)
                 recs += r
                 other += o
+        if self.skipped:
+            result.errors.append(f"{len(self.skipped)} file(s) or folder(s) not read: "
+                                 + "; ".join(self.skipped[:5])
+                                 + ("; ..." if len(self.skipped) > 5 else ""))
         if not recs:
             result.errors.append("no SATATYA recording tree (CameraNN/DD_Mon_YYYY/HH/"
                                  "HH_MM_SS~HH_MM_SS.stm) on any readable ext filesystem"
@@ -275,17 +284,27 @@ class MatrixParser(VendorParser):
             ]
         return result
 
+    def _listdir(self, fs: Ext, number: int, path: str) -> list[dict]:
+        """A folder's entries, or none if the ext reader refuses it (noted)."""
+        try:
+            return fs.listdir(number)
+        except ExtError as exc:
+            self.skipped.append(f"{path or '/'}: {exc}")
+            return []
+
     def _camera(self, fs: Ext, path: str, cam: dict) -> tuple[list[Recording], int]:
         recs, other = [], 0
         cam_id = cam["name"]
-        for d in fs.listdir(cam["number"]):
+        if not hasattr(self, "skipped"):
+            self.skipped = []
+        for d in self._listdir(fs, cam["number"], path):
             ymd = _date(d["name"]) if d["kind"] == "dir" else None
             if not ymd:
                 continue
-            for h in fs.listdir(d["number"]):
+            for h in self._listdir(fs, d["number"], f"{path}/{d['name']}"):
                 if h["kind"] != "dir" or not HOUR_RE.match(h["name"]):
                     continue
-                entries = fs.listdir(h["number"])
+                entries = self._listdir(fs, h["number"], f"{path}/{d['name']}/{h['name']}")
                 by_name = {e["name"]: e for e in entries if e["kind"] == "file"}
                 used = set()
                 for name, e in sorted(by_name.items()):
@@ -296,8 +315,11 @@ class MatrixParser(VendorParser):
                     sidecars = {n: by_name[n] for n in by_name
                                 if n != name and n.rsplit(".", 1)[0] == stem}
                     used |= {name, *sidecars}
-                    recs.append(self._recording(fs, f"{path}/{d['name']}/{h['name']}", cam_id,
-                                                ymd, m, name, e, sidecars))
+                    try:
+                        recs.append(self._recording(fs, f"{path}/{d['name']}/{h['name']}", cam_id,
+                                                    ymd, m, name, e, sidecars))
+                    except ExtError as exc:
+                        self.skipped.append(f"{path}/{d['name']}/{h['name']}/{name}: {exc}")
                 other += len(set(by_name) - used)
         return recs, other
 
