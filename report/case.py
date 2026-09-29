@@ -59,12 +59,19 @@ VENDOR_MATRIX = {
                   "parser": "Honeywell", "parser_status": "spec_only", "media": "none",
                   "basis": "plugins/honeywell.py, written from Yoon & Hwang, DFRWS USA 2026 "
                            "(arXiv:2605.07430); no Honeywell disk read by the team"},
-    "TP-Link": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
-                "media": "none", "basis": "firmware string signature only"},
+    "TP-Link": {"family": "TP-Link in-house TPFS (raw or ext4; SQLite index in a TpFile header)",
+                "parser": "TP-Link", "parser_status": "detected_not_parsed", "media": "none",
+                "basis": "plugins/tplink.py, from the VIGI NVR1008H V2 240119 firmware (static "
+                         "disassembly): detects the format sector and the index, and reads the "
+                         "index and system log when they are plain SQLite; footage is not "
+                         "placed on the disk (zone geometry not recovered) - carve-annexb"},
     "Godrej": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
                "media": "none", "basis": "firmware string signature only"},
-    "Uniview": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
-                "media": "none", "basis": "firmware/volume string signature only"},
+    "Uniview": {"family": "Uniview UBS (its own block store, in the kernel module comm.ko)",
+                "parser": "Uniview", "parser_status": "spec_only", "media": "none",
+                "basis": "plugins/uniview.py, from the storage driver of Uniview firmware "
+                         "NVR301-04LS3-W B3612.1.21.220408 (static disassembly); no Uniview "
+                         "disk read by the team"},
     "Matrix": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
                "media": "none", "basis": "firmware string signature only"},
 }
