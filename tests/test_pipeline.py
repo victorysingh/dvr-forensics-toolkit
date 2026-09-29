@@ -811,6 +811,14 @@ def test_heimvision(tmp: str) -> None:
           found and v["files"] == 4 and v["files_written"] == 3 and v["ident"] == "ok1ormated"
           and res.validation_status == "spec_only"
           and all(f["source"] == "observed_real_media" for f in res.field_provenance), str(v))
+    from detect.engine import SignatureScanner
+    sc = SignatureScanner()
+    sc.scan_block(0, open(img, "rb").read(), 0, "")
+    dets = {d.vendor: d for d in sc.detections()}
+    check("a scan names the recorder from its own structures (the disk carries no brand "
+          "string), with its parser available",
+          "HeimVision" in dets and dets["HeimVision"].parser_available
+          and dets["HeimVision"].confidence > 0.8, str({k: d.confidence for k, d in dets.items()}))
     check("the recorder's zone setting measured: display clock UTC+8 against its own "
           "system clock (FAT times), on every file",
           v["recorder_zone_minutes"] == 480 and v["recorder_zone_agreement"] == "3/3 files")
@@ -968,6 +976,15 @@ def test_heimvision(tmp: str) -> None:
               rep["identical"] and rep["fat"]["in_both"] == 17154
               and rep["fat"]["written_per_ftk"] == 808 and len(rep["ext3"]["compared"]) == 4
               and rep["zone_setting_minutes_from_ftk_times"] == 480, str(rep["fat"]))
+    sc = SignatureScanner()
+    with BlockDevice(path) as dev:
+        for k in range(2):
+            sc.scan_block(k << 23, dev.read_at(k << 23, 8 << 20), k, "")
+    dets = {d.vendor: d for d in sc.detections()}
+    check("real image: the first 16 MiB are enough for a scan to name HeimVision - its "
+          "system partition's mount point and its log and index schemas - parser available",
+          "HeimVision" in dets and dets["HeimVision"].confidence > 0.9
+          and dets["HeimVision"].parser_available, str({k: d.confidence for k, d in dets.items()}))
 
 
 def test_godrej(tmp: str) -> None:
@@ -1018,6 +1035,67 @@ def test_godrej(tmp: str) -> None:
     check("a QVEX head failing the firmware's own bounds check is not taken; on the QVFS disk "
           "no other plugin claims it, and Godrej claims no other vendor's disk",
           not badq_det and claimed == ["Godrej"] and not other, str(claimed))
+
+
+def test_daylight(tmp: str) -> None:
+    """The recorder's offset from UTC from its cameras' infrared switches: at
+    the right offset every dusk and dawn switch sits at one sun elevation."""
+    print("\n[daylight: the recorder's clock from its cameras' infrared switches]")
+    import random
+    import shutil as _sh
+    from datetime import datetime, timedelta
+    from analyse import daylight as DL
+
+    lat, lon = 12.97, 77.59                                   # Bengaluru
+    sunset = DL.solar_elevation(datetime(2026, 9, 23, 12, 46), lat, lon)   # 18:16 IST
+    noon = DL.solar_elevation(datetime(2026, 9, 23, 6, 40), lat, lon)
+    check("the sun, by NOAA's equations: Bengaluru's 18:16 IST sunset on 23 Sep sits at the "
+          "horizon, and its noon sun is high", -1.5 < sunset < 1.0 and 75 < noon < 79,
+          f"{sunset:.2f} {noon:.1f}")
+
+    rng = random.Random(3)
+    truth, h_switch = 337, -2.0                     # IST + a clock 7 min fast; the camera's threshold
+    series, jit, t = [], {}, datetime(2026, 9, 1)
+    while t < datetime(2026, 9, 11):
+        utc = t - timedelta(minutes=truth)
+        j = jit.setdefault((utc.date(), utc.hour < 12), rng.uniform(-0.6, 0.6))   # weather
+        h = DL.solar_elevation(utc, lat, lon)
+        c = 25 + rng.uniform(-5, 5) if h > h_switch + j else 1 + rng.uniform(0, 1)
+        if h < -10 and rng.random() < 0.01:
+            c = 30                                                  # a headlight at night
+        series.append((t, c))
+        t += timedelta(minutes=2)
+    ev = DL.switches(series)
+    res = DL.estimate(ev, lat, lon, zone=330)
+    check("ten days of footage: 10 dusk and 10 dawn switches, headlight flashes ignored",
+          (res["dusk"], res["dawn"]) == (10, 10), str((res["dusk"], res["dawn"])))
+    check("the offset found without the unit or the camera's threshold: UTC+337 min, i.e. IST "
+          "and a clock 7 min fast; the switch elevation recovered; per-switch offsets agree",
+          abs(res["offset_min"] - truth) <= 3 and abs(res["clock_error_min"] - 7) <= 3
+          and abs(res["switch_elevation_deg"] - h_switch) < 0.5
+          and res["per_switch_offset_min"]["range"][1] - res["per_switch_offset_min"]["range"][0] <= 10,
+          res["reading"])
+    one_kind = DL.estimate([e for e in ev if e["kind"] == "dusk"], lat, lon)
+    check("dusks alone are refused - every offset fits them equally - and the 12-hour alias "
+          "is ruled out by the sun's direction",
+          one_kind["offset_min"] is None and abs(res["offset_min"] - truth) < 60)
+
+    ffmpeg = os.environ.get("FFMPEG") or _sh.which("ffmpeg")
+    folder = os.environ.get("VENDOR_SAMPLES")
+    if not (ffmpeg and folder):
+        print("  [real footage] skipped - needs ffmpeg and VENDOR_SAMPLES")
+        return
+    night = [c for _, c in DL.sample(os.path.join(folder, "imkh_00000001541000000.mp4"), 3,
+                                     ffmpeg=ffmpeg)]
+    day = [c for _, c in DL.sample(os.path.join(folder, "ffmpeg_t4182_20150327215559_ch01.mp4"),
+                                   3, ffmpeg=ffmpeg)]
+    dav = DL.sample(os.path.join(folder, "ffmpeg_t6144_19.25.00-19.25.50[R].dav"), 3,
+                    ffmpeg=ffmpeg)
+    check("real recorder footage: a Hikvision infrared night picture measures as infrared and "
+          "a daylight one as colour, far apart; a .dav's samples carry the recorder's own times",
+          max(night) <= DL.MONO_MAX and min(day) > 4 * DL.MONO_MAX
+          and dav[0][0] == datetime(2017, 9, 18, 19, 25, 0),
+          f"night {max(night)} day {min(day)} dav {dav[0][0]}")
 
 
 def test_dahua_real_media() -> None:
@@ -3723,6 +3801,28 @@ def test_s63_certificate(tmp: str) -> None:
           and led.verify()["valid"])
 
 
+def test_s63_footage_folders(tmp: str) -> None:
+    """Footage extracted into a subfolder (USER_MANUAL 3.4: `extract --out clips/`)
+    is still certified; footage from another device is not."""
+    print("\n[s.63 certificate: where the footage was extracted to]")
+    from report import s63
+    case = os.path.join(tmp, "s63_case")                    # made by test_s63_certificate
+    with open(os.path.join(case, "scan_report.json"), encoding="utf-8") as fh:
+        device = json.load(fh)["device"]["path"]
+    for folder, src, sha in (("clips", device, "11" * 32), ("other", "/dev/sdz", "22" * 32)):
+        os.makedirs(os.path.join(case, folder), exist_ok=True)
+        with open(os.path.join(case, folder, f"{folder}.manifest.json"), "w", encoding="utf-8") as fh:
+            json.dump({"source_device": src, "output": {"file": f"{folder}.h265", "bytes": 10,
+                                                        "sha256": sha}}, fh)
+    cert = s63.build(case, "B", records="footage")
+    vals = {v["record"]: v["value"] for v in cert["fields"]["hash_values"]}
+    check("footage extracted into a subfolder of the case is certified with its path; footage "
+          "whose manifest names another device is left out, and the draft says why",
+          vals.get("clips/clips.h265") == "11" * 32 and "other/other.h265" not in vals
+          and any("other/other.manifest.json" in n and "not certified" in n
+                  for n in cert.get("notes", [])), str(sorted(vals))[:300])
+
+
 def test_real_media_tools(tmp: str) -> None:
     """The pieces of the real-media run: the decode check's classes, the
     head-image model search, and the carver coverage score."""
@@ -4072,12 +4172,14 @@ def main() -> int:
         test_matrix(tmp)
         test_nist_export(tmp)
         test_s63_certificate(tmp)
+        test_s63_footage_folders(tmp)
         test_real_media_tools(tmp)
         test_ewf(tmp)
         test_parallel_taps(tmp)
         test_case_export(tmp)
         test_heimvision(tmp)
         test_godrej(tmp)
+        test_daylight(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

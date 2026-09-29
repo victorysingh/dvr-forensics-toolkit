@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 536 pass, 0 fail: 515 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 7 on vendor-made files: 5 from other recorders (§8g) and 2 on NIST's reference export (§8i) |
+| Automated tests | 544 pass, 0 fail: 521 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -603,6 +603,20 @@ tiled classic set: 71 s).
 - Neither set is from an Indian recorder, and these models have not been
   run on the team's drives.
 
+### On our own drive (29 Sep - sampled, labels pending)
+
+The runs above are public clips. The same measurement on the team's own
+cameras is set up: `analytics_eval` sampled 35 keyframes evenly from each of
+six indexed drive-1 recordings - *Road View 1*, *Road View 2* and *Parking*,
+at 17:00 and at 22:00 on 3 Sep 2026 (`out/realchecks/analytics_eval/`, 210
+frames). It ran before tiling was merged, so it must be re-sampled with the
+current detector before the labels are scored. One result needs no labels:
+on all 35 night frames of *Parking*, where a car is parked in full view, the
+object model said *suitcase* and never *car* - the same miss as the parked
+cars in the Hikvision night clip above. Evenly sampled quiet hours hold few
+people, so person recall from this set must be reported with its count.
+
+
 ## 8b. Second drive: Hikvision footage under a Dahua-family format
 
 Drive `Z9C2632A` carries a DHFS 4.1 superblock whose index is empty on all
@@ -625,7 +639,7 @@ Stream with Hikvision `HK` stream-map descriptors.
 | Surviving Hikvision index | master sector copy + two identical HIKBTREE copies; 922 records on a 1 GiB block grid; 8 channels |
 | Recorder model and unit (28 Sep) | `identify-model` over the whole drive: **`DS-7B08HUHI-K1`**, 208 times from 0x11ECDD0. The team's Hikvision DVR is labelled `DS-7B08HUHI-K1`, serial `F29196515` (`record-device`, label photo hashed): model **agrees**. The platter also carries that unit's full device serial `DS-7B08HUHI-K1 0820201218CCWR F29196515 WCVU` 202 times, so this unit wrote this drive. The model check's "differ" (a Hikvision unit, Dahua-family structures on its disk) is the known reformat; which recorder did it is not established |
 | Head image (28 Sep) | first 4 GiB with `ddrescue -d`, 0 read errors, drive write-blocked throughout; all 512 blocks equal the full-drive pass. MD5 `8500709651324ce36b25b548f068144f`, SHA-256 `401d5153c94b037e8e931474bdc157ac830d9460bf51d3048d748b5990acf460` |
-| Camera attribution | 2,021 of 2,516 streams inside their block's record window; 495 older streams outside the index |
+| Camera attribution | 2,021 of 2,516 streams inside their block's record window. Of the other 495 (`label-ps` re-run on the write-blocked drive, 29 Sep, with the `stale_tail` rule of #41): **440 `stale_tail`**, 0.6 GiB / 1.8 h in 393 blocks - short remnants that end before their block's record starts, median 31.9 days older (10th-90th percentile 31.0-105.6 days, oldest 1,228.7), so the drive was overwriting a block about a month after last writing it; camera unknown. **55 `outside_index`**, 23.7 GiB / 96.8 h, each in a block with no record at all. The 922 index records read on 29 Sep are identical to those read on 26 Sep; the only label changes are these 440, from `outside_index` to `stale_tail`. Recorded in the case ledger; `verify`: chain intact, Merkle root matches |
 | Independent checks of the attribution | every camera keeps one resolution (CH03/CH04 2560×1440, CH01/02/06 960×576, CH05/07/08 1280×720, apart from 3 streams each on CH03/CH04); all eight hold 761–788 h |
 | Recorded vs recovered | per the index each camera recorded continuously (~27 Jul – 30 Aug 2024); the carve recovered **99.6–99.7%** of those hours on every camera |
 | Time zone | index times equal `HK` times — both local; not derivable from these |
@@ -752,6 +766,13 @@ places every `00 00 01` in the 806 written files by the parser.
 - `carve-annexb` therefore stays `synthetic_only`: its slice finding is
   measured on real media, but the streams it made here are not any one
   camera's footage.
+
+**Named by a scan** (29 Sep). The disk carries no brand string, so until
+now a scan reported no vendor for it although the parser read it. The plugin
+now declares signatures for the recorder's own structures, all in the first
+11 MB: its system partition's mount point `/root/rec/a1` (ext3 superblock)
+and the schemas of its event log and recording index. A scan of the first
+16 MiB names **HeimVision at 98-99.5%**, with its parser available.
 
 **Checked against FTK Imager's own reading of the disk** (29 Sep,
 `python -m validate.ftk_listing IMAGE.E01 LISTING.csv`). The image ships with
@@ -993,10 +1014,35 @@ The 2017 file's name says 19.25.00-19.25.50 and our decoded DHAV clock says
 19:24:59-19:25:49: the recorder's export name and our time decoding agree
 to 1 s.
 
-**Still to run** on the CP Plus drive's own `.dav` files, on the machine that holds them:
-```
-python -m validate.dhav_crosscheck out/cpplus_WWD4A3NX/carve/streams --ffmpeg PATH/ffmpeg --out dhav_crosscheck.json
-```
+**On the CP Plus drive's own `.dav` files (29 Sep).** All 2,246 streams
+carved outside the index (`out/cpplus_WWD4A3NX/carve/streams`), ffmpeg
+8.1.2. Result `out/realchecks/drive1_dhav_crosscheck.json`, SHA-256
+`2abeced1…4dabe2`.
+
+| | Result |
+|---|---|
+| Files identical frame for frame | **2,025 of 2,246** |
+| Video frames ffmpeg emitted | **719,097, every one identical to ours** (payload size, Adler-32, keyframe flag) |
+| Ours that ffmpeg did not emit | 270,686, all before the first keyframe of their file: 245,538 in files that open mid-group, 25,148 in the 221 files with no keyframe at all. These 221 are the only non-identical files, and ffmpeg emits no video from them by design. Both counts equal §7's independent ffprobe measurement |
+| Audio | **995,224 frames, identical in all 2,246 files** |
+| Other differences | 4,957 `0xF1` aux frames, ours only (expected); no truncated last frame; no header whose checksum we reject and ffmpeg keeps |
+| Time | 717,599 of 719,097 inside their own DHAV second. 1,271 (in 620 files) at exactly +1.000 s: ffmpeg's millisecond-counter time reaches the next second one frame before the date field ticks. **227 frames in 6 files are 1.3-4.0 s apart - see below** |
+
+**What the 227 frames show.** Each of the 6 files has a frame-counter gap of
+6-67 missing frames. Across it the millisecond counter advances by about what
+the gap implies (64 missing: +2,404 ms; 67: +2,621 ms; 31: +1,124 ms). The
+date field moves by -1 to +2 s. ffmpeg times frames by the millisecond
+counter, so after the gap it runs ahead, then holds until the date catches up.
+This tool reports the date. The two clock fields of the recorder's own frame
+header disagree by up to ~3 s there. The bytes alone cannot say which is
+right, and two decoders that agree on every byte show that they are
+interpreting the fields differently, not misreading them. **So after a
+counter gap, a carved frame's time is good to about ±3 s, not ±1 s.** The
+tool does not yet flag those frames (§10).
+
+This makes the DHAV frame walk two independent implementations agreeing on
+719,097 of this drive's own frames. The field layout both use still comes
+from `dhav.c` (see above), so Dahua / CP Plus stays `spec_only`.
 
 ## 8j. Godrej, from Qualvision's firmware
 
@@ -1042,11 +1088,88 @@ Three come from the vendors' own firmware (Uniview; TP-Link's index; Godrej
 via Qualvision) and one from the vendor's own documents (Matrix). Only the
 first three are observed; none is `validated`.
 
+## 8k. Dress rehearsal from the packaged executable (29 Sep)
+
+The whole workflow, run as an examiner would run it: from `ps26150-dvr.exe`
+(built from this branch; no Python on the path), on two real inputs.
+
+**A. NIST HeimVision image (E01, 139.74 GB)**
+
+| Step | Result |
+|---|---|
+| `scan --max-mb 4096` (triage) | MD5/SHA-256 of the range, Merkle map; vendor **HeimVision 99.5%, parser available**; no high-entropy region without video |
+| `parse --vendor HeimVision` | 806 files, 4 cameras, 24 h recorder-local; zone setting UTC+8 measured, not applied |
+| `extract` (camera 2) | 1,296,105 frames, 615 MB, SHA-256 in its manifest, 58 s |
+| `timeline` | 4 camera lanes, 24.0 h each, 0 gaps; "recorder-local, not converted" |
+| `report`, `case-export` | HTML/JSON report and CASE/UCO JSON-LD, each hash in the custody ledger |
+| `certificate --part B --records both` | drafted, Gazette wording; refuses to certify a whole-drive hash from a triage pass, as it should |
+| `verify` | custody chain intact; Merkle root **MATCH** |
+
+**B. A real Dahua recording (`.dav`, 2017, H.264; samples.ffmpeg.org, §8g)**
+
+| Step | Result |
+|---|---|
+| `scan --carve` | Dahua 95.5%; the DHAV carver, in its own process, found 2,042 frames, 1 stream |
+| `extract-carved` | `.dav` and `.h264`, hashed |
+| `export-nist` | a valid MP4 (ffmpeg: H.264 High, 2592x1520, 15 fps, 49.8 s); Level 0 declared **not** met, because no zone was stated |
+| `report`, `certificate`, `verify` | drive and footage hashes in the draft; Merkle MATCH |
+
+**What the rehearsal found, now fixed:**
+- **A scan never named HeimVision.** Its only signature was a brand string
+  that is not on the disk, spelled `Heimvision`. The plugin now carries
+  structural signatures (§8e).
+- **`scan --carve` did nothing in the executable.** The carver runs in a
+  worker process, and a packaged Windows build starts that process by
+  re-running the executable, whose command-line parser rejected the
+  worker's arguments. The scan reported it ("inline carve disabled ...
+  hashing continues unaffected") and carried on without carving. `cli.py`
+  now calls `multiprocessing.freeze_support()` first. The packaging check of
+  28 Sep ran `scan` without `--carve`, so it missed this.
+- **The certificate missed footage extracted into a subfolder.** USER_MANUAL
+  §3.4 extracts to `--out clips/`, and the certificate looked only at the
+  case folder's top level. It now looks one folder down, and it leaves out
+  (and says so) any footage whose manifest names another device.
+
+## 8l. The recorder's clock from daylight (`analyse/daylight.py`)
+
+Converting recorder time to UTC needs the recorder's zone and its clock
+error, normally read at the unit (SOP 1.2). With the unit out of reach, an
+outdoor camera holds a clock nobody can set: most CCTV cameras switch to a
+black-and-white infrared picture at dusk and back to colour at dawn, at a
+fixed light level - to first order, a fixed sun elevation.
+
+The tool finds each switch in footage sampled over days, stamped with the
+recorder's clock, and searches for the offset T (recorder = UTC + T) at
+which every dusk and every dawn switch sits at the same sun elevation (NOAA's
+solar equations). A wrong T moves dusk elevations one way and dawn ones the
+other, so only the right one makes them agree. The camera's threshold is
+not needed, and it comes out of the fit. The sun must be setting at every
+dusk switch and rising at every dawn one, which also rules out the 12-hour
+alias.
+
+| Check | Result |
+|---|---|
+| The sun | Bengaluru's 18:16 IST sunset on 23 Sep 2026 at the horizon (-0.8 deg); noon 76.9 deg |
+| 10 days of generated footage: IST, a clock 7 min fast, switch at -2 deg, +-0.6 deg of weather per switch, headlight flashes | 10 dusk + 10 dawn switches; **UTC +337 min = IST + 7 min**, found exactly; per-switch offsets 334-340; switch elevation -2.0 deg recovered |
+| Only dusks | refused: every offset fits them equally |
+| Real recorder footage (§8g samples) | a Hikvision infrared night picture measures chroma 0.0, a daylight one 49.5, evening Dahua colour 5.8-17.7 (threshold 4.0); a `.dav`'s samples carry the recorder's own frame times |
+
+**Limits, stated with each result:**
+- Weather moves the light threshold, and the spread of the per-switch offsets
+  shows by how much.
+- A street-lit scene or a camera without infrared has no switch.
+- The result settles a zone and a clock error of minutes, not seconds.
+- Estimating clocks from daylight is not new (Sundial, EWSN 2009); reading it
+  from a DVR's infrared switches is the application here.
+
+**Not yet run on our drives.** It needs days of the CP Plus unit's outdoor
+cameras (*Parking*, *Road View*) and the site's latitude and longitude.
+
 ## 9. Vendor format status
 
 | Vendor | Status | Why not better |
 |---|---|---|
-| Dahua / CP Plus | `spec_only` | layout read off real media and consistent throughout (§3), but no footage has been byte-matched against the recorder's own export. The frame walk agrees with ffmpeg's `dhav` demuxer, a second implementation, frame for frame on two real Dahua recordings from other units (§8g); its run on this drive's own `.dav` files is pending |
+| Dahua / CP Plus | `spec_only` | layout read off real media and consistent throughout (§3), but no footage has been byte-matched against the recorder's own export. The frame walk agrees with ffmpeg's `dhav` demuxer, a second implementation, frame for frame on two real Dahua recordings from other units and on all 719,097 video frames ffmpeg emits from this drive's 2,246 carved streams (§8g, 29 Sep). It shares ffmpeg's field layout, so this is independent code, not independent knowledge |
 | Hikvision — video container | `spec_only` | MPEG-PS + `HK` descriptors decoded from real footage and cross-checked; also checked on three Hikvision-made files from other recorders, 2014-2018 (§8g): `HK` times equal the painted clock (0 s, 5/5) or trail it by a constant 1 s (10/10), or equal the recorder's file-name start; 463/463 and 215/215 frames identical to ffmpeg's decode of the vendor files. Not byte-matched to an export of our drive |
 | Hikvision — index records | `spec_only` | decoded from the surviving HIKBTREE copies on real media and cross-checked (resolution per camera, hours per camera, 99.6% recovered vs recorded); not byte-matched to an export |
 | Hikvision — system log and master sector (`parsers/hiklog.py`) | `spec_only` | read off real media, six master-sector cross-checks, log clock checked against the footage; not matched against the log the recorder shows or exports |
@@ -1113,7 +1236,7 @@ tool's own parser reads, field by field.
 | `dahua_dhfs41.ksy` against `parsers/dahua.py` | synthetic DHFS disk | superblock; the volume's extent and cluster size; all 64 cluster records, every field (the channel as the byte stored); 328 DHAV frames (type, number, length, date, ms, extension length, trailer) - all equal |
 | The check itself | the same disk, a `.ksy` with `next` and `prev` swapped | 18 records flagged: the check is not vacuous |
 | A test-fixture fault it found | the MPEG-PS test streams | their HK descriptor declared 14 bytes (0x0E, the value the carver matches on real footage) but held 13. The carver reads fixed offsets and never noticed; the compiled `.ksy` did. Fixed to 14; every MPEG-PS test passes |
-| Real media | - | **not yet run** - on the machine that holds the images: `python -m validate.ksy_check --dahua <drive 1 head image> --ps <drive 2> --ps-region <offset> <length>` (USER_MANUAL §3.4h) |
+| Real media (29 Sep, kaitaistruct 0.11) | drive 1's 20 GiB head image; drive 2's 4 GiB head image, region 0x4C5E000 + 1 GiB (the data area's first block) | **agree, no mismatches.** Dahua: superblock 4.1, 4 volumes, 119,229 cluster records and 3,000 DHAV frames, field for field (volumes 2-4 lie beyond the image). Hikvision MPEG-PS: 2 streams carved, 115,004 packs read identically by the `.ksy` and the carver. Result `out/realchecks/ksy_check.json`, SHA-256 `4562b05d…6eef66a4` |
 
 ## 10. Open items
 
@@ -1126,4 +1249,7 @@ tool's own parser reads, field by field.
   to a USB stick from the recorder's menu (one file, hashed). Then `identify-model` over
   the whole of drive 1 for the unit's serial, DevID and MAC.
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
-- ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** Still to run: `validate.ksy_check` on the real images.
+- ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** ~~Still to run on the real images.~~ **Run 29 Sep: agree on both drives' images (§9a).**
+- ~~The ffmpeg cross-check on drive 1's own `.dav` files.~~ **Run 29 Sep (§8g):** 719,097 of 719,097 emitted frames identical. It found one thing to fix: after a frame-counter gap the DHAV date and millisecond counter can disagree by up to ~3 s (6 files, 227 frames). Frames after such a gap should carry that wider time uncertainty in the timeline and report; today they do not.
+- Analytics recall on our own cameras: 210 drive-1 frames sampled (§8a), to be re-sampled with tiling, then labelled and scored.
+- ~~Drive 2 `label-ps` re-run on the drive.~~ **Run 29 Sep (§8b):** 440 `stale_tail`, 55 `outside_index`; index unchanged since 26 Sep.
