@@ -1683,6 +1683,39 @@ def test_static_detections() -> None:
           r["frames_with_totals"] == {"face": 1} and r["flagged_not_counted"] == {"face": 1})
 
 
+def test_analytics_eval(tmp: str) -> None:
+    """Scoring the detectors against labels: a static detection counts against
+    the models but not the tool, an unlabelled frame is left out, and a class
+    no frame contains gets a false-alarm rate but no recall."""
+    print("\n[analytics: evaluation against labels]")
+    from validate import analytics_eval as E
+    out = os.path.join(tmp, "analytics_eval")
+    os.makedirs(out, exist_ok=True)
+    person = {"label": "person", "score": 0.8, "box": [0.1, 0.1, 0.3, 0.6]}
+    dets = [[dict(person, static=False)],            # 0: a person, seen
+            [dict(person, static=True)],             # 1: nobody; a static box (a coat)
+            [],                                      # 2: a person, missed
+            [],                                      # 3: nobody, nothing said
+            [dict(person, static=False)]]            # 4: not labelled
+    json.dump({"detections": [{"frame": i, "detections": d} for i, d in enumerate(dets)]},
+              open(os.path.join(out, "detections.json"), "w", encoding="utf-8"))
+    with open(os.path.join(out, "labels.csv"), "w", newline="", encoding="utf-8") as fh:
+        fh.write("frame,person,face,vehicle\n0,y,n,n\n1,n,n,n\n2,y,n,n\n3,n,n,n\n4,,,\n")
+    res = E.score(out)
+    rep, raw = res["classes"]["person"]["as reported"], res["classes"]["person"]["as the models said"]
+    check("an unlabelled frame is left out of the score", res["frames_labelled"] == 4)
+    check("as reported: the static box is not a false alarm",
+          (rep["tp"], rep["fp"], rep["fn"], rep["tn"]) == (1, 0, 1, 2)
+          and rep["precision"] == 1.0 and rep["recall"] == 0.5 and rep["false_alarm_rate"] == 0.0)
+    check("as the models said: the static box is one false alarm in two frames",
+          raw["fp"] == 1 and raw["precision"] == 0.5 and raw["false_alarm_rate"] == 0.5
+          and {w["frame"]: w["error"] for w in raw["disagreements"]} == {1: "false alarm",
+                                                                         2: "missed"})
+    face = res["classes"]["face"]["as reported"]
+    check("a class no frame contains: false-alarm rate, no recall",
+          face["recall"] is None and face["false_alarm_rate"] == 0.0 and face["frames_without"] == 4)
+
+
 def test_hikbtree(tmp: str) -> None:
     """HIKBTREE records as observed on real media: found by shape, the data
     base found as the common residue, copies de-duplicated, and a carved
@@ -3114,6 +3147,7 @@ def main() -> int:
         test_timeline_recorder_log()
         test_ps_carver(tmp)
         test_static_detections()
+        test_analytics_eval(tmp)
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)
