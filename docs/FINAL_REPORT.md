@@ -149,7 +149,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 562 in all: 539 on generated data with known ground
+- **Automated tests:** 572 in all: 549 on generated data with known ground
   truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -157,6 +157,7 @@ Full account: `VALIDATION_REPORT.md`.
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the
   CASE/UCO export and the certificate.
+- **Damaged or tampered disks:** 9,600 corrupted disks fed to all 8 vendor parsers (`VALIDATION_REPORT.md` §8m). The first 3,200 found 144 crashes and 1 hang in 22 places, all fixed. None crashes or hangs now, and a parser can no longer end in a traceback.
 - **Write blocking:** root writes refused on a sacrificial loop device, and
   the block re-applied automatically after 2 of 2 real reconnects.
 - **Reproducibility:** five independent reads over three days agree bit for

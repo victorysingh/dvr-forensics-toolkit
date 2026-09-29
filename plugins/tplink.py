@@ -198,6 +198,9 @@ def _sqlite_header(page1: bytes) -> Optional[dict]:
 
 def _open(blob: bytes) -> sqlite3.Connection:
     con = sqlite3.connect(":memory:")
+    # a damaged or tampered index can hold bytes that are not UTF-8: read them
+    # with replacement characters rather than stop on them
+    con.text_factory = lambda b: b.decode("utf-8", "replace")
     if hasattr(con, "deserialize"):
         con.deserialize(blob)
         return con
@@ -208,7 +211,13 @@ def _open(blob: bytes) -> sqlite3.Connection:
 def read_index(blob: bytes) -> dict:
     """The index tables, found by their columns.  Raises sqlite3 errors when
     the bytes are not a readable database."""
-    con = _open(blob)
+    try:
+        return _read_index(_open(blob))
+    except UnicodeDecodeError as exc:
+        raise sqlite3.DatabaseError(f"damaged text in the database ({exc.reason})") from exc
+
+
+def _read_index(con) -> dict:
     try:
         tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
         found = {}

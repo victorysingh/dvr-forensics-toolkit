@@ -94,17 +94,36 @@ class Ext:
                       (("mounted", 0x2C), ("written", 0x30), ("checked", 0x40),
                        ("created", 0x108))}
 
+    def _read(self, offset: int, length: int, what: str) -> bytes:
+        """Exactly `length` bytes: a structure that runs past the end of the
+        image is refused, never read short (a damaged or truncated disk)."""
+        raw = self.dev.read_at(offset, length)
+        if len(raw) < length:
+            raise ExtError(f"{what} at 0x{offset:X} lies beyond the image - not read")
+        return raw
+
     def _block(self, n: int) -> bytes:
-        return self.dev.read_at(self.start + n * self.block_size, self.block_size)
+        return self._read(self.start + n * self.block_size, self.block_size, f"block {n}")
+
+    def _check_size(self, ino: dict) -> None:
+        """A file cannot be larger than the disk it is on: a size field that
+        says so is damaged, and reading by it would exhaust memory or time."""
+        limit = getattr(self.dev, "size_bytes", 0)
+        if limit and ino["size"] > limit:
+            raise ExtError(f"inode {ino['number']} claims {ino['size']} bytes, more than the "
+                           f"whole disk - not read")
 
     def inode(self, number: int) -> dict:
+        if number < 1:
+            raise ExtError(f"inode number {number} - not read")
         group, index = divmod(number - 1, self.inodes_per_group)
         gd_at = self.start + (self.first_data_block + 1) * self.block_size + group * self.desc_size
-        gd = self.dev.read_at(gd_at, self.desc_size)
+        gd = self._read(gd_at, max(self.desc_size, 12), f"group descriptor {group}")
         table = struct.unpack_from("<I", gd, 8)[0]
         if self.desc_size >= 64:
             table |= struct.unpack_from("<I", gd, 0x28)[0] << 32
-        raw = self.dev.read_at(self.start + table * self.block_size + index * self.inode_size, 128)
+        raw = self._read(self.start + table * self.block_size + index * self.inode_size, 128,
+                         f"inode {number}")
         mode, _, size, atime, ctime, mtime, dtime = struct.unpack_from("<HHIIIII", raw, 0)
         if mode & 0xF000 == 0x8000:
             size |= struct.unpack_from("<I", raw, 108)[0] << 32
@@ -159,6 +178,7 @@ class Ext:
     def data_blocks(self, ino: dict) -> list[int]:
         """The disk block of every logical block of the file; 0 = a hole, or
         an allocated but unwritten block (both read as zeros)."""
+        self._check_size(ino)
         want = -(-ino["size"] // self.block_size)
         ext = self.extents(ino)
         if ext is not None:
@@ -198,6 +218,7 @@ class Ext:
 
     def read(self, ino: dict, limit: Optional[int] = None) -> bytes:
         """The file's bytes (the first `limit` of them); a hole reads as zeros."""
+        self._check_size(ino)
         size = ino["size"] if limit is None else min(ino["size"], limit)
         out = bytearray(size)
         for f, d, n in self.byte_runs(ino):
