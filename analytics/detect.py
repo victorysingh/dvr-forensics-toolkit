@@ -237,10 +237,15 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print) -> dict:
             "t_s is seconds from the first decodable frame of the clip, not a "
             "recorder timestamp.",
             "Every detection is a lead for an examiner to review in the footage itself.",
+            "An empty result does not mean nobody was there. Scored against 287 frames "
+            "of real recorder footage labelled by eye, the tool raised no false alarm but "
+            "reported a person in none of the 57 frames that had one "
+            "(docs/VALIDATION_REPORT.md section 8a).",
             "Detections that stay in the same place through most of a clip are flagged "
             "'static' and not counted: on real footage a steel pot was repeatedly detected "
-            "as a face. Static flags an object - or something that did not move - not a "
-            "person to review.",
+            "as a face. Static means the box did not move - usually an object mistaken for "
+            "a face or person, but a person sitting still is flagged too. Static "
+            "detections are kept in this file.",
         ],
     }
     os.makedirs(out_dir, exist_ok=True)

@@ -1851,7 +1851,8 @@ def test_static_detections() -> None:
 def test_analytics_eval(tmp: str) -> None:
     """Scoring the detectors against labels: a static detection counts against
     the models but not the tool, an unlabelled frame is left out, and a class
-    no frame contains gets a false-alarm rate but no recall."""
+    no frame contains gets a false-alarm rate but no recall.  The threshold
+    sweep applies the rules per clip, at each threshold afresh."""
     print("\n[analytics: evaluation against labels]")
     from validate import analytics_eval as E
     out = os.path.join(tmp, "analytics_eval")
@@ -1879,6 +1880,29 @@ def test_analytics_eval(tmp: str) -> None:
     face = res["classes"]["face"]["as reported"]
     check("a class no frame contains: false-alarm rate, no recall",
           face["recall"] is None and face["false_alarm_rate"] == 0.0 and face["frames_without"] == 4)
+
+    # The threshold sweep, from boxes kept at any score.  Clip 0 (frames 0-4):
+    # a shrub boxed as a person at one spot, and an oversized "face".  Clip 1
+    # (frames 5-6): a real person at the same spot, scored 0.3, then missed.
+    shrub = lambda s: {"label": "person", "score": s, "box": [0.1, 0.1, 0.3, 0.6]}
+    big_face = {"label": "face", "score": 0.9, "box": [0.3, 0.2, 0.7, 0.8]}
+    everything = [[shrub(0.55), big_face], [shrub(0.55)], [shrub(0.55)], [shrub(0.65)], [],
+                  [shrub(0.3)], []]
+    clip_of = [0, 0, 0, 0, 0, 1, 1]
+    labels = {f: {"person": "y" if f >= 5 else "n", "face": "n", "vehicle": "n"}
+              for f in range(7)}
+    sw = E.rescore(everything, clip_of, labels)
+    person = {r["threshold"]: r for r in sw["person"]}
+    check("sweep: a lower threshold finds the person the tool's misses; the rules run per "
+          "clip, so a box static in one clip still counts in another",
+          person[0.2]["as reported"]["tp"] == 1 and person[0.5]["as reported"]["tp"] == 0
+          and person[0.2]["as the models said"]["fp"] == 4)
+    check("sweep: a higher threshold can raise reported false alarms - a box too rare to "
+          "be static is counted",
+          person[0.5]["as reported"]["fp"] == 0 and person[0.6]["as reported"]["fp"] == 1)
+    faces = {r["threshold"]: r for r in sw["face"]}
+    check("sweep: an implausible face box is not counted, though the model said it",
+          faces[0.9]["as reported"]["fp"] == 0 and faces[0.9]["as the models said"]["fp"] == 1)
 
 
 def test_hikbtree(tmp: str) -> None:

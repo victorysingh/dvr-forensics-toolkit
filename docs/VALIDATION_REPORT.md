@@ -18,14 +18,14 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 516 pass, 0 fail: 495 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 7 on vendor-made files: 5 from other recorders (§8g) and 2 on NIST's reference export (§8i) |
+| Automated tests | 519 pass, 0 fail: 498 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 7 on vendor-made files: 5 from other recorders (§8g) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
-| Analytics (optional) | runs on recovered clips; detections reviewed by eye as plausible leads; no accuracy claimed |
+| Analytics (optional) | scored against 487 frames labelled by eye (§8a): **no false alarm** in any class, but a person reported in **0 of the 57 frames** that had one; faces 3 of 27, vehicles 4 of 12. A lead is worth reviewing; an empty list proves nothing |
 | OSD reader (optional) | rules and orchestration tested (§8c); **OCR accuracy not measured** — never yet run on a rendered frame |
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
@@ -301,7 +301,101 @@ walking along the road (on-screen clock 13/08/2026 05:59 PM, *Road View 1*);
 equal scores, very different certainty — a score ranks what to watch first;
 it is not a measure of truth.
 
-No systematic accuracy measurement has been made; none is claimed.
+### Measured against labels (29 Sep)
+
+`python -m validate.analytics_eval` samples frames from real clips, runs both
+detectors exactly as the tool does (the same thresholds and the same static
+and implausible-box rules), and scores them frame by frame against labels a
+person filled in by eye, looking at the plain frames with no boxes drawn.
+
+**First run, HeimVision CH01 (NIST image), 200 keyframes over 24 h.** No real
+person, face or vehicle is in any frame (a mannequin sits at a desk). The tool
+reported nothing: 0 false alarms in 200 frames. With nobody in the footage,
+this run could not measure recall.
+
+**Second run: six public recorder clips with people and vehicles in them,
+287 frames**, every one labelled by eye. The labels, with a note on each
+borderline frame, are in `validate/analytics_labels.csv`:
+
+| Clip (source; SHA-256) | Recorder, scene | Frames sampled | Person | Face | Vehicle |
+|---|---|---|---|---|---|
+| `19.25.00-19.25.50[R].dav` (FFmpeg trac #6144; `c17602dd…`) | Intelbras (Dahua OEM) fisheye, filmed while being mounted | 98 at 2/s | 39 | 12 | 0 |
+| `dav-sample.dav` (HandBrake #1935; `9787cb4b…`) | Amcrest (Dahua OEM), two people in a studio | 15 at 4/s | 15 | 15 | 0 |
+| `T1P3-Swan-CH01-20210814-191120-191154-….avi` (ForeSpeed; `ab9b8ce6…`) | Swann, empty street | 138 at 4/s | 0 | 0 | 0 |
+| `T1P4-Lorex-D862A8_ch1_main_20210814191228_….mp4` (ForeSpeed; `2edd4c1a…`) | Lorex (Dahua OEM), a pickup truck passing | 13 at 10/s | 3 | 0 | 6 |
+| `IMKH/00000001541000000.mp4` (VideoLAN; `79b1e557…`) | Hikvision, car park at night, infrared | 6 at 0.3/s | 0 | 0 | 6 |
+| `20150327215559_ch01.mp4` (FFmpeg trac #4182; `20e31574…`) | Hikvision, a floor | 17 at 2/s | 0 | 0 | 0 |
+| **Total** | | **287** | **57** | **27** | **12** |
+
+Each clip was sampled at its own rate so that no one clip dominates. The
+command is `sample CLIP@2 CLIP@4 ... --out DIR`. Scores, as the tool reports
+them (static and implausible detections not counted):
+
+| Class | Frames found (recall) | False alarms | Precision |
+|---|---|---|---|
+| Person | **0 of 57** | 0 of 230 | — (nothing reported) |
+| Face | 3 of 27 (11%) | 0 of 260 | 3 of 3 |
+| Vehicle | 4 of 12 (33%) | 0 of 275 | 4 of 4 |
+
+What this shows:
+
+- **When the tool names something, it has been right.** There was no false
+  alarm in any class, across these 287 frames and the 200 HeimVision frames.
+  The two rules do that work:
+  - 122 frames in which the object model saw a "person" in a roadside shrub
+    (Swann clip, scores 0.50–0.65) were flagged static;
+  - 61 frames in which the face model saw a "face" in the bright centre of
+    the fisheye picture were flagged implausible.
+- **An empty result proves nothing.** The tool reported a person in none of
+  the 57 frames that had one:
+  - In the fisheye clip (39 frames: small, distorted, seen from above), the
+    object model boxed the people in only 2 frames, at 0.35-0.38, below the
+    tool's 0.5.
+  - It never boxed the driver behind the truck's side window (3 frames). Its
+    only "person" in those frames is the roadside shrub; the Swann and Lorex
+    clips show the same street.
+  - It did box the two people seated in the Amcrest studio (8 of 15 frames,
+    0.54–0.67). **The static rule then removed them, because they sat still.**
+    The rule cannot tell a fixed false detection from a person who does not
+    move. At the thresholds where the model finds the parked cars in the
+    night clip, the rule removes those too.
+  - Faces: the 3 found are the Amcrest pair. The man looking up into the
+    fisheye lens (11 frames) got no box on his face. At model level those
+    frames did count as "found", but only because of the centre-of-picture
+    box: the right frame, the wrong place.
+  - Vehicles: the passing truck was found in 4 frames (0.51–0.98). It was
+    missed in its first 2 frames, entering at the edge, and the parked cars
+    at night were missed in all 6 frames.
+- **A lower threshold does not fix it.** The `sweep` command ran both
+  models again on the stored JPEG frames and scored every threshold. On 251
+  of the 287 frames, the JPEGs give the same labels as the original decode,
+  so the sweep's rows are indicative only.
+  - At 0.2, the object model "finds" a person in 16 of 57 frames, with 147
+    false-alarm frames. Three of the 16 are the shrub box in the truck
+    frames. After the rules, it finds 2 of 57: the fisheye frames above.
+  - A higher threshold can make things worse. At 0.6, only 20 shrub boxes
+    remain, which is under the static rule's 25% share, so they are counted:
+    20 false alarms.
+  - Faces at 0.5: 8 of 27 found, with 2 false alarms (small boxes in the
+    fisheye).
+  - Vehicles at 0.3: 11 of 12 found before the rules, with no false alarm.
+    After the rules, 5 of 12, because the parked cars are static.
+- **How the frames were labelled.**
+  - Person: a head or body can be recognised, even in part. A hand alone
+    does not count: 9 frames show only a hand, 8 of them the hand holding a
+    test board up to the Swann camera.
+  - Face: turned towards the camera enough to be seen as one.
+  - Vehicle: enough of it is in frame to recognise without context. The
+    ~15-pixel edge of a parked car at the Swann and Lorex left border does
+    not count.
+- **Limits of this measurement.** It covers six clips, labelled by one
+  person, and scores whole frames: a frame counts as found when any box of
+  the class is reported, wherever that box is. A second labeller would move
+  a few edge frames; that would not change 0 of 57.
+
+**What changed:** the report's analytics section (§6b) and the notes in
+`analytics.json` now state that an empty list does not mean nobody was there.
+The static note no longer claims that static flags only objects.
 
 ## 8b. Second drive: Hikvision footage under a Dahua-family format
 
