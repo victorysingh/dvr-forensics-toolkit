@@ -114,7 +114,7 @@ Sources: `STATUS.md` §2, `VALIDATION_REPORT.md` §3, §7, §8, `FORENSIC_IMAGE.
 | Checked against the picture | decoded frame's burned-in clock `01/05/2026 01:20:26 PM` equals its DHAV date `2026-05-01 13:20:26` to the second |
 | Unit identity | the unit, a CP Plus `CP-UNR-104F1` NVR (Dahua-built, agreeing with the DHFS on the disk), recorded from its label and System Info. A search of all 76.67 GiB of the drive's non-video blocks found **none of its serial, device ID or MAC and no model string**: the disk does not say which unit wrote it (`VALIDATION_REPORT.md` §2) |
 | Second implementation | ffmpeg's own `dhav` reader and ours agree on **all 719,097 video frames** it emits from the 2,246 carved streams, and on 995,224 audio frames; the published format definitions (Kaitai) agree with the parser on 119,229 cluster records |
-| Analytics (leads) | 4,802 sampled frames of recovered footage: a person in 51, a car in 63. Scored on 210 frames of the three cameras with labels checked by a person (§8a): the current detector finds **both people** (the old one found none) and has **no face false alarms** (the old one had 7), but it calls a dog a person and never reports the car parked in full view at night (it scores 0.25-0.47, under its 0.5 threshold) |
+| Analytics (leads) | 4,802 sampled frames of recovered footage, current detector (30 Sep): a person in 191, a car in 289, a motorcycle in 65, a face in 23, and 49 parked-vehicle places (first detector: person 51, car 63). Scored on 210 frames of the three cameras with labels checked by a person (§8a): the current detector finds **both people** (the old one found none) and has **no face false alarms** (the old one had 7); it calls a dog and a tree trunk a person, and the car parked in full view at night, once missed, is now reported as a parked vehicle in 26 of its 35 frames |
 
 ### 4.2 Drive 2: Hikvision footage under a Dahua-family format (Seagate ST1000VX005, s/n `Z9C2632A`)
 
@@ -149,7 +149,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 586 in all: 563 on generated data with known ground
+- **Automated tests:** 591 in all: 568 on generated data with known ground
   truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -157,7 +157,7 @@ Full account: `VALIDATION_REPORT.md`.
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the
   CASE/UCO export and the certificate.
-- **Damaged or tampered disks:** 9,600 corrupted disks fed to all 8 vendor parsers (`VALIDATION_REPORT.md` §8m). The first 3,200 found 144 crashes and 1 hang in 22 places, all fixed. None crashes or hangs now, and a parser can no longer end in a traceback.
+- **Damaged or tampered disks:** 9,600 corrupted disks fed to all 8 vendor parsers (`VALIDATION_REPORT.md` §8m). The first 3,200 found 144 crashes and 1 hang in 22 places, all fixed. None crashes or hangs now, and a parser can no longer end in a traceback. The three carvers and the E01 reader were fuzzed too: one bug, a damaged E01 set left its evidence file open, fixed.
 - **Write blocking:** root writes refused on a sacrificial loop device, and
   the block re-applied automatically after 2 of 2 real reconnects.
 - **Reproducibility:** five independent reads over three days agree bit for
