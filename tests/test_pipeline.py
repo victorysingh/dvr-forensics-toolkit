@@ -2995,6 +2995,30 @@ def test_model(tmp: str) -> None:
           and v_none["verdict"] == "not determined" and "does not show" in v_none["detail"],
           f"{v_found} {v_stale} {v_none}")
 
+    # the same search over worker processes (search_blocks) - what a whole drive needs
+    import random
+    disk = bytearray(random.Random(26150).randbytes(64 * 4096))
+    for at, s in ((5000, b" CP-UNR-104F1 "),                    # a model string
+                  (4096 * 3 - 5, b"=DS-7B08HUHI-K1;"),         # across an edge
+                  (4096 * 9 + 7, b" sn=WJQYRMDNPB06GIVC "),    # the serial
+                  (4096 * 22 - 3, bytes.fromhex("F820971012B7")),   # raw MAC, across an edge
+                  (4096 * 44 + 100, b"mac=f8-20-97-10-12-b7;"),     # MAC text, lower case
+                  (4096 * 40 + 100, b" DH-XVR5104HS-X ")):     # in a block not searched
+        disk[at:at + len(s)] = s
+    blocks = [(k * 4096, 4096) for k in range(64) if k % 7 != 5]   # contiguous runs and gaps
+    one = M.ModelSearch(forms)
+    for off, n in blocks:
+        one.feed(off, bytes(disk[off:off + n]))
+    many = M.ModelSearch(forms)
+    M.search_blocks(lambda off, n: bytes(disk[off:off + n]), blocks, many, workers=2)
+    r1, r2 = one.result({}), many.result({})
+    check("the search spread over worker processes finds exactly what one process finds",
+          json.dumps(r1) == json.dumps(r2)
+          and [c["model"] for c in r1["candidates"]] == ["CP-UNR-104F1", "DS-7B08HUHI-K1"]
+          and {(r["form"], r["count"]) for r in r1["unit_identifiers"]["found"]}
+          == {("text", 1), ("6 raw bytes", 1), ("text, hyphens", 1)},
+          json.dumps(r2)[:300])
+
     case_u = os.path.join(tmp, "unit_case")
     img_u = os.path.join(tmp, "unit.img")
     head_u = bytearray(4096)
