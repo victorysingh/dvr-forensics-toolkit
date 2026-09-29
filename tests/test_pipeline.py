@@ -903,6 +903,34 @@ def test_heimvision(tmp: str) -> None:
           and not br.volume["recorder_log"] and br.volume["recorder_index"]["written_not_listed"] == []
           and any("not read" in n for n in br.notes), str(br.notes[-1:]))
 
+    # FTK Imager's file listing, in its own format, against our reading: the
+    # comparison must read the format and must catch a planted difference.
+    from validate import ftk_listing as FL
+    with BlockDevice(img) as dev:
+        mine = FL.ours(dev)
+    rows = ["Filename\tFull Path\tSize (bytes)\tCreated\tModified\tAccessed\tIs Deleted"]
+    for k, v in mine["fat"].items():
+        rows.append(f"{k.rsplit(chr(92), 1)[-1]}\tprimary (2)\\{FL.FAT_ROOT}{k}\t{v['size']}\t"
+                    f"{v['modified']}\t{v['modified']}\t\tno")
+    for n, v in mine["ext3"].items():
+        rows.append(f"{n}\tprimary (1)\\{FL.EXT_ROOT}{n}\t{v['size']}\t\t{v['modified']}\t"
+                    f"{v['accessed']}\tno")
+    listing = os.path.join(tmp, "listing.csv")
+    with open(listing, "w", encoding="utf-16") as fh:
+        fh.write("\n".join(rows) + "\n")
+    same = FL.compare(mine, FL.theirs(FL.load_listing(listing)))
+    k = next(i for i, r in enumerate(rows) if ".dat\t" in r)
+    rows[k] = rows[k].replace("\t65536\t", "\t65535\t")
+    with open(listing, "w", encoding="utf-16") as fh:
+        fh.write("\n".join(rows) + "\n")
+    diff = FL.compare(mine, FL.theirs(FL.load_listing(listing)))
+    check("FTK-listing comparison: reads FTK's UTF-16 tab format, agrees with itself, and "
+          "catches one planted size difference by name",
+          same["identical"] and same["fat"]["in_both"] == len(mine["fat"]) >= 6
+          and same["zone_setting_minutes_from_ftk_times"] == 480
+          and not diff["identical"] and len(diff["fat"]["size_differs"]) == 1,
+          str(diff["fat"]["size_differs"]))
+
     path = os.environ.get("HEIMVISION_E01")
     if not path:
         print("  [real image] skipped - set HEIMVISION_E01 to the CFReDS K9604-W .E01")
@@ -931,6 +959,15 @@ def test_heimvision(tmp: str) -> None:
           and rv["footage_before_logged_start_s"] == {"CH01": -0.4, "CH02": 7.5, "CH03": 7.4,
                                                      "CH04": 6.9},
           str(rv["footage_before_logged_start_s"]))
+    ftk = os.path.join(os.path.dirname(path), "HeimVision K9604-W File Listing.csv")
+    if os.path.exists(ftk):
+        rep = FL.check(path, ftk)
+        check("real image: FTK Imager's own file listing and our reading agree on every one "
+              "of 17,154 FAT32 files (size and write time) and the 4 ext3 files; FTK's times "
+              "give the same UTC+8 zone setting",
+              rep["identical"] and rep["fat"]["in_both"] == 17154
+              and rep["fat"]["written_per_ftk"] == 808 and len(rep["ext3"]["compared"]) == 4
+              and rep["zone_setting_minutes_from_ftk_times"] == 480, str(rep["fat"]))
 
 
 def test_dahua_real_media() -> None:
