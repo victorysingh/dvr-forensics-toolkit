@@ -112,7 +112,9 @@ Sources: `STATUS.md` §2, `VALIDATION_REPORT.md` §3, §7, §8, `FORENSIC_IMAGE.
 | Deleted footage | 349.5 M frames carved without the index; **2,246 streams (5.4 GB) outside every index**, March to August 2026, all extracted |
 | Timeline | 6 recorder-wide gaps (three on 23 Sep, the day the drive was pulled); a nightly 02:00–02:09 interruption across all three cameras; 2 streams dated 2000-01-01 05:30, a reset clock whose 05:30 suggests the zone is IST (an inference, not applied) |
 | Checked against the picture | decoded frame's burned-in clock `01/05/2026 01:20:26 PM` equals its DHAV date `2026-05-01 13:20:26` to the second |
-| Analytics (leads) | 4,802 sampled frames of recovered footage: a person in 51, a car in 63 |
+| Unit identity | the unit, a CP Plus `CP-UNR-104F1` NVR (Dahua-built, agreeing with the DHFS on the disk), recorded from its label and System Info. A search of all 76.67 GiB of the drive's non-video blocks found **none of its serial, device ID or MAC and no model string**: the disk does not say which unit wrote it (`VALIDATION_REPORT.md` §2) |
+| Second implementation | ffmpeg's own `dhav` reader and ours agree on **all 719,097 video frames** it emits from the 2,246 carved streams, and on 995,224 audio frames; the published format definitions (Kaitai) agree with the parser on 119,229 cluster records |
+| Analytics (leads) | 4,802 sampled frames of recovered footage: a person in 51, a car in 63. Scored on 210 frames of the three cameras with labels checked by a person (§8a): the current detector finds **both people** (the old one found none) and has **no face false alarms** (the old one had 7), but it calls a dog a person and never reports the car parked in full view at night (it scores 0.25-0.47, under its 0.5 threshold) |
 
 ### 4.2 Drive 2: Hikvision footage under a Dahua-family format (Seagate ST1000VX005, s/n `Z9C2632A`)
 
@@ -147,7 +149,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 551 in all: 528 on generated data with known ground
+- **Automated tests:** 554 in all: 531 on generated data with known ground
   truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -178,7 +180,12 @@ Full account: `VALIDATION_REPORT.md`.
 - **Checked without an export** (`VALIDATION_REPORT.md` §8g), as SWGDE
   18-Q-001 and ISO/IEC 17025 allow when no reference export exists:
   - ffmpeg's `dhav` demuxer, a second implementation, agrees with ours frame
-    for frame on two real Dahua recordings (726 and 104 video frames);
+    for frame on two real Dahua recordings (726 and 104 video frames), and on
+    all 719,097 video frames it emits from the CP Plus drive's own 2,246
+    carved streams;
+  - the published format definitions (Kaitai `.ksy`, compiled by the official
+    compiler) read both drives' images exactly as the parsers do: 119,229
+    DHFS cluster records, 3,000 DHAV frames, 115,004 Hikvision PS packs;
   - on three Hikvision-made files, our carve decodes identically to the
     vendor's file (463/463, 215/215 frames), and the `HK` time equals the
     painted clock, trails it by a constant 1 s, or equals the recorder's own
@@ -205,6 +212,17 @@ measured 23.4 MiB/s on drive 1, a 1 TB drive takes:
 
 The saving is fewer reads of the evidence. On fast media the pass is
 CPU-bound (26.7 MiB/s measured), and `TECH_STACK.md` records the planned fix.
+
+Two later steps, measured on the same drive on 29 Sep:
+- **Searching the whole drive for the unit's model and identifiers**
+  (`identify-model`, 77 GiB of non-video blocks). It was CPU-bound at
+  5.6 MiB/s, about 4 h; spread over worker processes it ran at 42 MiB/s,
+  **about 35 min**. The result is identical, checked on 768 MiB of real data
+  against the single-process code.
+- **Extracting four days of footage** (301 hourly recordings). Each call used
+  to parse the whole drive first, and over USB that parse alone ran for
+  minutes. One call now parses once and extracts all 301: **about 2 h** in
+  all, with each recording's files and manifest as before.
 
 ## 7. Legal defensibility
 
@@ -331,7 +349,9 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   is lost), and read no title right. The wrong readings are years or hours
   off, so the comparison with the container's own date flags them. On our
   drives it read "Camera 01" correctly and nothing on drive 1's bright
-  scenes. It remains `synthetic_only`: a lead to check, not a time source.
+  scenes: measured again on 29 Sep, it found no title or clock band on any of
+  drive 1's six clips. It remains `synthetic_only`: a lead to check, not a
+  time source.
 - **About 38% of CP Plus video frames do not decode strictly.** The cause
   is measured: 0.3-0.4% of the frames are missing from the disk, and each
   breaks the rest of its ~8.6 s group of pictures. Most have no intact copy
@@ -358,6 +378,11 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   - Its false alarms: 6 person frames, each a hand in the picture, and 1
     face frame, a head at the fisheye's edge.
   - It still misses distorted and distant people.
+  - On our own CP Plus cameras (210 frames, the deciding ones checked by a
+    person) it found both people and gave no face false alarm, but called a
+    dog a person, read a tree trunk as one in 2 frames, and reported **no
+    vehicle**: the car parked in full view at night scores 0.25-0.47, under
+    the 0.5 threshold, and the static rule would remove it anyway.
   - A lead is worth reviewing; an empty list proves nothing
     (`VALIDATION_REPORT.md` §8a).
 - **On fast media the single pass is CPU-bound.**
