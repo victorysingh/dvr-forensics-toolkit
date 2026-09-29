@@ -287,6 +287,9 @@ and 30+ rival repositories (`RESEARCH_BASIS.md` §5, `docs/research/`):
   number.** On our CP Plus unit the DHAV channel byte is 0 for every camera,
   where identifier-based demultiplexing, as in Information 2026, cannot help.
   (The continuity principle is Park & Lee 2014's; the field evidence is ours.)
+  Run beside OpenDHFS, the newest open DHFS tool, on a disk with known
+  contents: both find the same frames, and only ours splits the three
+  cameras, exactly as written (`VALIDATION_REPORT.md` §8m).
 
 Hashing, the Merkle map, the custody ledger, the s.63 draft, "AI as a lead"
 and offline use are engineering other teams also have, and are not pitched

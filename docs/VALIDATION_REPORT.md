@@ -1019,6 +1019,49 @@ alias.
 **Not yet run on our drives.** It needs days of the CP Plus unit's outdoor
 cameras (*Parking*, *Road View*) and the site's latitude and longitude.
 
+## 8m. Other tools on the same data (research gap G5, 29 Sep)
+
+Five free tools were run beside ours, read-only, on the same inputs. Two
+more are other SIH26150 teams' tools; for those, their own published
+results on the NIST image are set beside ours. Each tool is named at the
+commit that was run.
+
+| Tool (commit) | Input | Their result | Ours |
+|---|---|---|---|
+| OpenDHFS (`af5b6d0`, Aug 2026), DHAV carving | the real Dahua `.dav` of §8g (FFmpeg #6144) | 2,042 DHAV candidates | 2,042 frames (Kaitai agrees, §9a) |
+| OpenDHFS | the real Dahua `.dav` cut to 2 MB (HandBrake #1935) | 191 candidates | 190 complete frames; the extra one is most likely the frame the cut truncated |
+| OpenDHFS | a generated DHFS 4.1 disk with known contents: 3 cameras recording at once (462, 459 and 457 frames surviving) over an older recording | 6,601 candidates; the recording under test is **one group of 1,379**, "camera/channel assertion: No" | 6,597 frames; the recording under test is **three streams of 462, 459 and 457**, one per camera, as written |
+| dhfs_extractor (`166bd56`, IFRN, DHFS 4.1) | the same generated disk | **does not finish**: its partition-table loop reads 64-byte entries until it meets `AA 55 AA 55`, with no bound, and our disk has no such marker there | 3 recordings, cameras 0-2, 12 s each |
+| hikextractor (`d73755a`) | a generated disk in drive 2's observed Hikvision layout (8 recordings on 4 cameras, one deleted) | reads the master sector (signature, capacity, block size); lists no recordings | 8 recordings |
+| hikvision-nvr-recovery (A22Z4, `813eeab`) | the same disk | reads the master sector; one empty index page. **Every stored time is converted in the examiner's computer's own zone** (`datetime.fromtimestamp`): the same field reads 05:30 on an IST laptop and 00:00 under UTC | recorder times stay recorder-local; UTC only from a stated zone and clock error |
+| Trace (`Hardik-droid/sih_x`, their `docs/real-corpus-validation.md`) | the NIST HeimVision E01 | hashes equal NIST's; **3 of the 806 recording files sampled**, 12 excerpts, 13,186 frames (881 s); the 24 h labelled **UTC** | all 806 files, 24 h on each of 4 cameras (1,296,105 frames on camera 2 alone); times labelled recorder-local, the zone setting measured as UTC+8 (§8e) |
+| CCTVault (`VinayBU14`, their README and status report) | the NIST HeimVision E01 | parses the `luo` header's epoch times "into UTC ISO-8601 strings" | as above: those times are the recorder's display time, not UTC |
+| DVRExtractor (`41581c2`) | - | not run: a Windows GUI that bundles Dahua's closed `dhplay.dll`; nothing to script | - |
+
+What this does and does not show:
+
+- **On real Dahua files, OpenDHFS and our parser find the same frames.**
+  That is independent agreement on the DHAV format, from a second
+  implementation.
+- **Separating cameras is where the tools differ.** OpenDHFS declines to do
+  it, by design. We separate the cameras by stream continuity and match the
+  written ground truth exactly (USP claim 5, `FINAL_REPORT.md` §8).
+- **The generated disks carry our reading of each format.** On the Hikvision
+  disk, and where dhfs_extractor stalls, the difference may be the disk's
+  and not the tool's. Neither disk proves a rival wrong: the Hikvision tools
+  follow the 2015 paper's older layout (`HIK.2011.03.08`); dhfs_extractor was
+  built on Brazilian recorders' disks, and our notes on drive 1 never
+  recorded the bytes after the last partition entry, which it relies on. A
+  fair head-to-head needs the real images: `dhfs41.DHFS41().load_image()` on
+  drive 1's head image, and the two Hikvision tools on drive 2.
+- **Two findings stand on their own.** A loop with no bound turns a disk
+  without the expected marker into a hang, not an error. And a tool that
+  converts recorder times in the host's zone gives different answers on
+  different examiners' machines.
+- **The SIH comparison is on the same public image.** It uses the other
+  teams' own published figures. They were not re-run here, because both need
+  the 150 GB E01 streamed through their own readers.
+
 ## 9. Vendor format status
 
 | Vendor | Status | Why not better |
