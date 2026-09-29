@@ -2063,7 +2063,7 @@ def test_analytics_tiles() -> None:
     in two tiles is kept once, and boxes kept at any score then filtered are
     the boxes kept at the threshold (what `sweep` relies on)."""
     print("\n[analytics: tiles]")
-    from analytics.tiles import merge, tiles, to_frame
+    from analytics.tiles import merge, tiles, to_frame, unrotate
     g = tiles(1920, 1080, 3, 0.2)
     xs, ys = sorted({t[0] for t in g}), sorted({t[1] for t in g})
     tw, th = g[0][2], g[0][3]
@@ -2093,6 +2093,14 @@ def test_analytics_tiles() -> None:
     check("boxes merged at any score and then filtered are the boxes merged at the threshold",
           all([d for d in merge(boxes) if d["score"] >= t] == merge([d for d in boxes if d["score"] >= t])
               for t in (0.2, 0.3, 0.4, 0.5, 0.6)))
+    # np.rot90's quarter turn (anticlockwise) moves a 0-1 box to this place:
+    turn = lambda b: [b[1], round(1 - b[2], 4), b[3], round(1 - b[0], 4)]
+    box, b, back = [0.1, 0.2, 0.4, 0.9], [0.1, 0.2, 0.4, 0.9], []
+    for k in (1, 2, 3):
+        b = turn(b)
+        back.append(unrotate(b, k))
+    check("a box found in the frame turned a quarter, a half or three quarters of a turn "
+          "maps back to where it is in the frame", back == [box, box, box], str(back))
 
 
 def test_analytics_models() -> None:

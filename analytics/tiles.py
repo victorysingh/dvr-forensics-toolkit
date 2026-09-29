@@ -37,6 +37,29 @@ def to_frame(box: list[float], tile: tuple, w: int, h: int) -> list[float]:
             round((x + x2 * tw) / w, 4), round((y + y2 * th) / h, 4)]
 
 
+# A camera on the ceiling - a fisheye above all - sees people lying at every
+# angle round the picture, and the detectors learned upright people.  Running
+# them on the frame turned a quarter, a half and three quarters of a turn
+# (numpy's rot90, k = 1, 2, 3: anticlockwise) and turning each box back finds
+# the people who lie sideways or upside down (docs/VALIDATION_REPORT.md 8a).
+ROTATIONS = (1, 2, 3)
+
+
+def unrotate(box: list[float], k: int) -> list[float]:
+    """A box (0-1) found in the frame turned k quarter turns anticlockwise, in
+    the unturned frame's own 0-1 coordinates."""
+    u1, v1, u2, v2 = box
+    if k == 1:
+        out = [1 - v2, u1, 1 - v1, u2]
+    elif k == 2:
+        out = [1 - u2, 1 - v2, 1 - u1, 1 - v1]
+    elif k == 3:
+        out = [v1, 1 - u2, v2, 1 - u1]
+    else:
+        out = [u1, v1, u2, v2]
+    return [round(v, 4) for v in out]
+
+
 def merge(dets: list[dict], iou: float = MERGE_IOU) -> list[dict]:
     """One box per object where tiles overlap: strongest first, a box is
     dropped if one already kept has the same label and overlaps it by `iou`
