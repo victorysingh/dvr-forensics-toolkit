@@ -127,7 +127,8 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
     evenly to `frames` per clip."""
     from analytics import detect
     clips = [clips] if isinstance(clips, str) else list(clips)
-    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, threshold, thresholds
+    from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, keep_threshold, mark_weak, thresholds
+    from analytics.static import parked_spots
     model_set = model_set or DEFAULT_SET
     models = detect.load_models(model_set)
     ms = MODEL_SETS[model_set]
@@ -162,8 +163,8 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
             detect._thumbnail(rgb, [], os.path.join(out, "frames", name))
             # every box down to SWEEP's lowest; the tool's are a subset
             any_score = detect.detect_frame(models, rgb, big, tiles, low, rotate)
-            dets = [dict(d) for d in any_score
-                    if d["score"] >= threshold(model_set, d["label"])]
+            dets = mark_weak(model_set, [dict(d) for d in any_score
+                                         if d["score"] >= keep_threshold(model_set, d["label"])])
             x = {"frame": n, "clip": ci, "index": idx, "detections": dets, "any_score": any_score}
             hits.append(x)
             clip_hits.append(x)
@@ -178,6 +179,7 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
         flag_static(with_dets, len(clip_hits))
         flag_implausible(with_dets)
         per_clip.append({"clip": os.path.basename(clip), "clip_sha256": detect.sha256_file(clip),
+                         "parked_vehicles": parked_spots(with_dets, key="frame"),
                          "frames": len(clip_hits), "first_frame": first,
                          "sampling": f"{fps:g} fps" if fps else f"every {every}th of {total} keyframes"})
         if not clip_hits:
@@ -209,10 +211,19 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
 
 def score(out: str) -> dict:
     with open(os.path.join(out, "detections.json"), encoding="utf-8") as fh:
-        det = {x["frame"]: x["detections"] for x in json.load(fh)["detections"]}
+        stored = json.load(fh)
+    det = {x["frame"]: x["detections"] for x in stored["detections"]}
     with open(os.path.join(out, "labels.csv"), newline="", encoding="utf-8") as fh:
         labels = list(csv.DictReader(fh))
     res: dict = {"frames_labelled": 0, "classes": {}}
+    # parked vehicles are reported once per place: say, for each, how many of
+    # its frames a person labelled as holding a vehicle
+    by_frame = {int(r["frame"]): r for r in labels}
+    res["parked_vehicles"] = [
+        dict(s, clip=c["clip"], labelled_vehicle=sum(
+            1 for f in range(s["first"], s["last"] + 1)
+            if by_frame.get(f, {}).get("vehicle", "").strip().lower() == "y"))
+        for c in stored.get("clips", []) for s in c.get("parked_vehicles", [])]
     for cls, names in CLASSES.items():
         for view in ("as reported", "as the models said"):
             tp = fp = fn = tn = 0
@@ -358,6 +369,10 @@ def main() -> int:
         return 0
     res = score(a.out)
     print(f"{res['frames_labelled']} frames labelled")
+    for s in res["parked_vehicles"]:
+        print(f"  parked {s['label']:<6} {s['clip'][:36]:<36} best {s['best']:.2f}, seen in "
+              f"{s['frames']} frames ({s['first']}-{s['last']}); frames labelled vehicle in "
+              f"that span: {s['labelled_vehicle']}")
     for cls, views in res["classes"].items():
         for view, m in views.items():
             print(f"  {cls:<8} {view:<19} with {m['frames_with']:>3}  without "

@@ -52,12 +52,12 @@ MODELS = {
 # set A, so they stay at 0.5 (docs/VALIDATION_REPORT.md section 8a).
 MODEL_SETS = {
     "yolox": {"objects": "yolox", "faces": "yunet", "objects_min": 0.5, "faces_min": 0.7,
-              "class_min": {"person": 0.4},
+              "class_min": {"person": 0.4}, "parked_min": 0.3,
               "tiles": 2, "rule": "analytics.yolox_yunet.v3",
               "how": "YOLOX-S on the whole 1920 x 1080 frame and on each tile of an n x n "
                      "grid; YuNet on the whole 1920 x 1080 frame"},
     "classic": {"objects": "objects", "faces": "face", "objects_min": 0.5, "faces_min": 0.8,
-                "class_min": {},
+                "class_min": {}, "parked_min": 0.5,
                 "tiles": 3, "rule": "analytics.ultraface_ssdmobilenet.v2",
                 "how": "SSD-MobileNet on the whole frame and each tile of an n x n grid of a "
                        "1920 x 1080 decode; UltraFace likewise on the 640 x 360 frame"},
@@ -73,7 +73,26 @@ def threshold(model_set: str, label: str) -> float:
     return s["class_min"].get(label, s["objects_min"])
 
 
+def keep_threshold(model_set: str, label: str) -> float:
+    """The score a detection needs to be kept at all: its reporting threshold,
+    or, for a car, bus or truck, the lower parked_min.  Such a box counts only
+    as part of a parked vehicle (analytics/static.py parked_spots); below the
+    reporting threshold it is marked "weak" and not counted otherwise."""
+    t = threshold(model_set, label)
+    if label in ("car", "bus", "truck"):
+        return min(t, MODEL_SETS[model_set]["parked_min"])
+    return t
+
+
+def mark_weak(model_set: str, dets: list) -> list:
+    """Flag the kept boxes that are under their class's reporting threshold."""
+    for d in dets:
+        d["weak"] = d["score"] < threshold(model_set, d["label"])
+    return dets
+
+
 def thresholds(model_set: str) -> dict:
     """The set's thresholds as recorded in its output."""
     s = MODEL_SETS[model_set]
-    return {"faces": s["faces_min"], "objects": s["objects_min"], **s["class_min"]}
+    return {"faces": s["faces_min"], "objects": s["objects_min"], **s["class_min"],
+            "parked vehicles": s["parked_min"]}
