@@ -17,9 +17,16 @@ therefore not tested: this is an independent-implementation check, not
 independent knowledge of the format.  Status stays spec_only; only a
 byte-match with the recorder's own export is `validated`.
 
-Known, expected differences are reported, not hidden: ffmpeg does not emit
-0xF1 aux frames, and it ignores the header checksum byte this tool enforces,
-so a frame with a bad checksum is ffmpeg's and not ours.
+Known, expected differences are reported, not hidden:
+  * ffmpeg does not emit 0xF1 aux frames;
+  * it ignores the header checksum byte this tool enforces, so a frame with a
+    bad checksum is ffmpeg's and not ours (a real difference, reported);
+  * it emits no video before the first keyframe - a file that opens
+    mid-group (observed on real Dahua files) is aligned at that keyframe,
+    and the frames before it are counted;
+  * it emits the payload bytes present of a last frame the file cuts short,
+    which this tool rejects (no trailer) - counted when the extra packet is
+    exactly those bytes.
 
 Usage:
   python -m validate.dhav_crosscheck FILE_OR_DIR [...] [--ffmpeg PATH] [--out report.json]
@@ -31,6 +38,7 @@ import argparse
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import zlib
@@ -61,10 +69,28 @@ def our_frames(path: str) -> Iterator[D.DhavFrame]:
             pos = end if end and end > pos else pos + WINDOW
 
 
+def _truncated_tail(fh, after: int, size: int) -> Optional[dict]:
+    """A valid DHAV header after the last complete frame whose frame runs past
+    the end of the file: the file was cut inside it."""
+    fh.seek(after)
+    rest = fh.read(size - after)
+    p = rest.find(D.DHAV_MAGIC)
+    if p < 0 or not D.header_ok(rest[p:p + D.DHAV_HDR]):
+        return None
+    _, ftype, *_, flen, _date, _ms, ext, _ck = struct.unpack_from(D.DHAV_HDR_FMT, rest, p)
+    if after + p + flen <= size:
+        return None
+    kind = "video" if ftype in D.VIDEO_TYPES else "audio" if ftype == D.TYPE_AUDIO else "aux"
+    return {"offset": after + p, "kind": kind, "declared": flen, "present": len(rest) - p,
+            "payload_present": max(0, len(rest) - p - D.DHAV_HDR - ext)}
+
+
 def ours(path: str) -> dict:
-    video, audio, aux = [], [], 0
+    video, audio, aux, end = [], [], 0, 0
+    size = os.path.getsize(path)
     with open(path, "rb") as fh:
         for fr in our_frames(path):
+            end = fr.offset + fr.length
             fh.seek(fr.offset + D.DHAV_HDR + fr.ext_length)
             pay = fh.read(fr.length - D.DHAV_HDR - fr.ext_length - D.DHAV_TAIL)
             row = (len(pay), zlib.adler32(pay, 0))
@@ -76,7 +102,8 @@ def ours(path: str) -> dict:
                 audio.append(row)
             else:
                 aux += 1
-    return {"video": video, "audio": audio, "aux": aux}
+        tail = _truncated_tail(fh, end, size) if size - end >= D.DHAV_HDR else None
+    return {"video": video, "audio": audio, "aux": aux, "truncated_tail": tail}
 
 
 def ffmpeg_frames(path: str, ffmpeg: str) -> dict:
@@ -111,17 +138,38 @@ def compare(a: dict, b: dict) -> dict:
                 return i
         return None if len(x) == len(y) else min(len(x), len(y))
 
-    v_ours, v_ff = a["video"], b["video"]
+    def cut_tail(theirs, mine, kind):
+        """Drop ffmpeg's last packet when it is exactly the payload bytes of a
+        frame the file cuts short - which we reject."""
+        t = a.get("truncated_tail")
+        if (t and t["kind"] == kind and len(theirs) == len(mine) + 1
+                and theirs[-1][0] == t["payload_present"]):
+            return theirs[:-1], True
+        return theirs, False
+
+    v_all, v_ff = a["video"], b["video"]
+    # ffmpeg emits no video before the first keyframe: align there, when that
+    # is what makes the two agree (a file that opens mid-group)
+    lead = next((i for i, x in enumerate(v_all) if x[2]), 0)
+    v_ours = v_all
+    if lead and first_diff(v_all, v_ff, 3) is not None:
+        v_ours = v_all[lead:]
+    v_ff, v_cut = cut_tail(v_ff, v_ours, "video")
+    a_ff, a_cut = cut_tail(b["audio"], a["audio"], "audio")
     k = first_diff(v_ours, v_ff, 3)
     deltas = [f[3] - o[3] for o, f in zip(v_ours, v_ff) if o[3] is not None]
     within = sum(1 for d in deltas if 0 <= d < 1.0)
-    ka = first_diff(a["audio"], b["audio"], 2)
+    ka = first_diff(a["audio"], a_ff, 2)
     res = {
-        "video": {"ours": len(v_ours), "ffmpeg": len(v_ff),
+        "video": {"ours": len(v_all), "ffmpeg": len(b["video"]),
                   "identical": k is None,
                   "matching_prefix": len(v_ours) if k is None else k},
         "audio": {"ours": len(a["audio"]), "ffmpeg": len(b["audio"]),
                   "identical": ka is None},
+        "expected_differences": {
+            "ours_before_first_keyframe": len(v_all) - len(v_ours),
+            "ffmpeg_truncated_last_frame": v_cut or a_cut,
+            "truncated_tail": a.get("truncated_tail")},
         "time": {"frames_compared": len(deltas),
                  "ffmpeg_within_the_frames_own_second": within,
                  "max_offset_s": round(max((abs(d) for d in deltas), default=0.0), 3)},
