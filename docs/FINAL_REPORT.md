@@ -245,6 +245,11 @@ CPU-bound (26.7 MiB/s measured), and `TECH_STACK.md` records the planned fix.
   `identify-model`, SOP 1.2, `validate-export`). MeitY's s.79A scheme (v2.0,
   2025) lists "CCTV Forensics" and asks labs for ISO/IEC 17025 and a list of
   every tool used.
+- **Exchange:** `export-nist` writes recovered H.264 in NIST's CCTV export
+  profile (NISTIR 8161r1 Level 0), written for the FBI. Every frame carries
+  its UTC time, and the file carries the recorder's clock offset. Its time
+  stamps are byte-identical to NIST's own reference file, and the pictures
+  are proven unchanged (VALIDATION_REPORT §8i).
 - **Procedure:** `SOP_EXAMINATION.md` and `LINUX_ACQUISITION.md` follow SWGDE
   DVR acquisition practice, ISO/IEC 27037 and NIST SP 800-86. Step 1.2 reads
   the recorder's clock against true time before anything else.
@@ -354,9 +359,13 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
    the Dahua-family recorder that reformatted the disk kept its own log, which
    records hard-drive formatting (Dragonas et al. 2024) - on that recorder's
    disk or flash, not this one.
-3. **Make the OCR read what the eye read:** clocks with a weekday or AM/PM,
-   and white text on bright backgrounds (VALIDATION_REPORT §8c).
-4. **Speed:** one regex pass, threaded hashes, and a process pool.
+3. **Make the OCR read what the eye read:** clocks with a weekday or AM/PM
+   are now read (28 Sep) and need a re-run on the reference frames. White
+   text on bright backgrounds remains open: a top-hat filter was tried and
+   did not help (VALIDATION_REPORT §8c).
+4. **Speed:** done in the main - the taps run in a process pool, and the NAL
+   searches are one pass; threaded hashes did not matter (PERFORMANCE.md §5).
+   What is left, folding the signature search into that pass, is small.
 5. **Any real disk** from Honeywell, Uniview or TP-Link: run the plugin
    (`parse --vendor ...`) - the first real disk is its test. The same for
    Matrix. From Godrej: run `survey` and `carve-annexb`, then write a plugin.
