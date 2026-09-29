@@ -276,10 +276,35 @@ and the platter's model strings against the unit. A disagreement is a finding
 to explain, not an error: a Hikvision unit whose disk carries Dahua
 structures is a disk that another recorder formatted.
 
+### 3.4g Uniview and TP-Link (plugins from the vendors' firmware)
+
+Both are `plugins/` files, loaded like Honeywell's; see VALIDATION_REPORT §8f
+for what they rest on. No real disk from either has been read yet.
+
+```bash
+# Uniview: recordings per block, with camera and recorder-clock times
+python cli.py parse --vendor Uniview --device /dev/sdb --out out/CASE-001
+python cli.py extract --vendor Uniview --device /dev/sdb --out out/CASE-001 \
+    --recording unv-b00012                     # the block's video, GOPs checked
+python cli.py parse --vendor Uniview --device /dev/sdb --remnants   # GOPs with no index
+
+# TP-Link: scan first, so the index header's offset is passed as a hint
+python cli.py parse --vendor TP-Link --device /dev/sdb --out out/CASE-001
+```
+
+- **Uniview.** Each recording is one 256 MiB block of one camera. `--remnants`
+  walks every block for GOPs by their own trailers, index or not; runs past
+  a block's write position are named `unv-stale-*` (older footage).
+- **TP-Link.** The summary says whether the index was read, or found and not
+  readable (encrypted). When read: recordings per camera and the recorder's
+  system log, as the index states them. No footage is placed on the disk -
+  use `carve-annexb` (§3.4f).
+
 ### 3.4f Footage from a recorder we have no parser for
 
-When detection names a vendor with no parser (TP-Link, Godrej,
-Uniview, Matrix) — or names nobody — recover the video anyway:
+When detection names a vendor with no parser (Godrej, Matrix), or
+TP-Link (whose plugin reads the index but places no footage) — or names
+nobody — recover the video anyway:
 
 ```bash
 python cli.py carve-annexb --device /dev/sdb --out out/CASE-001     # or scan --carve-annexb

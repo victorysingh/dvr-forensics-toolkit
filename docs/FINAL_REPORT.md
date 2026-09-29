@@ -168,7 +168,9 @@ Full account: `VALIDATION_REPORT.md`.
   - Hikvision full-filesystem parser: `spec_only` (the layout observed on drive 2;
     not yet run on an intact Hikvision disk).
   - Honeywell: `spec_only`.
-  - TP-Link, Godrej, Uniview, Matrix: `detected_not_parsed`.
+  - Uniview: `spec_only`, from the storage driver in Uniview's own firmware.
+  - TP-Link: `detected_not_parsed`; its index is read when plain (from the VIGI firmware), but no footage is placed.
+  - Godrej, Matrix: `detected_not_parsed`.
 - **The route to `validated`** is built (`validate-export`, USER_MANUAL
   §3.4d). The evidence drives must not go back into their recorders, so the
   export comes from a **reference disk**: a spare disk that the same recorder
@@ -244,10 +246,13 @@ Three findings go beyond the published work:
 | Hikvision | container, index and full-FS parser `spec_only` (the parser not yet run on an intact Hikvision disk) | real footage and a surviving index on drive 2 |
 | HeimVision (beyond the eight) | `spec_only` | read off a real public NIST image; drop-in plugin |
 | Honeywell | `spec_only` | drop-in plugin from Yoon & Hwang (DFRWS USA 2026); older units were Dahua-built until April 2022, so the Dahua parser may apply |
-| TP-Link, Godrej, Uniview, Matrix | `detected_not_parsed` | brand strings and model numbering; video recoverable with no parser by `carve-annexb`; sourced first answers in `OEM_COMPARISON.md` §5.1 |
+| Uniview | `spec_only` | drop-in plugin from the storage driver in Uniview's own firmware (static disassembly); footage found with or without its index (VALIDATION_REPORT §8f) |
+| TP-Link | `detected_not_parsed` | drop-in plugin from the VIGI firmware: format sector and index detected, a plain index read (recordings, system log); footage not placed - `carve-annexb`; an encrypted index is reported as such |
+| Godrej, Matrix | `detected_not_parsed` | brand strings and model numbering; video recoverable with no parser by `carve-annexb`; sourced first answers in `OEM_COMPARISON.md` §5.1 |
 
 **Four platforms are read from real media (three of the eight, plus
-HeimVision from a public NIST image) and one more from published research;
+HeimVision from a public NIST image), one more from published research, and
+one (Uniview, plus TP-Link's index) from the vendor's own firmware;
 all eight are detected; and footage can be recovered from any vendor that
 stores standard H.264/H.265.** That is our honest answer to "five to six".
 
@@ -299,8 +304,9 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
 3. **Make the OCR read what the eye read:** clocks with a weekday or AM/PM,
    and white text on bright backgrounds (VALIDATION_REPORT §8c).
 4. **Speed:** one regex pass, threaded hashes, and a process pool.
-5. **Any real disk** from Honeywell, TP-Link, Godrej, Uniview or Matrix: run
-   `survey` and `carve-annexb`, then write a plugin.
+5. **Any real disk** from Honeywell, Uniview or TP-Link: run the plugin
+   (`parse --vendor ...`) - the first real disk is its test. From Godrej or
+   Matrix: run `survey` and `carve-annexb`, then write a plugin.
 
 ## 12. Deliverables named in the PS
 
