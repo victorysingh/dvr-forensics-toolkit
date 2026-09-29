@@ -117,8 +117,8 @@ both drives, the OSD reader can move from `synthetic_only` to `spec_only`
 
 ## 3. UTC from daylight, on the outdoor cameras
 
-This needs **the site's latitude and longitude** (ask JP), and several days
-of one outdoor camera, so that it sees several dusks and dawns.
+The site is **Bengaluru, 12.97° N, 77.59° E** (JP, 29 Sep). It also needs
+several days of one outdoor camera, so that it sees several dusks and dawns.
 
 Pick the recordings of **one** camera (e.g. *Road View 1*) covering 3-5
 consecutive days from `$CASE1/parse_dahua.json` (or the viewer's Filesystem
@@ -132,7 +132,7 @@ done
 python -m analyse.daylight sample out/realchecks/daylight_clips/*.dav \
     --out out/realchecks/daylight.jsonl --every 60
 python -m analyse.daylight estimate out/realchecks/daylight.jsonl \
-    --lat SITE_LAT --lon SITE_LON --zone 330
+    --lat 12.97 --lon 77.59 --zone 330
 ```
 
 A second estimate, from footage already on disk, uses the 2,246 streams
@@ -141,7 +141,7 @@ widens the spread:
 
 ```bash
 python -m analyse.daylight sample $CASE1/carve/streams/*.dav --out out/realchecks/daylight_carved.jsonl --every 60
-python -m analyse.daylight estimate out/realchecks/daylight_carved.jsonl --lat SITE_LAT --lon SITE_LON --zone 330
+python -m analyse.daylight estimate out/realchecks/daylight_carved.jsonl --lat 12.97 --lon 77.59 --zone 330
 ```
 
 **Bring back:** both `estimate` printouts. They give the offset from UTC, the
