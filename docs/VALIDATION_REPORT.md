@@ -1268,6 +1268,30 @@ This makes the DHAV frame walk two independent implementations agreeing on
 719,097 of this drive's own frames. The field layout both use still comes
 from `dhav.c` (see above), so Dahua / CP Plus stays `spec_only`.
 
+**On the drive's indexed recordings too (29 Sep).** The 301 hourly
+recordings extracted for §8l (14-17 Sep, all three cameras, 131 GiB of
+`.dav`, reassembled through the index) were run through the same check.
+Results are in `out/realchecks/xcheck_indexed/`.
+
+| | Result |
+|---|---|
+| Files identical frame for frame | **300 of 301** |
+| Video frames ffmpeg emitted | **25,758,151, every one identical to ours** |
+| Ours that ffmpeg did not emit | 34,579: 34,550 before a first keyframe, and the 29 of the one other file, a 59 KB recording with no keyframe (ffmpeg emits no video from it, by design) |
+| Audio | **25,901,562 frames, identical in all 301 files** |
+| Other | 129,704 `0xF1` aux frames, ours only; no truncated last frame |
+| Time | 25,709,656 of 25,758,151 (99.8%) inside their own DHAV second; the largest offset is 1.96 s, in 50 files. Unlike the carved streams, no frame is missing there. **The recorder's own clock steps**: between consecutive frames, with the frame and millisecond counters running on, the date repeats a second (-1 s, 6 times) or skips one (+2 s, 3 times). Each step falls at about ten past the hour (01:10, 03:10, 05:10, 09:10, 12:10, 20:10 on 14-16 Sep) and is shared by the cameras. ffmpeg keeps its time monotonic and waits for the date to catch up (1.96 s). The other offsets in those files were not traced |
+
+**What the steps suggest.** They are the signature of a periodic clock
+synchronisation, corrected both ways by a second or two, for example NTP or
+the recorder syncing with its cameras. The disk does not say which, so it
+is not a result. If it is a network time server, the clock stays within a
+couple of seconds of it between syncs; the unit's time settings screen
+(NTP on or off, which server) settles it. Clock steps: `out/realchecks/xcheck_indexed/clock_steps.json`.
+
+So on the reassembled recordings, the extraction path an examiner uses most,
+the two implementations agree on every frame ffmpeg reads.
+
 ## 8j. Godrej, from Qualvision's firmware
 
 Godrej publishes no format and no firmware. But its SeeThru cloud portal
