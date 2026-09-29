@@ -147,7 +147,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 493 in all: 474 on generated data with known ground
+- **Automated tests:** 503 in all: 484 on generated data with known ground
   truth, 14 on real media (9 on the CP Plus drive's image, 5 on the
   HeimVision E01 and its FTK listing), and 5 on vendor-made files from other
   recorders (`VALIDATION_REPORT.md` §1).
@@ -172,7 +172,10 @@ Full account: `VALIDATION_REPORT.md`.
   - Honeywell: `spec_only`.
   - Uniview: `spec_only`, from the storage driver in Uniview's own firmware.
   - TP-Link: `detected_not_parsed`; its index is read when plain (from the VIGI firmware), but no footage is placed.
-  - Godrej, Matrix: `detected_not_parsed`.
+  - Godrej: `spec_only`, from Qualvision's firmware (Godrej's SeeThru
+    recorders run Qualvision's software): footage found and dated, no camera.
+  - Matrix: `spec_only`, from Matrix's own documentation of its disk tree:
+    every clip with its camera and times; the `.stm` container not decoded.
 - **Checked without an export** (`VALIDATION_REPORT.md` §8g), as SWGDE
   18-Q-001 and ISO/IEC 17025 allow when no reference export exists:
   - ffmpeg's `dhav` demuxer, a second implementation, agrees with ours frame
@@ -295,13 +298,16 @@ as unique.
 | Honeywell | `spec_only` | drop-in plugin from Yoon & Hwang (DFRWS USA 2026); older units were Dahua-built until April 2022, so the Dahua parser may apply |
 | Uniview | `spec_only` | drop-in plugin from the storage driver in Uniview's own firmware (static disassembly); footage found with or without its index (VALIDATION_REPORT §8f) |
 | TP-Link | `detected_not_parsed` | drop-in plugin from the VIGI firmware: format sector and index detected, a plain index read (recordings, system log); footage not placed - `carve-annexb`; an encrypted index is reported as such |
-| Godrej, Matrix | `detected_not_parsed` | brand strings and model numbering; video recoverable with no parser by `carve-annexb`; sourced first answers in `OEM_COMPARISON.md` §5.1 |
+| Godrej | `spec_only` | drop-in plugin from Qualvision's own firmware (Godrej SeeThru runs Qualvision's software): disk head, frame chain, dated runs; cameras and the index not decoded (VALIDATION_REPORT §8h) |
+| Matrix | `spec_only` | drop-in plugin from Matrix's own documentation: clip files on an ext volume, camera and times from the path; `.stm` not decoded (VALIDATION_REPORT §8h) |
 
-**Four platforms are read from real media (three of the eight, plus
-HeimVision from a public NIST image), one more from published research, and
-one (Uniview, plus TP-Link's index) from the vendor's own firmware;
-all eight are detected; and footage can be recovered from any vendor that
-stores standard H.264/H.265.** That is our honest answer to "five to six".
+**All eight named OEMs now have a plugin.** Three are read from real media
+(Dahua, CP Plus, Hikvision), plus HeimVision from a public NIST image. One
+more comes from published research (Honeywell), three from the vendors' own
+firmware (Uniview, TP-Link's index, and Godrej via Qualvision), and one from
+the vendor's own documentation (Matrix). Only the first three are observed,
+none is `validated`, and footage can also be recovered from any vendor that
+stores standard H.264/H.265. That is our honest answer to "five to six".
 
 ## 10. Limitations
 
@@ -353,9 +359,9 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
 3. **Make the OCR read what the eye read:** clocks with a weekday or AM/PM,
    and white text on bright backgrounds (VALIDATION_REPORT §8c).
 4. **Speed:** one regex pass, threaded hashes, and a process pool.
-5. **Any real disk** from Honeywell, Uniview or TP-Link: run the plugin
-   (`parse --vendor ...`) - the first real disk is its test. From Godrej or
-   Matrix: run `survey` and `carve-annexb`, then write a plugin.
+5. **Any real disk** from Honeywell, Uniview, TP-Link, Godrej or Matrix:
+   run the plugin (`parse --vendor ...`) - the first real disk is its test.
+   From anyone else: run `survey` and `carve-annexb`, then write a plugin.
 
 ## 12. Deliverables named in the PS
 

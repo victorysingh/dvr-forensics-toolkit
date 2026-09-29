@@ -345,7 +345,7 @@ goes beyond.
 
 ---
 
-### D14. Two formats nobody has published, read from the vendors' own code
+### D14. Formats nobody has published, read from the vendors' own code and documents
 
 - **What.** Uniview and TP-Link have no published on-disk format (OEM_COMPARISON
   §5.1). Their public firmware was unpacked and the storage code read by
@@ -362,6 +362,14 @@ goes beyond.
   be documented and testable to be relied on; each field here cites its
   firmware function, and the status stays `spec_only` until a real disk
   checks it.
+- **Then Godrej and Matrix (29 Sep, `VALIDATION_REPORT.md` §8h).** Godrej's
+  SeeThru recorders run Qualvision's software, so Qualvision's firmware was
+  read the same way: the QVFS disk head, and a 20-byte frame head whose time
+  the firmware's own debug print decodes with Dahua's packed-date shifts. A
+  frame chain then finds and dates footage without the index. Matrix
+  documents its own disk as clip files in `CameraNN/DD_Mon_YYYY/HH/` folders;
+  reading them needed ext4, now read through its extent trees. So all eight
+  named OEMs have a plugin, each with its source and what it does not know.
 
 ---
 

@@ -65,15 +65,21 @@ VENDOR_MATRIX = {
                          "disassembly): detects the format sector and the index, and reads the "
                          "index and system log when they are plain SQLite; footage is not "
                          "placed on the disk (zone geometry not recovered) - carve-annexb"},
-    "Godrej": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
-               "media": "none", "basis": "firmware string signature only"},
+    "Godrej": {"family": "Qualvision QVFS (Godrej SeeThru runs Qualvision's software)",
+               "parser": "Godrej", "parser_status": "spec_only", "media": "none",
+               "basis": "plugins/godrej.py, from Qualvision firmware NVR401L-4P4 20240531 "
+                        "(static disassembly of Sofia): disk head and frame chain with times; "
+                        "cameras and the index not decoded; no Godrej/Qualvision disk read"},
     "Uniview": {"family": "Uniview UBS (its own block store, in the kernel module comm.ko)",
                 "parser": "Uniview", "parser_status": "spec_only", "media": "none",
                 "basis": "plugins/uniview.py, from the storage driver of Uniview firmware "
                          "NVR301-04LS3-W B3612.1.21.220408 (static disassembly); no Uniview "
                          "disk read by the team"},
-    "Matrix": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
-               "media": "none", "basis": "firmware string signature only"},
+    "Matrix": {"family": "Matrix SATATYA: clip files on a Linux filesystem",
+               "parser": "Matrix", "parser_status": "spec_only", "media": "none",
+               "basis": "plugins/matrix.py, from Matrix's own wiki (HDD backup, 2018): "
+                        "CameraNN/DD_Mon_YYYY/HH/HH_MM_SS~HH_MM_SS.stmN on ext2/3/4; the .stm "
+                        "container not decoded; no Matrix disk read"},
 }
 
 

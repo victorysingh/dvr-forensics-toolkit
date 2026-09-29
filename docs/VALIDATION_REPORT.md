@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 493 pass, 0 fail: 474 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 5 on vendor-made files from other recorders (§8g) |
+| Automated tests | 503 pass, 0 fail: 484 on generated data with known ground truth (2 need ffmpeg), 14 on real media (9 on the CP Plus drive's image, 5 on the HeimVision E01 and its FTK listing), 5 on vendor-made files from other recorders (§8g) |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
@@ -629,6 +629,57 @@ to 1 s.
 python -m validate.dhav_crosscheck out/cpplus_WWD4A3NX/carve/streams --ffmpeg PATH/ffmpeg --out dhav_crosscheck.json
 ```
 
+## 8h. The last two named OEMs: Godrej (from Qualvision's firmware) and Matrix (from its documentation)
+
+Neither has a published on-disk format, and neither unit or disk is held.
+Both plugins are `spec_only`, tested on disks built to the reading, and say
+what they do not know.
+
+**Godrej = Qualvision QVFS** (`plugins/godrej.py`). Godrej's SeeThru cloud
+portal drives Qualvision's `/tdkcgi` API, which Qualvision's firmware
+implements. Its application `Sofia` (NVR401L-4P4, 20240531) was read by
+static disassembly (`docs/research/fwread/sofia.py`), each structure from a
+named function:
+- disk head `QVEX` v1.0 at LBA 0, with two (start, size) regions bounded by
+  the size field (`IDiskExt::CheckHead`);
+- frames of a 20-byte head: `00 00 01` + type E0-EB, a u32 payload length,
+  the next frame at head + 20 + length (`CheckFrameHead`, `LoadFrameHead`,
+  `ReadPacket`);
+- the frame time: a DHTIME at +8 and milliseconds at +0x0C, decoded in the
+  firmware's own debug print with exactly Dahua's packed-date shifts
+  (`CHOTUpload::OpenFile`). The research notes had this as an assumption;
+  the disassembly makes it firmware evidence.
+
+Footage is found by the frame chain alone: a head is believed only when the
+next head follows exactly where its length says, several in a row. Not
+decoded, so not claimed: the VIDEO/PIC and HM index blocks (so no run is given
+a camera), the frame types' meanings, and six bytes of the head.
+
+**Matrix SATATYA** (`plugins/matrix.py`). Matrix's wiki tells a user to open
+the recorder's share at `device/HDD/camera/date/hour/` and copy the `.stm`
+with its `.evnt`, `.ifrm` and `.tmid` - e.g.
+`RAID0/Camera01/21_Apr_2018/14/14_47_19~14_59_59.stm1`. So a SATATYA disk is
+a Linux filesystem of clip files. The plugin reads it on ext2/3/4
+(`parsers/ext3.py` now reads ext4 extents and 64-bit group descriptors; an
+extent tree that fails its checks is refused). Each clip's camera, start and
+end come from the path, and each disagreement is reported: an hour folder
+the name contradicts, an end before a start. The recorder's zone setting is
+measured as for HeimVision (path wall-clock vs inode mtime). The `.stm`
+container and the sidecars are not decoded; clips are extracted as stored.
+
+| Check (generated disks) | Result |
+|---|---|
+| ext4: one extent, a split file, a depth-1 tree, an unwritten extent | every clip read back byte for byte; a tree node with a broken magic refused |
+| Matrix | 4 clips, 2 cameras, times from the path; a misfiled clip reported; IST (+330) measured on 4/4; a clip extracted exactly through its 5-fragment tree; clips on the timeline |
+| Godrej | head and regions as the firmware checks them; both runs at their offsets, every frame, times to the millisecond; a lone fake head passed over; video extracted exactly; a head failing the firmware's bounds check refused |
+| Neither plugin claims the other's disk | yes |
+
+With these, all eight named OEMs have a plugin: three read from real media
+(Dahua, CP Plus, Hikvision), one from published research (Honeywell), three
+from the vendors' own firmware (Uniview; TP-Link's index; Godrej via
+Qualvision), and one from the vendor's own documentation (Matrix). Only the
+first three are observed; none is `validated`.
+
 ## 9. Vendor format status
 
 | Vendor | Status | Why not better |
@@ -642,7 +693,8 @@ python -m validate.dhav_crosscheck out/cpplus_WWD4A3NX/carve/streams --ffmpeg PA
 | Honeywell | `spec_only` | `plugins/honeywell.py`, written from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430); tested on a disk built to the paper's description (10 tests, including recovery after a format); no Honeywell disk read |
 | Uniview | `spec_only` | `plugins/uniview.py`, from the storage driver in Uniview's own firmware (§8f); tested on a disk built to it (11 tests, including footage found with the index wiped); no Uniview disk read |
 | TP-Link | `detected_not_parsed` (index: `spec_only`) | `plugins/tplink.py`, from the VIGI firmware (§8f): the format sector and the index are detected, and a plain index is read (recordings per camera, GOP rows, system log); footage is not placed on the disk, because the zone geometry was not recovered - `carve-annexb` recovers it; an encrypted index is reported as encrypted |
-| Godrej, Matrix | `detected_not_parsed` | brand-string detection only; their video is recoverable by `carve-annexb` without a parser |
+| Godrej (Qualvision QVFS) | `spec_only` | `plugins/godrej.py`, from Qualvision's own firmware (§8h); tested on a disk built to it; no Godrej or Qualvision disk read; cameras and the index not decoded |
+| Matrix (SATATYA) | `spec_only` | `plugins/matrix.py`, from Matrix's own documentation of its disk tree (§8h); tested on an ext4 disk built to it; no Matrix disk read; the `.stm` container not decoded |
 
 **To reach `validated`** — Dahua/CP Plus, and Hikvision the same way.
 

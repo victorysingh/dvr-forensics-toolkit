@@ -14,6 +14,7 @@ Needs `pip install capstone pyelftools` (not needed by the tool itself).
 | Uniview | `NVR301_04LS3_W_General-B3612.1.21.220408.zip` (download.aras.nl/Video/Uniview/Recorders/Firmware/) → `Program.bin` → SquashFS | `/driverfile/comm.ko` | `56b84ede4893acf0c2f5fffe6e2235f2b0b9a6ac9dee55166449ec53043ac3fc` |
 | TP-Link | archive.org `TP-Link_VIGINVR1008HV2_240119_cc1d1` → `nvr1008hv2_en_1_0_7_up_boot_24011951953-signed.bin` → SquashFS at 0x18A600 | `/usr/lib/liblayouthddb.so` | `df6c5bd2518b908a879de8908b675337d3fe2a3c2bb1410f04e11dad20c3b169` |
 | TP-Link | (same) | `/usr/lib/libsqlite3.so.0.8.6` | `4754d86ab6476fd4b8997de9e3c52b0dc94209bb936a2234934e8de8d8c00ea0` |
+| Qualvision (Godrej) | `NVR401L-4P4.20240531.zip` (homaxi.com, SHA-256 `fe10f538…a80a`) → `.upf` → `usr.ubiimg` (UBIFS, LZO) | `/Sofia` (from `Sofia.lzma`) | `eb9e9e1d5ff48f519eb5c9fef1f8f140006976f0a4462799273524625ec2944b` |
 
 How they were fetched and unpacked is in `../datasets.md`, which also has
 the other firmware hunted for.
@@ -25,6 +26,9 @@ the other firmware hunted for.
   each call with its target.
 - `so.py` reads a shared library (Thumb-2, position-independent). It resolves
   `ldr rX, [pc]` + `add rX, pc` string loads and PLT calls.
+- `sofia.py` reads Qualvision's statically linked `Sofia` (ARM, ELF at file
+  offset 0x200, loaded at 0x10000): where a debug string is used, and the
+  code around it, each literal load labelled.
 
 ```bash
 python ko.py comm.ko func UBS_MT_PrintSuper     # one function, annotated
@@ -63,3 +67,21 @@ Not recovered, and so not used by the plugin: TP-Link's database-area record
 (`rawDiskLayout_DBAreaInfoInit`, `rawDiskLayout_restoreDBAreaInfo`), which
 holds where the zones start and how large a zone is; and TP-Link's GOP
 header.
+
+## Where each Qualvision (Godrej) structure comes from (`Sofia`)
+
+Godrej's SeeThru cloud portal drives Qualvision's `/tdkcgi` API, and
+`Sofia` implements it, so a SeeThru recorder runs this software
+(`../vendor_formats.md`). Addresses are virtual addresses.
+
+| Structure | Function (found by its string) | What to look for |
+|---|---|---|
+| Disk head | `IDiskExt::CheckHead` 0x954e64 (`sofia.py Sofia str "int IDiskExt::CheckHead()"`) | `QVEX` = 0x58455651 at +0; 0x10000 at +4; +8 and +0xC against the disk object's +0x44/+0x48; the three bounds checks on +0x10..+0x1C |
+| Frame head | `CheckFrameHead` 0x989858 | `u32[+0] & 0xFFFFFF == 0x10000`; `(type + 0x20) & 0xFF <= 0x0B`; length at +4 |
+| Head size | `LoadFrameHead` 0x98a164 | reads 0x14 bytes into the object at +0xD4 |
+| Payload, next frame | `ReadPacket` 0x98a320 | allocates length + 0x14, reads length bytes from +0x14; next = here + 0x14 + length (0x98a728) |
+| Frame time | `CHOTUpload::OpenFile` 0x309610 (`str "openfile frame head time"`) | the debug print's shifts on the u32 at +8 (sec, min, hour, day, month, year-2000) and the u16 at +0xC (ms) |
+
+Not recovered, and so not used by the plugin: the VIDEO/PIC index blocks and
+the per-channel HM time index (which name a frame's camera), the meaning of
+frame types 0xE0-0xEB, and the six bytes at +0x0E of a frame head.

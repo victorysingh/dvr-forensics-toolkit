@@ -892,8 +892,9 @@ def test_heimvision(tmp: str) -> None:
             refused = False
         except ExtError:
             refused = True
-    check("ext3: a file past 12 blocks read through its indirect block; an ext4 extent "
-          "inode refused, not guessed", whole == truth["pad"] and refused)
+    check("ext3: a file past 12 blocks read through its indirect block; an inode flagged "
+          "for extents whose extent tree does not validate is refused, not guessed",
+          whole == truth["pad"] and refused)
     bare = os.path.join(tmp, "heimvision_bare.img")
     SV.build(bare, system=False)
     with BlockDevice(bare) as dev:
@@ -968,6 +969,127 @@ def test_heimvision(tmp: str) -> None:
               rep["identical"] and rep["fat"]["in_both"] == 17154
               and rep["fat"]["written_per_ftk"] == 808 and len(rep["ext3"]["compared"]) == 4
               and rep["zone_setting_minutes_from_ftk_times"] == 480, str(rep["fat"]))
+
+
+def test_godrej_matrix(tmp: str) -> None:
+    """The last two named OEMs: Matrix from its own documentation (clip files
+    on ext4, read through an extent tree), Godrej from Qualvision's firmware
+    (a QVEX head and a self-checking frame chain).  Both on disks built to
+    those readings - spec_only."""
+    print("\n[Godrej (Qualvision QVFS) and Matrix (SATATYA) plugins]")
+    import hashlib
+    from analyse.timeline import ClockModel, build as build_timeline
+    from core.contract import to_dict
+    from detect.engine import parse_partitions
+    from parsers.ext3 import Ext, ExtError
+    from tests import synth_matrix as SM, synth_qvfs as SQ
+
+    img = os.path.join(tmp, "matrix.img")
+    truth = SM.build(img)
+    with BlockDevice(img) as dev:
+        fs = Ext(dev, parse_partitions(dev.read_at(0, 64 << 10), 512)[0].start_offset)
+        found = {}
+
+        def walk(n):
+            for e in fs.listdir(n):
+                if e["kind"] == "dir":
+                    walk(e["number"])
+                elif e["name"].endswith(".stm1"):
+                    found[e["name"]] = (fs.read(e), len(fs.runs(e)))
+        walk(2)
+    by_layout = {c["layout"]: c for c in truth["clips"]}
+    got = {c["layout"]: found[f"{c['start']:%H_%M_%S}~{c['end']:%H_%M_%S}.stm1"] for c in truth["clips"]}
+    check("ext4 read through extents: one extent, a file split in two, a depth-1 tree with an "
+          "index block, and an unwritten extent that reads as zeros - byte for byte",
+          fs.desc_size == 64 and all(got[k][0] == by_layout[k]["bytes"] for k in got)
+          and {k: v[1] for k, v in got.items()} == {"split": 2, "tree": 5, "one": 1, "unwritten": 1},
+          str({k: v[1] for k, v in got.items()}))
+    raw = bytearray(open(img, "rb").read())
+    k = raw.find(struct.pack("<HHHH", 0xF30A, 5, (4096 - 12) // 12, 0))
+    raw[k:k + 2] = b"\x00\x00"                                  # break the leaf's magic
+    bad = os.path.join(tmp, "matrix_bad.img")
+    open(bad, "wb").write(raw)
+    with BlockDevice(bad) as dev:
+        fsb = Ext(dev, parse_partitions(dev.read_at(0, 64 << 10), 512)[0].start_offset)
+        try:
+            walk_bad = [e for e in fsb.listdir(2)]
+            cam = fsb.listdir(fsb.listdir(walk_bad[0]["number"])[0]["number"])
+            hour = fsb.listdir(fsb.listdir(cam[0]["number"])[1]["number"])
+            fsb.read(next(e for e in hour if e["name"].endswith(".stm1")))
+            refused = False
+        except ExtError:
+            refused = True
+    check("an extent tree whose node fails its magic is refused, not guessed", refused)
+
+    p = get_parser("Matrix")
+    with BlockDevice(img) as dev:
+        det = p.detect(dev)
+        res = p.parse(dev)
+        tree_clip = next(r for r in res.recordings if r.id.endswith("150000"))
+        st = p.extract_recording(dev, tree_clip.id, os.path.join(tmp, "mx"))
+    v = res.volume
+    check("Matrix: detected by its CameraNN tree; 4 clips on 2 cameras, times from the folder "
+          "date and the file names, recorder-local; status spec_only from Matrix's own document",
+          det and len(res.recordings) == 4 and v["cameras"] == ["CAM01", "CAM02"]
+          and v["span_local"] == ("2018-04-21 14:47:19", "2018-04-21 16:05:00")
+          and res.recordings[0].start_utc is None and res.validation_status == "spec_only"
+          and not res.errors, str(v.get("summary")))
+    check("Matrix: the planted fault (a clip under an hour folder its name disagrees with) is "
+          "reported; sidecars counted; the zone setting measured as IST (+330) on every clip",
+          v["problems"] == ["RAID0/Camera02/21_Apr_2018/15/16_00_00~16_05_00.stm1: filed under "
+                            "hour 15, its name starts at 16:00:00"]
+          and v["sidecars_per_clip"] == {"0 of 3": 1, "3 of 3": 3}
+          and v["recorder_zone_minutes"] == 330 and v["recorder_zone_agreement"] == "4/4 clips",
+          str(v["problems"]))
+    check("Matrix: a clip extracted as stored, through its 5-fragment extent tree, with its "
+          "sidecars named",
+          st["sha256"] == hashlib.sha256(by_layout["tree"]["bytes"]).hexdigest()
+          and st["sidecars"] == [".evnt", ".ifrm", ".tmid"], str(st))
+    tl = build_timeline({"recordings": [to_dict(r) for r in res.recordings]}, None, ClockModel())
+    check("Matrix clips go on the timeline, one lane per camera, recorder-local",
+          sorted(tl["cameras"]) == ["CAM01", "CAM02"] and tl["counts"]["indexed"] == 4)
+
+    qimg = os.path.join(tmp, "qvfs.img")
+    qt = SQ.build(qimg)
+    g = get_parser("Godrej")
+    with BlockDevice(qimg) as dev:
+        gdet = g.detect(dev)
+        gr = g.parse(dev)
+        outs = [g.extract_recording(dev, r.id, os.path.join(tmp, f"qv{i}"))
+                for i, r in enumerate(gr.recordings)]
+    gv = gr.volume
+    check("Godrej/Qualvision: the QVEX head read as the firmware checks it; region bounds hold; "
+          "the size field is the disk in sectors",
+          gdet and gv["head"]["bounds_ok"] and gv["region_unit_bytes"] == 512
+          and gv["head"]["region_b"] == (SQ.B_START, SQ.B_SIZE)
+          and gr.validation_status == "spec_only", str(gv["head"]))
+    check("Godrej: footage found by the frame chain - both runs at their offsets, every frame, "
+          "first and last times to the millisecond - and a lone fake head chained to nothing "
+          "is passed over",
+          [(r.offset, r.frame_count) for r in gr.recordings]
+          == [(t["offset"], t["frames"]) for t in qt["runs"]]
+          and [r.duration_s for r in gr.recordings] == [4.76, 2.96]
+          and gr.recordings[0].timestamps[0].raw_value.endswith("2025-03-14 09:30:00 recorder-local")
+          and all(r.camera_id == "UNKNOWN" for r in gr.recordings)
+          and not any(r.offset <= qt["fake_head_at"] < r.offset + r.length for r in gr.recordings),
+          str([(r.offset, r.frame_count, r.duration_s) for r in gr.recordings]))
+    check("Godrej: a run's video extracted exactly (payloads with a start code), audio left out",
+          all(open(os.path.join(tmp, f"qv{i}.es"), "rb").read() == qt["runs"][i]["video"]
+              for i in range(2))
+          and [o["frames_without_start_code"] for o in outs] == [24, 15], str(outs))
+    raw = bytearray(open(qimg, "rb").read())
+    struct.pack_into("<I", raw, 0x14, SQ.TOTAL)                  # region A now too big
+    badq = os.path.join(tmp, "qvfs_bad.img")
+    open(badq, "wb").write(raw)
+    with BlockDevice(badq) as dev:
+        badq_det = g.detect(dev)
+    with BlockDevice(img) as dev:
+        cross = (g.detect(dev), get_parser("Matrix").detect(dev))
+    with BlockDevice(qimg) as dev:
+        cross += (get_parser("Matrix").detect(dev),)
+    check("a QVEX head whose regions fail the firmware's own bounds check is not taken; neither "
+          "plugin claims the other's disk",
+          not badq_det and cross == (False, True, False), str(cross))
 
 
 def test_dahua_real_media() -> None:
@@ -3649,6 +3771,7 @@ def main() -> int:
         test_parallel_taps(tmp)
         test_case_export(tmp)
         test_heimvision(tmp)
+        test_godrej_matrix(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
