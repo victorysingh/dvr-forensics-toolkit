@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "./lib/api.js";
 import { useHashRoute, linkTo, go } from "./lib/useHashRoute.js";
 import { bytes, num, pct } from "./lib/format.js";
+import { isDemo } from "./lib/host.js";
 import { Skeleton, Empty, ToastHost, useToast, DL } from "./components/index.jsx";
 
 import Dashboard from "./screens/Dashboard.jsx";
@@ -132,8 +133,12 @@ function TopBar({ cases, caseId, screen, c }) {
       {live && <Badge tone="live">LIVE {pct(live.fraction)}</Badge>}
       {ver && <Badge tone={ver.valid ? "ok" : "bad"}>
         {ver.valid ? "chain intact" : "chain broken"}</Badge>}
-      <Badge title="Binds 127.0.0.1, never opens an evidence device, never writes">
-        offline &middot; read-only</Badge>
+      {isDemo()
+        ? <Badge tone="warn" title="A public demonstration of the interface, served from static
+            snapshots of synthetic cases. Not an evidence workstation, and not real evidence.">
+            demo &middot; synthetic data</Badge>
+        : <Badge title="Binds 127.0.0.1, never opens an evidence device, never writes">
+            offline &middot; read-only</Badge>}
       {c?.scan && (
         <a href={api.reportUrl(c.id)} target="_blank" rel="noopener"
           className="hidden md:inline-flex"><Badge>Report &#8599;</Badge></a>
@@ -148,6 +153,7 @@ function Badge({ children, tone, title }) {
     ok: "text-validated border-validated/45",
     bad: "text-danger border-danger/45",
     live: "text-accent-dark border-accent-dark/45",
+    warn: "text-synthetic border-synthetic/45",
   };
   // `dim` only when there is no tone: its dark-mode rule is a descendant
   // selector, so it outranks a plain text-* utility and would grey out the
@@ -156,7 +162,7 @@ function Badge({ children, tone, title }) {
     <span title={title}
       className={`border rounded-full px-2.5 py-1 text-[11.5px] whitespace-nowrap
         inline-flex items-center gap-1.5 ${tones[tone] || "hairline dim"}`}>
-      {tone && <span className={`w-1.5 h-1.5 rounded-full bg-current
+      {tone && tone !== "warn" && <span className={`w-1.5 h-1.5 rounded-full bg-current
         ${tone === "live" ? "animate-pulse" : ""}`} />}
       {children}
     </span>
@@ -250,6 +256,17 @@ function CasesHome({ cases }) {
   }
   return (
     <>
+      {isDemo() && (
+        <div className="rounded-xl border border-synthetic/45 bg-synthetic/10 px-3.5 py-3 mb-4
+          text-[12.5px]">
+          <b className="text-synthetic">Demonstration build.</b> These cases are
+          <b> synthetic disks generated for the demo</b> &mdash; not evidence, and not
+          vendor samples. The screens are the real interface reading real pipeline
+          output; the acquisition, carving and custody chain all ran, on made-up disks.
+          The actual tool runs offline on an examiner's own machine and binds the
+          loopback interface only.
+        </div>
+      )}
       <h1 className="text-[19px] font-semibold mb-3.5">Cases</h1>
       <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(290px,1fr))]">
         {cases.map((c) => (

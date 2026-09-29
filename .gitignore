@@ -17,3 +17,4 @@ analytics/models/*.onnx
 # ships, so an air-gapped machine needs nothing from here.
 ui/node_modules/
 ui/dist/
+ui/dist-demo/

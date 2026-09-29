@@ -1,0 +1,758 @@
+{
+ "id": "SAMPLE",
+ "dir": "out/SAMPLE",
+ "case_id": "PS26150-SAMPLE",
+ "scan": {
+  "case": {
+   "case_id": "PS26150-SAMPLE",
+   "investigator": "Examiner",
+   "organization": "PS26150 Lab",
+   "notes": "",
+   "opened_utc": "2026-09-29T11:36:11.607Z"
+  },
+  "device": {
+   "path": "/evidence/SAMPLE.img",
+   "size_bytes": 4259840,
+   "sector_size": 512,
+   "model": "disk image file",
+   "serial": "",
+   "bus_type": "",
+   "removable": false,
+   "write_block_method": "n/a:image-file",
+   "write_blocked": true,
+   "acquired_utc": "2026-09-29T11:36:11.608Z"
+  },
+  "hashes": [
+   {
+    "algorithm": "md5",
+    "value": "712267f9efe636acd7c9bd2397d7cbf3",
+    "scope": "full_device",
+    "offset": 0,
+    "length": 4259840,
+    "computed_utc": "2026-09-29T11:36:13.177Z"
+   },
+   {
+    "algorithm": "sha256",
+    "value": "16b3964705c0e335874611478a4e18b85e753f2ae412a95cf5b7b959968e52cb",
+    "scope": "full_device",
+    "offset": 0,
+    "length": 4259840,
+    "computed_utc": "2026-09-29T11:36:13.177Z"
+   },
+   {
+    "algorithm": "sha256-merkle",
+    "value": "9e82521c54ea0b504da879c5048693671ed6ae405d562de2dfa4a2eca54800cf",
+    "scope": "block_merkle_root",
+    "offset": 0,
+    "length": 4259840,
+    "computed_utc": "2026-09-29T11:36:13.177Z"
+   }
+  ],
+  "merkle_root": "9e82521c54ea0b504da879c5048693671ed6ae405d562de2dfa4a2eca54800cf",
+  "stats": {
+   "bytes_read": 4259840,
+   "blocks_hashed": 5,
+   "block_size": 1048576,
+   "bad_sectors": 0,
+   "duration_s": 1.57,
+   "throughput_mbps": 2.59,
+   "complete_pass": true
+  },
+  "bad_regions": [],
+  "detections": [
+   {
+    "vendor": "Dahua",
+    "confidence": 0.9926,
+    "validation_status": "spec_only",
+    "evidence": [
+     "dahua.dhfs x1 (Dahua filesystem superblock magic; source: dvrdecode; Dahua FS write-ups)",
+     "dahua.dhav x6629 (DHAV frame container header (video payload wrapper); source: DHAV format documentation; ffmpeg dhav demuxer)",
+     "dahua.dhav_end x6631 (DHAV frame trailer - pairs with the DHAV header; source: ffmpeg dhav demuxer)"
+    ],
+    "hit_count": 13261,
+    "parser_available": true
+   }
+  ],
+  "generated_utc": "2026-09-29T11:36:13.177Z",
+  "tool": "ps26150-forensics",
+  "tool_version": "0.1.0",
+  "signature_hit_count": 1001
+ },
+ "regions": {
+  "rule": "regions.v1",
+  "counts": {
+   "empty": 0,
+   "structured": 0,
+   "video": 5,
+   "container_without_video": 0,
+   "unstructured": 0
+  },
+  "written_blocks": 5,
+  "flagged_blocks": 0,
+  "flagged_share": 0.0,
+  "start_code_limit_per_8mib": 8.74,
+  "regions": [],
+  "verdict": "no high-entropy region without video structure"
+ },
+ "custody": {
+  "entries": [
+   {
+    "action": "device_opened_read_only",
+    "actor": "Examiner",
+    "case_id": "PS26150-SAMPLE",
+    "data_hash": "",
+    "detail": {
+     "bus_type": "",
+     "model": "disk image file",
+     "path": "/evidence/SAMPLE.img",
+     "sector_size": 512,
+     "serial": "",
+     "size_bytes": 4259840,
+     "write_block_method": "n/a:image-file"
+    },
+    "entry_hash": "f068dd1ba7904ab58782c1a982c57856a5c6449f65d394759bb4a2814ce60017",
+    "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "seq": 0,
+    "ts_utc": "2026-09-29T11:36:11.608Z"
+   },
+   {
+    "action": "scan_started",
+    "actor": "Examiner",
+    "case_id": "PS26150-SAMPLE",
+    "data_hash": "",
+    "detail": {
+     "block_size": 1048576,
+     "inline_taps": [
+      "carve",
+      "activity"
+     ],
+     "resumed": false,
+     "scan_end": 4259840,
+     "start_offset": 0
+    },
+    "entry_hash": "70bbfa372d79b121bbdb5b458f96d95d61539cee0306ade5975727ab38d7874c",
+    "prev_hash": "f068dd1ba7904ab58782c1a982c57856a5c6449f65d394759bb4a2814ce60017",
+    "seq": 1,
+    "ts_utc": "2026-09-29T11:36:13.112Z"
+   },
+   {
+    "action": "inline_carve_completed",
+    "actor": "Examiner",
+    "case_id": "PS26150-SAMPLE",
+    "data_hash": "b66992989db75d1d32f6407e77d5a527126dc4e74fb24c1306b3fd543486c184",
+    "detail": {
+     "frames": 6625,
+     "labels": {
+      "CH01": 1,
+      "CH02": 1,
+      "CH03": 1,
+      "outside_index": 2
+     },
+     "report": "carve/carve_report.json",
+     "sha256": "b66992989db75d1d32f6407e77d5a527126dc4e74fb24c1306b3fd543486c184",
+     "streams_kept": 5
+    },
+    "entry_hash": "c134c10a5240d2d53493dcb918b15510ec1f12bbf977826c21089a24ccfa1678",
+    "prev_hash": "70bbfa372d79b121bbdb5b458f96d95d61539cee0306ade5975727ab38d7874c",
+    "seq": 2,
+    "ts_utc": "2026-09-29T11:36:13.238Z"
+   },
+   {
+    "action": "inline_activity_completed",
+    "actor": "Examiner",
+    "case_id": "PS26150-SAMPLE",
+    "data_hash": "17480268db95890a7b6deb279879a020ab15b37d91f63fbc170a3e9ac24b9eb2",
+    "detail": {
+     "labels": {
+      "CH01": 1,
+      "CH02": 1,
+      "CH03": 1,
+      "outside_index": 3
+     },
+     "multi_camera_peaks": 0,
+     "peaks": 0,
+     "report": "activity.json",
+     "sha256": "17480268db95890a7b6deb279879a020ab15b37d91f63fbc170a3e9ac24b9eb2"
+    },
+    "entry_hash": "52414b81e7c4a4efcd46a760ce0d1ff973720806d1fee8ce84b202c0834afc09",
+    "prev_hash": "c134c10a5240d2d53493dcb918b15510ec1f12bbf977826c21089a24ccfa1678",
+    "seq": 3,
+    "ts_utc": "2026-09-29T11:36:13.337Z"
+   },
+   {
+    "action": "scan_completed",
+    "actor": "Examiner",
+    "case_id": "PS26150-SAMPLE",
+    "data_hash": "9e82521c54ea0b504da879c5048693671ed6ae405d562de2dfa4a2eca54800cf",
+    "detail": {
+     "bad_sectors": 0,
+     "blocks": 5,
+     "bytes_read": 4259840,
+     "codec": {
+      "first_sps_offsets": [],
+      "hevc_param_sets": 90,
+      "idr": 0,
+      "likely_codec": "h265",
+      "pps": 1,
+      "sps": 0,
+      "start_codes": 4492
+     },
+     "complete_pass": true,
+     "detections": [
+      {
+       "confidence": 0.9926,
+       "status": "spec_only",
+       "vendor": "Dahua"
+      }
+     ],
+     "reconnects": [],
+     "regions": {
+      "counts": {
+       "container_without_video": 0,
+       "empty": 0,
+       "structured": 0,
+       "unstructured": 0,
+       "video": 5
+      },
+      "flagged_blocks": 0,
+      "verdict": "no high-entropy region without video structure"
+     },
+     "signature_hits": 1001
+    },
+    "entry_hash": "d2bc486db9dedf3d3bd9cc6a4c8d645400f1e08c14cccc15bc7bfee38c07a415",
+    "prev_hash": "52414b81e7c4a4efcd46a760ce0d1ff973720806d1fee8ce84b202c0834afc09",
+    "seq": 4,
+    "ts_utc": "2026-09-29T11:36:13.338Z"
+   },
+   {
+    "action": "carved_streams_extracted",
+    "actor": "Examiner",
+    "case_id": "PS26150-SAMPLE",
+    "data_hash": "7fd3db107780c1d436c4f7817a2965766f035197ab46732019159de6e8f00398",
+    "detail": {
+     "bytes": 6798028,
+     "frame_count_mismatches": [],
+     "manifest": "carve/extracted.json",
+     "streams": 5,
+     "write_block_method": "n/a:image-file"
+    },
+    "entry_hash": "e88ff3df67fd6fe215558ba5a7e7594495c19ff91f0d6e13de260f0294e38386",
+    "prev_hash": "d2bc486db9dedf3d3bd9cc6a4c8d645400f1e08c14cccc15bc7bfee38c07a415",
+    "seq": 5,
+    "ts_utc": "2026-09-29T11:36:13.422Z"
+   },
+   {
+    "action": "timeline_built",
+    "actor": "Examiner",
+    "case_id": "PS26150-SAMPLE",
+    "data_hash": "6ba7d4a2441ff67116620abdba418afa639a9ba1fe623f4fd17a4cd22a3f6a43",
+    "detail": {
+     "clock": {
+      "drift_s": 0.0,
+      "drift_source": null,
+      "rule": "recorder-local time, not converted: the recorder's zone was not stated, so no UTC is asserted",
+      "tz_offset_min": null
+     },
+     "counts": {
+      "indexed": 0,
+      "remnant": 0,
+      "unindexed": 2
+     },
+     "inputs": {
+      "carve/carve_report.json": "b66992989db75d1d32f6407e77d5a527126dc4e74fb24c1306b3fd543486c184"
+     }
+    },
+    "entry_hash": "d2d5c61d288114f63f23dc5f85d972cda5020a95cea30352e24037b96452a1eb",
+    "prev_hash": "e88ff3df67fd6fe215558ba5a7e7594495c19ff91f0d6e13de260f0294e38386",
+    "seq": 6,
+    "ts_utc": "2026-09-29T11:36:13.428Z"
+   },
+   {
+    "action": "case_exported",
+    "actor": "Examiner",
+    "case_id": "PS26150-SAMPLE",
+    "data_hash": "73195adcc7a291cdec22046f1f70785049dbbc93dedf3dc829d1c8704b69a36b",
+    "detail": {
+     "file": "case.jsonld",
+     "nodes": 33
+    },
+    "entry_hash": "4907124fa845b3c7288ae21a5c0c6d55109a202adcc1bcb063503e99f56dbdb2",
+    "prev_hash": "d2d5c61d288114f63f23dc5f85d972cda5020a95cea30352e24037b96452a1eb",
+    "seq": 7,
+    "ts_utc": "2026-09-29T11:36:13.438Z"
+   },
+   {
+    "action": "device_recorded",
+    "actor": "Examiner",
+    "case_id": "PS26150-SAMPLE",
+    "data_hash": "419217e3cd98f4f8da806beb434ea0543a224ea87dcc8fcd59ade1d22e44a532",
+    "detail": {
+     "device_id": null,
+     "firmware": "V4.000",
+     "mac": null,
+     "model": "CP-UNR-104F1",
+     "photos": [],
+     "read_from": null,
+     "serial": "DEMO-0001"
+    },
+    "entry_hash": "94c20e2bd3a65b9c397f86bad466217486a895ae34441d4f6e114b7b525cea9e",
+    "prev_hash": "4907124fa845b3c7288ae21a5c0c6d55109a202adcc1bcb063503e99f56dbdb2",
+    "seq": 8,
+    "ts_utc": "2026-09-29T11:36:24.069Z"
+   }
+  ],
+  "verify": {
+   "valid": true,
+   "entries": 9,
+   "head": "94c20e2bd3a65b9c397f86bad466217486a895ae34441d4f6e114b7b525cea9e",
+   "message": "chain intact across 9 entries"
+  },
+  "head": "94c20e2bd3a65b9c397f86bad466217486a895ae34441d4f6e114b7b525cea9e"
+ },
+ "carve": {
+  "sha256": "b66992989db75d1d32f6407e77d5a527126dc4e74fb24c1306b3fd543486c184",
+  "tool": "ps26150-forensics scan --carve (inline)",
+  "stats": {
+   "region_start": 0,
+   "region_end": 4259840,
+   "frames": 6625,
+   "streams_opened": 5,
+   "repeats_dropped": 0,
+   "joined_by_contiguity": 6612,
+   "joined_by_closest": 8,
+   "ambiguous_splits": 0,
+   "streams_kept": 5,
+   "frames_in_short_streams": 0
+  },
+  "validation_status": "spec_only",
+  "labels": {
+   "outside_index": {
+    "streams": 2,
+    "frames": 5936,
+    "bytes": 3507284
+   },
+   "CH01": {
+    "streams": 1,
+    "frames": 231,
+    "bytes": 142244
+   },
+   "CH02": {
+    "streams": 1,
+    "frames": 230,
+    "bytes": 138313
+   },
+   "CH03": {
+    "streams": 1,
+    "frames": 228,
+    "bytes": 131009
+   }
+  },
+  "outside_index": [
+   {
+    "id": "carve-00000",
+    "camera_id": "UNKNOWN",
+    "state": "fragment",
+    "codec": "",
+    "offset": 327680,
+    "length": 195998,
+    "start_utc": null,
+    "end_utc": null,
+    "duration_s": 8.0,
+    "confidence": 0.6,
+    "frame_count": 330,
+    "timestamps": [
+     {
+      "source": "container",
+      "raw_value": "0x6A026000 = 2026-08-01 06:00:00 recorder-local",
+      "decoded_utc": null,
+      "tz_offset_min": null,
+      "confidence": 0.3,
+      "decode_rule": "DHAV +0x10 packed date of a carved frame; zone unknown, not converted; no index corroborates it"
+     },
+     {
+      "source": "container",
+      "raw_value": "0x6A026008 = 2026-08-01 06:00:08 recorder-local",
+      "decoded_utc": null,
+      "tz_offset_min": null,
+      "confidence": 0.3,
+      "decode_rule": "DHAV +0x10 packed date of a carved frame; zone unknown, not converted; no index corroborates it"
+     }
+    ],
+    "provenance": {
+     "disk_offset": 327680,
+     "length": 195998,
+     "sector_start": 640,
+     "sector_end": 1023,
+     "parser_rule": "carve.dhav.continuity.v1",
+     "sha256": ""
+    },
+    "index_tally": {
+     "outside_index": 330
+    }
+   },
+   {
+    "id": "carve-00004",
+    "camera_id": "UNKNOWN",
+    "state": "fragment",
+    "codec": "",
+    "offset": 928364,
+    "length": 3311286,
+    "start_utc": null,
+    "end_utc": null,
+    "duration_s": 146.0,
+    "confidence": 0.5982,
+    "frame_count": 5606,
+    "timestamps": [
+     {
+      "source": "container",
+      "raw_value": "0x6A02601A = 2026-08-01 06:00:26 recorder-local",
+      "decoded_utc": null,
+      "tz_offset_min": null,
+      "confidence": 0.3,
+      "decode_rule": "DHAV +0x10 packed date of a carved frame; zone unknown, not converted; no index corroborates it"
+     },
+     {
+      "source": "container",
+      "raw_value": "0x6A0260B4 = 2026-08-01 06:02:52 recorder-local",
+      "decoded_utc": null,
+      "tz_offset_min": null,
+      "confidence": 0.3,
+      "decode_rule": "DHAV +0x10 packed date of a carved frame; zone unknown, not converted; no index corroborates it"
+     }
+    ],
+    "provenance": {
+     "disk_offset": 928364,
+     "length": 3311286,
+     "sector_start": 1813,
+     "sector_end": 8319,
+     "parser_rule": "carve.dhav.continuity.v1",
+     "sha256": ""
+    },
+    "index_tally": {
+     "outside_index": 5606
+    }
+   }
+  ],
+  "outside_total": 2,
+  "outputs": {},
+  "notes": [
+   "A carved stream is a run of mutually continuous, validated DHAV frames. It is not a camera: frames carry no camera number.",
+   "Where continuity was ambiguous the carve split rather than guessed, so one camera can span several streams; streams never knowingly mix cameras.",
+   "index_label comes from the DHFS index; 'outside_index' means no index record accounts for those frames at their dates."
+  ],
+  "extracted": {
+   "sha256": "7fd3db107780c1d436c4f7817a2965766f035197ab46732019159de6e8f00398",
+   "streams": {
+    "carve-00000": {
+     "label": "outside_index",
+     "frames_written": 330,
+     "frames_carved": 330,
+     "frames_match": true,
+     "codec": "h265",
+     "files": {
+      "carve-00000.dav": {
+       "bytes": 195998,
+       "sha256": "b516fce94dca7eed1400986a700a801f7ae32dcd8489676abd2342169d0549f7"
+      },
+      "carve-00000.h265": {
+       "bytes": 144278,
+       "sha256": "d7e56faaa881c5c06a35e4f42183f1e788ac95d11cb4ed3b3f135afcc8f1808d"
+      }
+     }
+    },
+    "carve-00001": {
+     "label": "CH01",
+     "frames_written": 231,
+     "frames_carved": 231,
+     "frames_match": true,
+     "codec": "h265",
+     "files": {
+      "carve-00001.dav": {
+       "bytes": 142244,
+       "sha256": "84a4d08794e685c87b7b9c2cb00a4c8b9c4b579c2f018d7cb69148ac025aebf3"
+      },
+      "carve-00001.h265": {
+       "bytes": 106004,
+       "sha256": "efeafe46e4b0e14b55efbc4f6adcde9cd6d172384e81a23485eb740d0f690d34"
+      }
+     }
+    },
+    "carve-00002": {
+     "label": "CH02",
+     "frames_written": 230,
+     "frames_carved": 230,
+     "frames_match": true,
+     "codec": "h265",
+     "files": {
+      "carve-00002.dav": {
+       "bytes": 138313,
+       "sha256": "95b35186233d0abf9a40f24dfdfca5e3f5da6b8c7462075dc1e9ecbf69ef5fd8"
+      },
+      "carve-00002.h265": {
+       "bytes": 102129,
+       "sha256": "8b95cafc776afd098e3b834f52a4e08845a716531584eec5df2922a1cd2da7b2"
+      }
+     }
+    },
+    "carve-00003": {
+     "label": "CH03",
+     "frames_written": 228,
+     "frames_carved": 228,
+     "frames_match": true,
+     "codec": "h265",
+     "files": {
+      "carve-00003.dav": {
+       "bytes": 131009,
+       "sha256": "00ffa382ac49e979d6fc1ebe9a1296c62d3fb60917592b8d3a0d67c36dd3b42c"
+      },
+      "carve-00003.h265": {
+       "bytes": 94937,
+       "sha256": "1ce5b9b5a75e11058450420c90224d28ef4052d5862288b12fd1558fa1219361"
+      }
+     }
+    },
+    "carve-00004": {
+     "label": "outside_index",
+     "frames_written": 5606,
+     "frames_carved": 5606,
+     "frames_match": true,
+     "codec": "h265",
+     "files": {
+      "carve-00004.dav": {
+       "bytes": 3311286,
+       "sha256": "cc3b4e3febf1a1dd3045e8258f4f53e5d7a4897fd215ce693500a9221516b0e9"
+      },
+      "carve-00004.h265": {
+       "bytes": 2431830,
+       "sha256": "73acae346e876289c313b12f698e34c7edb6ca25a4cc210134c5515fb412e7f5"
+      }
+     }
+    }
+   }
+  }
+ },
+ "timeline": {
+  "clock": {
+   "tz_offset_min": null,
+   "drift_s": 0.0,
+   "drift_source": null,
+   "rule": "recorder-local time, not converted: the recorder's zone was not stated, so no UTC is asserted"
+  },
+  "cameras": {},
+  "gaps": [],
+  "correlations": [],
+  "anomalies": [],
+  "counts": {
+   "indexed": 0,
+   "unindexed": 2,
+   "remnant": 0
+  },
+  "notes": [
+   "Every camera on one recorder shares one clock, so ordering across cameras holds even where no UTC is asserted.",
+   "Lanes named '<width>x<height> group' are carved footage grouped by resolution because no index survives to name the camera; a group may hold more than one camera, and its gaps mean no footage was recovered - including footage recorded and later overwritten.",
+   "A gap means no indexed footage for that period. Motion-only recording, power loss, overwrite and deletion all produce gaps; the timeline does not say which.",
+   "'unindexed' footage was carved from the platter with no index record accounting for it; its camera is unknown."
+  ],
+  "inputs": {
+   "carve/carve_report.json": "b66992989db75d1d32f6407e77d5a527126dc4e74fb24c1306b3fd543486c184"
+  },
+  "index_coverage": null,
+  "sha256": "6ba7d4a2441ff67116620abdba418afa639a9ba1fe623f4fd17a4cd22a3f6a43",
+  "events": [
+   {
+    "id": "carve-00000",
+    "kind": "unindexed",
+    "camera": "UNKNOWN",
+    "start_local": "2026-08-01 06:00:00",
+    "end_local": "2026-08-01 06:00:08",
+    "start_utc": null,
+    "end_utc": null,
+    "duration_s": 8.0,
+    "time_basis": "frame",
+    "confidence": 0.6,
+    "offset": 327680,
+    "length": 195998,
+    "note": "carved footage no index record accounts for"
+   },
+   {
+    "id": "carve-00004",
+    "kind": "unindexed",
+    "camera": "UNKNOWN",
+    "start_local": "2026-08-01 06:00:26",
+    "end_local": "2026-08-01 06:02:52",
+    "start_utc": null,
+    "end_utc": null,
+    "duration_s": 146.0,
+    "time_basis": "frame",
+    "confidence": 0.5982,
+    "offset": 928364,
+    "length": 3311286,
+    "note": "carved footage no index record accounts for"
+   }
+  ],
+  "recorder_events": []
+ },
+ "activity": {
+  "sha256": "17480268db95890a7b6deb279879a020ab15b37d91f63fbc170a3e9ac24b9eb2",
+  "rule": "activity.pframe_bytes_per_minute.v2",
+  "status": "lead, not evidence",
+  "notes": [
+   "index = P-frame bytes in a minute / that camera's median minute over the whole period (time-of-day view). local_index = the same over the median of the 30 minutes either side; peaks use local_index, so they mark bursts rather than busy hours. No video was decoded.",
+   "P-frames also grow with low-light noise, lighting changes, IR switching, rain, camera shake and encoder settings. A peak marks footage worth reviewing; it is not evidence that anything happened.",
+   "Minutes are the recorder's own clock."
+  ],
+  "peak_factor": 3.0,
+  "cameras": {
+   "CH01": {
+    "minutes": 1,
+    "median_p_bytes_per_minute": 96412
+   },
+   "CH02": {
+    "minutes": 1,
+    "median_p_bytes_per_minute": 96401
+   },
+   "CH03": {
+    "minutes": 1,
+    "median_p_bytes_per_minute": 91534
+   },
+   "outside_index": {
+    "minutes": 3,
+    "median_p_bytes_per_minute": 854504
+   }
+  },
+  "peaks": [],
+  "peaks_total": 0,
+  "multi_camera_peaks": []
+ },
+ "model": {
+  "observations": [
+   {
+    "model": "CP-UNR-104F1",
+    "serial": "DEMO-0001",
+    "mac": null,
+    "device_id": null,
+    "firmware": "V4.000",
+    "read_from": null,
+    "photo": null,
+    "recorded_by": "Examiner",
+    "recorded_utc": "2026-09-29T11:36:24.067Z",
+    "identified": {
+     "family": "cpplus",
+     "vendor": "CP Plus",
+     "kind": "recorder",
+     "storage": "Dahua-family where the unit is Dahua-built: DHFS 4.1 observed on one CP Plus unit's drive (WWD4A3NX); not established for every model"
+    }
+   }
+  ],
+  "record_sha256": "3b3bbd7c9f108776d4c653b555851050521817def261e7a2993ca3b46849d199",
+  "platter": null,
+  "platter_sha256": null,
+  "checks": [
+   {
+    "check": "model vs format on the disk",
+    "verdict": "agree",
+    "detail": "CP-UNR-104F1 is a CP Plus recorder; the disk carries Dahua-family structures (CP Plus units are commonly Dahua-built)"
+   },
+   {
+    "check": "model strings on the platter",
+    "verdict": "not determined",
+    "detail": "not searched (identify-model)"
+   }
+  ]
+ },
+ "vendors": [
+  {
+   "vendor": "Hikvision",
+   "signatures": 4,
+   "parser": "Hikvision",
+   "parser_status": "synthetic_only",
+   "family": "Hikvision (HIKBTREE)",
+   "media": "second drive held - not yet read",
+   "basis": "HIKBTREE layout from published analyses; field offsets corroborated only by the synthetic fixture until the team's own drive is read",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "Dahua",
+   "signatures": 3,
+   "parser": "Dahua",
+   "parser_status": "spec_only",
+   "family": "Dahua DHFS 4.1",
+   "media": "CP Plus drive held (Dahua-family, DHFS 4.1)",
+   "basis": "DHFS structures and DHAV frames read off real media and cross-checked against ffmpeg's DHAV demuxer; not yet byte-matched to a recorder export",
+   "detected_confidence": 0.9926,
+   "detected_note": ""
+  },
+  {
+   "vendor": "CP Plus",
+   "signatures": 2,
+   "parser": "Dahua",
+   "parser_status": "spec_only",
+   "family": "Dahua-family (rebadged DHFS 4.1)",
+   "media": "CP Plus drive held",
+   "basis": "the CP Plus unit's platter carries Dahua DHFS 4.1; on disk the two are indistinguishable, so attribution to CP Plus rests on the seized unit's label",
+   "detected_confidence": 0.9926,
+   "detected_note": "Dahua-family structures - consistent with CP Plus"
+  },
+  {
+   "vendor": "Honeywell",
+   "signatures": 1,
+   "parser": "Honeywell",
+   "parser_status": "spec_only",
+   "family": "Honeywell NVR (GPT + proprietary video partition)",
+   "media": "none",
+   "basis": "plugins/honeywell.py, written from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430); no Honeywell disk read by the team",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "TP-Link",
+   "signatures": 3,
+   "parser": "TP-Link",
+   "parser_status": "detected_not_parsed",
+   "family": "TP-Link in-house TPFS (raw or ext4; SQLite index in a TpFile header)",
+   "media": "none",
+   "basis": "plugins/tplink.py, from the VIGI NVR1008H V2 240119 firmware (static disassembly): detects the format sector and the index, and reads the index and system log when they are plain SQLite; footage is not placed on the disk (zone geometry not recovered) - carve-annexb",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "Godrej",
+   "signatures": 2,
+   "parser": "Godrej",
+   "parser_status": "spec_only",
+   "family": "Qualvision QVFS (Godrej SeeThru runs Qualvision's software)",
+   "media": "none",
+   "basis": "plugins/godrej.py, from Qualvision firmware NVR401L-4P4 20240531 (static disassembly of Sofia): disk head and frame chain with times; cameras and the index not decoded; no Godrej/Qualvision disk read",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "Uniview",
+   "signatures": 2,
+   "parser": "Uniview",
+   "parser_status": "spec_only",
+   "family": "Uniview UBS (its own block store, in the kernel module comm.ko)",
+   "media": "none",
+   "basis": "plugins/uniview.py, from the storage driver of Uniview firmware NVR301-04LS3-W B3612.1.21.220408 (static disassembly); no Uniview disk read by the team",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "Matrix",
+   "signatures": 3,
+   "parser": "Matrix",
+   "parser_status": "spec_only",
+   "family": "Matrix SATATYA (a Linux file tree of .stm files; filesystem not documented)",
+   "media": "none",
+   "basis": "plugins/matrix.py, from Matrix's own documents (the CameraNN/date/hour tree and file naming); reads ext2/3/4, incl. one RAID 1 mirror; the .stm container is not published and is extracted as stored; no Matrix disk read by the team",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  }
+ ],
+ "files": {
+  "scan_report.json": "201024e034c860a7e31c0cb392c84d8e4b4391cf518f146d28fd743d96f41c7a",
+  "blockmap.jsonl": "fd1cf6f97c0a277f0c11059bd9afcd1b422dbc6d307c1019b47a0fa2ec73f766",
+  "custody_ledger.jsonl": "7e23fcdb2a19aee8241007293299f6dba4088195f2c669adfdb4c5d50e5147bc"
+ }
+}

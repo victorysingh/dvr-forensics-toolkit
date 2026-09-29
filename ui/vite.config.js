@@ -9,9 +9,17 @@ import tailwindcss from "@tailwindcss/vite";
 //
 // Everything is inlined or emitted locally - no CDN, no font host, no
 // remote source map - because the console has to work with the network off.
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
   base: "/",
+
+  // `demo` mode (npm run build:demo) is the hosted demonstration: it alone
+  // copies demo-public/, which holds static snapshots of synthetic cases
+  // served at the same /api/... paths via vercel.json rewrites. The product
+  // build takes no public directory at all, so those fixtures can never end
+  // up inside the packaged executable.
+  publicDir: mode === "demo" ? "demo-public" : false,
+
   build: {
     outDir: "../viewer/static",
     emptyOutDir: true,
@@ -34,4 +42,4 @@ export default defineConfig({
       "/file": "http://127.0.0.1:8150",
     },
   },
-});
+}));

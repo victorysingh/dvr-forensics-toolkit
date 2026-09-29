@@ -1,0 +1,24 @@
+[
+ {
+  "id": "R1",
+  "case_id": "PS26150-R1",
+  "device": "/evidence/R1.img",
+  "size_bytes": 4259840,
+  "complete": true,
+  "progress": 1.2307692307692308,
+  "has_parse": false,
+  "has_carve": true,
+  "has_timeline": true
+ },
+ {
+  "id": "SAMPLE",
+  "case_id": "PS26150-SAMPLE",
+  "device": "/evidence/SAMPLE.img",
+  "size_bytes": 4259840,
+  "complete": true,
+  "progress": 1.2307692307692308,
+  "has_parse": false,
+  "has_carve": true,
+  "has_timeline": true
+ }
+]
