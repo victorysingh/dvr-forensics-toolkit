@@ -65,8 +65,11 @@ VENDOR_MATRIX = {
                          "disassembly): detects the format sector and the index, and reads the "
                          "index and system log when they are plain SQLite; footage is not "
                          "placed on the disk (zone geometry not recovered) - carve-annexb"},
-    "Godrej": {"family": "unknown", "parser": None, "parser_status": "detected_not_parsed",
-               "media": "none", "basis": "firmware string signature only"},
+    "Godrej": {"family": "Qualvision QVFS (Godrej SeeThru runs Qualvision's software)",
+               "parser": "Godrej", "parser_status": "spec_only", "media": "none",
+               "basis": "plugins/godrej.py, from Qualvision firmware NVR401L-4P4 20240531 "
+                        "(static disassembly of Sofia): disk head and frame chain with times; "
+                        "cameras and the index not decoded; no Godrej/Qualvision disk read"},
     "Uniview": {"family": "Uniview UBS (its own block store, in the kernel module comm.ko)",
                 "parser": "Uniview", "parser_status": "spec_only", "media": "none",
                 "basis": "plugins/uniview.py, from the storage driver of Uniview firmware "
