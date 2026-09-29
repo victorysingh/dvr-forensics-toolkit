@@ -1,6 +1,6 @@
 """How often the analytics layer is right, on real footage, against labels.
 
-    python -m validate.analytics_eval sample CLIP [CLIP ...] --out DIR [--frames 200 | --fps 2]
+    python -m validate.analytics_eval sample CLIP [CLIP ...] --out DIR [--frames 200 | --fps 2] [--tiles 3]
     #   ... fill in DIR/labels.csv: person, face, vehicle as y or n ...
     python -m validate.analytics_eval score DIR
     python -m validate.analytics_eval sweep DIR     # would another threshold do better?
@@ -19,8 +19,11 @@ this frame" when someone is?
           recording, day and night - keeps --frames of them evenly (or, with
           --fps, takes every clip at that rate: short clips have few
           keyframes), and runs both detectors exactly as the tool does: the
-          same thresholds, and the same static and implausible-box rules
-          (analytics/static.py), applied per clip.
+          same tiling (--tiles; the object model on a 1920 x 1080 decode,
+          the face model on 640 x 360), the same thresholds, and the same
+          static and implausible-box rules (analytics/static.py), applied
+          per clip.  It also keeps every box down to the lowest thresholds
+          in SWEEP, for `sweep`.
           It writes frames/NNN.jpg (the plain frame, no boxes drawn, so the
           labelling is not led by the detector), sheets/SS.jpg (4 x 4 contact
           sheets of those frames, in order, left to right), detections.json,
@@ -32,9 +35,10 @@ this frame" when someone is?
           every frame where the detector and the label disagree, for review.
           A class no labelled frame contains has no recall: the false-alarm
           rate is then the only number the labels support.
-  sweep   runs both models again on the stored frames at low thresholds and
-          scores each class at every threshold in SWEEP, before and after the
-          rules - whether a miss is the threshold's or the model's.
+  sweep   scores each class at every threshold in SWEEP, before and after
+          the rules, from the boxes `sample` kept at low scores - exactly
+          the boxes the tool would report at each threshold, with nothing
+          run again - whether a miss is the threshold's or the model's.
 
 The labels behind docs/VALIDATION_REPORT.md section 8a (six public recorder
 clips, 287 frames) are in validate/analytics_labels.csv.
@@ -43,8 +47,8 @@ A frame counts as positive for a class when at least one detection of it is
 reported.  Labels are what a person can see in the frame at the size stored
 (640 x 360): "face" means a face turned enough towards the camera to be seen
 as one.  Needs what the analytics layer needs (numpy, onnxruntime, ffmpeg,
-the pinned models - analytics/README.md) to sample; scoring needs only the
-standard library.  Read-only on the clip.
+the pinned models - analytics/README.md) to sample; scoring and sweeping
+need only the standard library.  Read-only on the clip.
 """
 
 from __future__ import annotations
@@ -114,13 +118,20 @@ def keyframes(clip: str, every: int = 1, w: int | None = None, h: int | None = N
             k += 1
 
 
-def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=print) -> dict:
-    """Frames from one clip or several, both detectors run on each.  With
+def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=print,
+           tiles: int | None = None) -> dict:
+    """Frames from one clip or several, both detectors run on each, as the
+    tool runs them (`tiles` x `tiles` tiles, by default the tool's).  With
     `fps`, every clip is sampled at that rate; without, keyframes are spread
     evenly to `frames` per clip."""
     from analytics import detect
     clips = [clips] if isinstance(clips, str) else list(clips)
     models = detect.load_models()
+    tiles = detect.TILES if tiles is None else tiles
+    scale = detect.OBJECT_SCALE if tiles > 1 else 1
+    w, h = detect.DECODE_W * scale, detect.DECODE_H * scale
+    tool = (detect.FACE_MIN, detect.OBJECT_MIN)
+    low = (min(SWEEP["face"]), min(SWEEP["objects"]))
     os.makedirs(os.path.join(out, "frames"), exist_ok=True)
     rows, hits, per_clip, n = [], [], [], 0
     default_fps = fps
@@ -130,25 +141,32 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
         if path and rate.replace(".", "", 1).isdigit():
             clip, fps = path, float(rate)
         if fps:
-            source, total, every = at_rate(clip, fps), None, None
+            source, total, every = at_rate(clip, fps, w, h), None, None
             log(f"{os.path.basename(clip)}: {fps:g} frames a second, both detectors ...")
         else:
             total = sum(1 for _ in keyframes(clip, 1, 32, 18))
             if not total:
                 raise SystemExit(f"no decodable keyframe in {clip}")
             every = max(1, total // frames)
-            source = keyframes(clip, every)
+            source = keyframes(clip, every, w, h)
             log(f"{os.path.basename(clip)}: {total} keyframes; every {every}th, both detectors ...")
         first, clip_hits = n, []
-        for idx, rgb in source:
+        for idx, big in source:
             if not fps and n - first >= frames:
                 break
             name = f"{n:03d}.jpg"
+            rgb = detect.shrink(big, scale)
             detect._thumbnail(rgb, [], os.path.join(out, "frames", name))
-            dets = detect.faces(models["face"], rgb) + detect.objects(models["objects"], rgb)
-            h = {"frame": n, "clip": ci, "index": idx, "detections": dets}
-            hits.append(h)
-            clip_hits.append(h)
+            try:                    # every box down to SWEEP's lowest; the tool's are a subset
+                detect.FACE_MIN, detect.OBJECT_MIN = low
+                any_score = detect.detect_frame(models, rgb, big, tiles)
+            finally:
+                detect.FACE_MIN, detect.OBJECT_MIN = tool
+            dets = [dict(d) for d in any_score
+                    if d["score"] >= (tool[0] if d["label"] == "face" else tool[1])]
+            x = {"frame": n, "clip": ci, "index": idx, "detections": dets, "any_score": any_score}
+            hits.append(x)
+            clip_hits.append(x)
             rows.append({"frame": n, "file": f"frames/{name}", "clip": os.path.basename(clip),
                          "sheet": n // SHEET ** 2, "row": n % SHEET ** 2 // SHEET,
                          "col": n % SHEET,
@@ -176,6 +194,9 @@ def sample(clips, out: str, frames: int = 200, fps: float | None = None, log=pri
     res = {"clips": per_clip, "frames": n,
            "models": {k: m["sha256"] for k, m in detect.MODELS.items()},
            "thresholds": {"face": detect.FACE_MIN, "objects": detect.OBJECT_MIN},
+           "any_score_down_to": {"face": low[0], "objects": low[1]},
+           "tiles": tiles, "decoded_at": {"objects": f"{w} x {h}",
+                                          "faces": f"{detect.DECODE_W} x {detect.DECODE_H}"},
            "detections": hits}
     with open(os.path.join(out, "detections.json"), "w", encoding="utf-8") as fh:
         json.dump(res, fh, indent=1)
@@ -275,44 +296,26 @@ def rescore(everything: list, clip_of: list, labels: dict) -> dict:
 
 
 def sweep(out: str, log=print) -> dict:
-    """Would another threshold find more?  Both models run again on the
-    stored frames at the lowest thresholds in SWEEP, and rescore() scores
-    each class at every threshold, as reported and as the models said.
-    It reads frames/NNN.jpg - a JPEG copy, not the original decode - so the
-    result says how many frames give the same labels as detections.json at
-    the tool's own thresholds."""
-    import numpy as np
-
-    from analytics import detect
+    """Would another threshold find more?  `sample` kept every box down to
+    the lowest thresholds in SWEEP.  A box is only ever dropped for a
+    stronger one (face NMS, the merge of overlapping tiles), so those boxes
+    filtered at a threshold are exactly what the tool reports there, and
+    rescore() scores each class at every threshold, as reported and as the
+    models said.  Standard library only: nothing is decoded or run again."""
     with open(os.path.join(out, "detections.json"), encoding="utf-8") as fh:
-        stored = json.load(fh)["detections"]
+        det = json.load(fh)
+    stored = sorted(det["detections"], key=lambda x: x["frame"])
+    if any("any_score" not in x for x in stored):
+        raise SystemExit("detections.json keeps no low-score boxes (sampled before 29 Sep 2026)"
+                         " - run sample again")
     with open(os.path.join(out, "labels.csv"), newline="", encoding="utf-8") as fh:
         labels = {int(r["frame"]): r for r in csv.DictReader(fh)}
-    models = detect.load_models()
-    w, h = detect.DECODE_W, detect.DECODE_H
-    cmd = ["ffmpeg", "-nostdin", "-v", "quiet", "-start_number", "0",
-           "-i", os.path.join(out, "frames", "%03d.jpg"),
-           "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-    tool = (detect.FACE_MIN, detect.OBJECT_MIN)
-    everything = []
-    try:                                     # the detectors read these module thresholds
-        detect.FACE_MIN, detect.OBJECT_MIN = min(SWEEP["face"]), min(SWEEP["objects"])
-        with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
-            while len(buf := p.stdout.read(w * h * 3)) == w * h * 3:
-                rgb = np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-                everything.append(detect.faces(models["face"], rgb)
-                                  + detect.objects(models["objects"], rgb))
-    finally:
-        detect.FACE_MIN, detect.OBJECT_MIN = tool
-    log(f"{len(everything)} frames run again at face >= {min(SWEEP['face'])}, "
+    everything = [x["any_score"] for x in stored]
+    clip_of = [x.get("clip", 0) for x in stored]
+    log(f"{len(everything)} frames, boxes kept down to face >= {min(SWEEP['face'])}, "
         f"objects >= {min(SWEEP['objects'])}")
-    clip_of = [x.get("clip", 0) for x in sorted(stored, key=lambda x: x["frame"])]
-    same = over(everything, clip_of, *tool)
-    agree = sum(1 for x in stored if x["frame"] < len(same) and
-                {d["label"] for d in x["detections"]} == {d["label"] for d in same[x["frame"]]})
-    res = {"frames": len(everything), "frames_agreeing_with_sample": agree,
-           "tool_thresholds": {"face": tool[0], "objects": tool[1]},
-           "classes": rescore(everything, clip_of, labels), "detections_any_score": everything}
+    res = {"frames": len(everything), "tool_thresholds": det.get("thresholds"),
+           "tiles": det.get("tiles"), "classes": rescore(everything, clip_of, labels)}
     with open(os.path.join(out, "sweep.json"), "w", encoding="utf-8") as fh:
         json.dump(res, fh, indent=1)
     return res
@@ -327,18 +330,18 @@ def main() -> int:
     s.add_argument("--frames", type=int, default=200, help="keyframes kept per clip")
     s.add_argument("--fps", type=float, default=None,
                    help="sample every clip at this rate instead (short clips)")
+    s.add_argument("--tiles", type=int, default=None,
+                   help="n x n tiles as the tool runs them (default the tool's; 1 = untiled)")
     sc = sub.add_parser("score")
     sc.add_argument("out")
     sw = sub.add_parser("sweep")
     sw.add_argument("out")
     a = ap.parse_args()
     if a.cmd == "sample":
-        sample(a.clip, a.out, a.frames, a.fps)
+        sample(a.clip, a.out, a.frames, a.fps, tiles=a.tiles)
         return 0
     if a.cmd == "sweep":
         res = sweep(a.out)
-        print(f"{res['frames_agreeing_with_sample']}/{res['frames']} frames give the same "
-              "labels as the original decode at the tool's thresholds")
         for cls, rows in res["classes"].items():
             for row in rows:
                 r, m = row["as reported"], row["as the models said"]
