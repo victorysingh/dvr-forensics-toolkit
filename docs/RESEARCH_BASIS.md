@@ -287,6 +287,26 @@ goes beyond.
 
 ---
 
+### D14. Two formats nobody has published, read from the vendors' own code
+
+- **What.** Uniview and TP-Link have no published on-disk format (OEM_COMPARISON
+  §5.1). Their public firmware was unpacked and the storage code read by
+  static disassembly - nothing run - and each structure tied to the function
+  that writes it. The result is two drop-in plugins: Uniview's block store
+  (superblock, index, 256 MiB blocks, self-checking GOPs) and TP-Link's index
+  (a SQLite database in TP's own header, which the firmware can AES-encrypt).
+- **Evidence** (`VALIDATION_REPORT.md` §8f): 18 tests on disks built to the
+  readings, including Uniview footage found with its index wiped, and an
+  encrypted TP-Link index reported as encrypted rather than guessed at.
+- **Beyond what.** No paper or rival found covers either format (hunt of 29
+  Sep: `docs/research/`); commercial tools claim support without a layout.
+  Stoykova et al. (2022, CLSR 46:105725) ask that a reverse-engineered format
+  be documented and testable to be relied on; each field here cites its
+  firmware function, and the status stays `spec_only` until a real disk
+  checks it.
+
+---
+
 ## 3. Component by component: what it is built on
 
 | Component | Built on | What we took | What we found or added on real media |
