@@ -1954,6 +1954,68 @@ def test_analytics_eval(tmp: str) -> None:
     check("sweep: an implausible face box is not counted, though the model said it",
           faces[0.9]["as reported"]["fp"] == 0 and faces[0.9]["as the models said"]["fp"] == 1)
 
+    # The sweep command scores the boxes `sample` kept at low scores; no model runs.
+    sw_dir = os.path.join(tmp, "analytics_sweep")
+    os.makedirs(sw_dir, exist_ok=True)
+    stored = [{"frame": f, "clip": c, "detections": [], "any_score": e}
+              for f, (c, e) in enumerate(zip(clip_of, everything))]
+    with open(os.path.join(sw_dir, "labels.csv"), "w", newline="", encoding="utf-8") as fh:
+        fh.write("frame,person,face,vehicle\n"
+                 + "".join(f"{f},{'y' if f >= 5 else 'n'},n,n\n" for f in range(7)))
+    dump = lambda: json.dump({"thresholds": {"face": 0.8, "objects": 0.5}, "tiles": 3,
+                              "detections": stored},
+                             open(os.path.join(sw_dir, "detections.json"), "w", encoding="utf-8"))
+    dump()
+    check("sweep command: scores the stored low-score boxes, with nothing run again",
+          E.sweep(sw_dir, log=lambda *a: None)["classes"] == sw)
+    for x in stored:
+        del x["any_score"]
+    dump()
+    try:
+        E.sweep(sw_dir, log=lambda *a: None)
+        refused = False
+    except SystemExit:
+        refused = True
+    check("sweep command: refuses a sample that kept no low-score boxes", refused)
+
+
+def test_analytics_tiles() -> None:
+    """Tiling for small people: the grid spans the frame with overlapping
+    tiles, a tile's box maps back to the whole frame, the same object boxed
+    in two tiles is kept once, and boxes kept at any score then filtered are
+    the boxes kept at the threshold (what `sweep` relies on)."""
+    print("\n[analytics: tiles]")
+    from analytics.tiles import merge, tiles, to_frame
+    g = tiles(1920, 1080, 3, 0.2)
+    xs, ys = sorted({t[0] for t in g}), sorted({t[1] for t in g})
+    tw, th = g[0][2], g[0][3]
+    check("a 3 x 3 grid spans the frame edge to edge",
+          len(g) == 9 and xs[0] == ys[0] == 0 and xs[-1] + tw == 1920 and ys[-1] + th == 1080,
+          str(g))
+    check("neighbouring tiles overlap by a fifth of a tile",
+          all(abs(xs[i] + tw - xs[i + 1] - 0.2 * tw) <= 2 for i in range(2))
+          and all(abs(ys[i] + th - ys[i + 1] - 0.2 * th) <= 2 for i in range(2)), str(g))
+    check("a 1 x 1 grid is the whole frame", tiles(640, 360, 1) == [(0, 0, 640, 360)])
+    corner = g[-1]
+    check("a box found in a tile maps back to the whole frame",
+          to_frame([0.0, 0.0, 1.0, 1.0], corner, 1920, 1080)
+          == [round(corner[0] / 1920, 4), round(corner[1] / 1080, 4), 1.0, 1.0]
+          and to_frame([0.5, 0.2, 1.0, 0.6], (960, 540, 960, 540), 1920, 1080)
+          == [0.75, 0.6, 1.0, 0.8])
+    person = lambda s, box: {"label": "person", "score": s, "box": box}
+    whole = person(0.55, [0.40, 0.40, 0.50, 0.70])       # small, in the whole frame
+    tile = person(0.81, [0.41, 0.40, 0.50, 0.69])        # the same person, in a tile
+    other = person(0.60, [0.70, 0.40, 0.80, 0.70])
+    face = {"label": "face", "score": 0.9, "box": [0.42, 0.41, 0.47, 0.47]}
+    check("the same person boxed in the whole frame and in a tile is kept once, the "
+          "stronger box; another person, and a face on the first, are kept",
+          [d["score"] for d in merge([whole, tile, other, face])] == [0.9, 0.81, 0.6])
+    boxes = [person(s, [0.1 + (i % 4) * 0.05, 0.1, 0.3 + (i % 4) * 0.05, 0.5])
+             for i, s in enumerate((0.25, 0.9, 0.45, 0.6, 0.35, 0.52, 0.3, 0.41))]
+    check("boxes merged at any score and then filtered are the boxes merged at the threshold",
+          all([d for d in merge(boxes) if d["score"] >= t] == merge([d for d in boxes if d["score"] >= t])
+              for t in (0.2, 0.3, 0.4, 0.5, 0.6)))
+
 
 def test_hikbtree(tmp: str) -> None:
     """HIKBTREE records as observed on real media: found by shape, the data
@@ -3941,6 +4003,7 @@ def main() -> int:
         test_ps_carver(tmp)
         test_static_detections()
         test_analytics_eval(tmp)
+        test_analytics_tiles()
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)
