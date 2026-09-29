@@ -302,6 +302,10 @@ a plugin (§8).
 
 ### 3.4g Section 63 certificate (BSA 2023) — a draft
 
+Footage extracted anywhere in the case folder, or one folder down (e.g.
+`clips/`), is found by its manifest; footage whose manifest names another
+device is left out, and the draft says so.
+
 ```bash
 python cli.py certificate --out out/CASE-001 --part B --records both \
     --name "A. Examiner" --designation "Forensic examiner"
