@@ -341,8 +341,15 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   read, so every time is the recorder's own clock. The combined two-recorder
   view says "not aligned" for this reason. A route that needs no unit is
   built: the offset from the cameras' infrared switches at dusk and dawn
-  (`VALIDATION_REPORT.md` §8l). It is tested on generated days and real
-  night and day footage, and not yet run on our drives' outdoor cameras.
+  (`VALIDATION_REPORT.md` §8l).
+  - Run on drive 1 over four days of all three cameras, it found **no
+    switch**: the scene is lit all night, so the cameras never turn to
+    infrared at dusk.
+  - An exploratory reading of the picture's colour at dusk and dawn shows
+    the clock keeps **IST**, within a few minutes (UTC +328 min). That rules
+    out UTC or any other zone setting.
+  - The clock error is **not measured**. UTC to the minute still needs the
+    unit's clock photographed beside network time.
 - **The on-screen text reader (OCR) is weak.** Measured on six real
   recorders' files (36 painted clocks), it found the clock on 3 of the 6,
   read 5 frames exactly and 9 wrongly (a year off, or 12 hours off when "PM"
