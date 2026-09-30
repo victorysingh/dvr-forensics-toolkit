@@ -82,11 +82,15 @@ function Console() {
   if (!cases) return <Shell><Skeleton rows={5} /></Shell>;
 
   const Screen = screen.C;
+  // The screen rail belongs to a case: on the cases home it would list
+  // screens that have nothing to show yet, so it only appears once a case is
+  // open, and the home takes the full width.
   return (
-    <div className="grid grid-rows-[auto_1fr] h-screen">
+    <div className="grid grid-rows-[auto_1fr] grid-cols-[minmax(0,1fr)] h-screen">
       <TopBar cases={cases} caseId={caseId} screen={screen.id} c={caseData} />
-      <div className="grid grid-cols-[52px_1fr] xl:grid-cols-[208px_1fr] min-h-0">
-        <Sidebar caseId={caseId} screen={screen.id} />
+      <div className={`grid min-h-0 ${caseId
+        ? "grid-cols-[52px_1fr] xl:grid-cols-[208px_1fr]" : "grid-cols-[1fr]"}`}>
+        {caseId && <Sidebar caseId={caseId} screen={screen.id} />}
         <div className="grid grid-rows-[auto_1fr] min-w-0 min-h-0">
           <Stepper c={caseData} caseId={caseId} />
           <main className="min-w-0 overflow-y-auto px-5 pt-4 pb-10" key={`${caseId}/${screen.id}`}>
@@ -121,7 +125,7 @@ function TopBar({ cases, caseId, screen, c }) {
 
       <select value={caseId || ""} aria-label="Case"
         onChange={(e) => go(e.target.value || null, screen)}
-        className="panel-2 hairline border rounded-lg px-2.5 py-1.5 max-w-[320px] text-sm">
+        className="panel-2 hairline border rounded-lg px-2.5 py-1.5 max-w-[320px] min-w-0 text-sm">
         <option value="">All cases&hellip;</option>
         {cases.map((x) => (
           <option key={x.id} value={x.id}>{x.id}{x.case_id ? ` · ${x.case_id}` : ""}</option>
@@ -137,8 +141,9 @@ function TopBar({ cases, caseId, screen, c }) {
         ? <Badge tone="warn" title="A public demonstration of the interface, served from static
             snapshots of synthetic cases. Not an evidence workstation, and not real evidence.">
             demo &middot; synthetic data</Badge>
-        : <Badge title="Binds 127.0.0.1, never opens an evidence device, never writes">
-            offline &middot; read-only</Badge>}
+        : <span className="hidden sm:inline-flex">
+            <Badge title="Binds 127.0.0.1, never opens an evidence device, never writes">
+              offline &middot; read-only</Badge></span>}
       {c?.scan && (
         <a href={api.reportUrl(c.id)} target="_blank" rel="noopener"
           className="hidden md:inline-flex"><Badge>Report &#8599;</Badge></a>
@@ -231,7 +236,7 @@ const readLook = () => document.documentElement.dataset.look || LOOKS[0].id;
 function LookSwitcher() {
   const look = useHtmlAttr(readLook);
   return (
-    <div className="hairline border rounded-[var(--radius-panel)] flex overflow-hidden"
+    <div className="hairline border rounded-[var(--radius-panel)] hidden md:flex overflow-hidden"
       title="Visual direction (press l to cycle)">
       {LOOKS.map((l) => (
         <button key={l.id} onClick={() => setLook(l.id)}
@@ -246,9 +251,19 @@ function LookSwitcher() {
 
 /* ------------------------------------------------------------- sidebar */
 function Sidebar({ caseId, screen }) {
-  if (!caseId) return <nav className="panel rounded-none border-0 border-r" />;
   return (
-    <nav className="panel rounded-none border-0 border-r p-2 overflow-y-auto" aria-label="Screens">
+    <nav className="panel rounded-none border-0 border-r p-2 overflow-y-auto rail-in"
+      aria-label="Screens">
+      <a href="#/" title="All cases (Esc)"
+        className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12.5px]
+          justify-center xl:justify-start dim hover:text-accent">
+        <span className="w-[18px] text-center shrink-0">&larr;</span>
+        <span className="hidden xl:inline">All cases</span>
+      </a>
+      <div className="hidden xl:block px-2.5 pt-1 pb-2.5 mb-1.5 border-b hairline">
+        <div className="micro">Case</div>
+        <div className="text-[13px] font-semibold break-all leading-snug">{caseId}</div>
+      </div>
       {SCREENS.map((s, i) => {
         const on = s.id === screen;
         return (
@@ -309,13 +324,32 @@ function Stepper({ c, caseId }) {
 }
 
 /* ---------------------------------------------------------- cases home */
+// Complete acquisitions are the ones an examiner opens, so they lead, as
+// cards naming what the detector found.  An attempt that stopped short stays
+// listed - it is part of the case's history - but as a compact row after them.
+const STAGES = [["Acquire", "complete"], ["Parse", "has_parse"],
+                ["Recover", "has_carve"], ["Timeline", "has_timeline"]];
+
+// A device node reads fine as it is; an image path is long and mostly the
+// directory it happens to sit in, so the card shows the file and the full
+// path is one hover away.
+const shortDevice = (p) => (!p ? "—" : p.startsWith("/dev/") ? p : p.split(/[\\/]/).pop());
+
 function CasesHome({ cases }) {
+  const [q, setQ] = useState("");
   if (!cases.length) {
     return <Empty what="No cases in this folder."
       how="cli.py serve --out <folder that holds case folders>" />;
   }
+  const needle = q.trim().toLowerCase();
+  const shown = cases.filter((c) => !needle || [c.id, c.case_id, c.vendor, c.device]
+    .some((v) => String(v || "").toLowerCase().includes(needle)));
+  const ready = shown.filter((c) => c.complete);
+  const partial = shown.filter((c) => !c.complete).sort((a, b) => b.progress - a.progress);
+  const done = cases.filter((c) => c.complete);
+  const vendors = [...new Set(done.map((c) => c.vendor).filter(Boolean))];
   return (
-    <>
+    <div className="max-w-[1480px] mx-auto">
       {isDemo() && (
         <div className="rounded-xl border border-synthetic/45 bg-synthetic/10 px-3.5 py-3 mb-4
           text-[12.5px]">
@@ -327,41 +361,107 @@ function CasesHome({ cases }) {
           loopback interface only.
         </div>
       )}
-      <h1 className="text-[19px] font-semibold mb-3.5">Cases</h1>
-      <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(290px,1fr))]">
-        {/* finished acquisitions first; an aborted attempt stays listed, since
-            it is part of the case's history, but after the ones that count */}
-        {[...cases].sort((a, b) => (b.complete - a.complete)).map((c) => (
-          <a key={c.id} href={linkTo(c.id, "dashboard")}
-            className="panel p-4 hover:border-accent block">
-            {/* `accent`, not a hardcoded teal: the looks redefine that token,
-                and a fixed colour here would ignore the chosen direction.
-                `break-all` is setup's fix for a long case id overflowing. */}
-            <div className="text-[17px] font-semibold break-all">{c.id}</div>
-            <div className="dim font-mono text-[12px] mt-0.5 mb-2.5 break-all">
-              {c.device || "—"}</div>
-            <DL rows={[["Case ID", c.case_id || "—"], ["Size", bytes(c.size_bytes)]]} />
-            {!c.complete && (
-              <div className="mt-2.5">
-                <div className="panel-2 h-1.5 rounded-full overflow-hidden">
-                  <i className="block h-full bg-accent rounded-full"
-                    style={{ width: pct(c.progress) }} />
+      <div className="flex items-end justify-between gap-4 flex-wrap mb-4">
+        <div>
+          <h1 className="display text-[22px] font-semibold">Cases</h1>
+          <p className="dim text-[13px] mt-0.5">
+            Open a case to examine its evidence, recordings, recovered footage,
+            timeline and custody.</p>
+        </div>
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)}
+          data-table-search placeholder="Filter by case, vendor or device  ( / )"
+          aria-label="Filter cases"
+          className="panel-2 hairline border rounded-lg px-3 py-1.5 text-sm w-[300px]
+            max-w-full" />
+      </div>
+
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mb-6">
+        <HomeStat label="Cases" value={num(cases.length)} />
+        <HomeStat label="Ready to examine" value={num(done.length)} />
+        <HomeStat label="Acquired" value={bytes(done.reduce((s, c) => s + (c.size_bytes || 0), 0))} />
+        <HomeStat label="Vendors detected" value={vendors.length ? vendors.join(" · ") : "—"} small />
+      </div>
+
+      {!shown.length && <Empty what={`No case matches “${q}”.`} />}
+
+      {ready.length > 0 && (
+        <section className="mb-7">
+          <h2 className="micro mb-2.5">Ready to examine &middot; {ready.length}</h2>
+          <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(300px,1fr))]">
+            {ready.map((c) => <CaseCard key={c.id} c={c} />)}
+          </div>
+        </section>
+      )}
+
+      {partial.length > 0 && (
+        <section>
+          <h2 className="micro mb-1">Incomplete acquisitions &middot; {partial.length}</h2>
+          <p className="dim text-[12px] mb-2.5">Did not finish a full pass of the device.
+            Kept because each attempt is part of its case's history.</p>
+          <div className="grid gap-2">
+            {partial.map((c) => (
+              <a key={c.id} href={linkTo(c.id, "dashboard")}
+                className="panel px-4 py-2.5 flex items-center gap-4 hover:border-accent group">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14px] font-semibold break-all group-hover:text-accent">
+                    {c.id}</div>
+                  <div className="dim font-mono text-[11.5px] truncate" title={c.device}>
+                    {shortDevice(c.device)} &middot; {bytes(c.size_bytes)}</div>
                 </div>
-                <div className="dim text-[11px] mt-1">acquiring &mdash; {pct(c.progress)}</div>
-              </div>
-            )}
-            <div className="flex gap-1.5 flex-wrap mt-2.5">
-              {[["scan", c.complete], ["parse", c.has_parse],
-                ["carve", c.has_carve], ["timeline", c.has_timeline]].map(([k, has]) => (
-                <span key={k}
-                  className={`hairline border rounded-full px-2 py-px text-[10.5px]
-                    ${has ? "text-validated border-validated/45" : "dim"}`}>{k}</span>
-              ))}
-            </div>
-          </a>
+                <div className="w-[200px] max-w-[40%] shrink-0">
+                  <div className="bg-line h-1.5 rounded-full overflow-hidden">
+                    <i className="block h-full bg-synthetic rounded-full"
+                      style={{ width: pct(c.progress) }} />
+                  </div>
+                  <div className="dim text-[11px] mt-1">{pct(c.progress)} of the device read</div>
+                </div>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function HomeStat({ label, value, small }) {
+  return (
+    <div className="panel px-4 py-3 min-w-0">
+      <div className="micro">{label}</div>
+      <div className={`${small ? "text-[15px] font-semibold mt-1.5" : "figure mt-1"} truncate`}
+        title={String(value)}>{value}</div>
+    </div>
+  );
+}
+
+function CaseCard({ c }) {
+  return (
+    // `accent`, not a hardcoded teal: the looks redefine that token, and a
+    // fixed colour here would ignore the chosen direction.  `break-all` is
+    // setup's fix for a long case id overflowing.
+    <a href={linkTo(c.id, "dashboard")} className="panel p-4 hover:border-accent block group">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="micro truncate">{c.case_id || "no case ID"}</span>
+        {c.vendor
+          ? <span title="The detector's best match for this disk, with its confidence"
+              className="border border-accent/45 text-accent rounded-full px-2 py-px
+                text-[10.5px] whitespace-nowrap">
+              {c.vendor} &middot; {pct(c.vendor_confidence)}</span>
+          : <span className="hairline border dim rounded-full px-2 py-px text-[10.5px]
+              whitespace-nowrap">vendor not identified</span>}
+      </div>
+      <div className="text-[17px] font-semibold break-all group-hover:text-accent">{c.id}</div>
+      <div className="dim font-mono text-[12px] mt-0.5 truncate" title={c.device}>
+        {bytes(c.size_bytes)} &middot; {shortDevice(c.device)}</div>
+      <div className="grid grid-cols-4 gap-1.5 mt-3.5" aria-label="Pipeline stages">
+        {STAGES.map(([t, k]) => (
+          <div key={t} title={`${t}: ${c[k] ? "done" : "not run"}`}>
+            <i className={`block h-1 rounded-full ${c[k] ? "bg-validated" : "bg-line"}`} />
+            <div className={`text-[10.5px] mt-1 ${c[k] ? "" : "dim"}`}>{t}</div>
+          </div>
         ))}
       </div>
-    </>
+    </a>
   );
 }
 
@@ -386,6 +486,7 @@ function useKeyboard(screens, caseId) {
         if (q) { e.preventDefault(); q.focus(); }
         return;
       }
+      if (e.key === "Escape" && caseId) { go(null); return; }
       const n = Number(e.key);
       if (n >= 1 && n <= screens.length && caseId) go(caseId, screens[n - 1].id);
     };
