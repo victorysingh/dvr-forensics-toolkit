@@ -155,8 +155,8 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 605 in all: 582 on generated data with known ground
-  truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
+- **Automated tests:** 691 in all: 668 on generated data with known ground
+  truth and on the access-control layer (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
   They cover the Merkle tree, the custody chain, bad sectors, device loss,
@@ -180,7 +180,7 @@ Full account: `VALIDATION_REPORT.md`.
     not yet run on an intact Hikvision disk).
   - Honeywell: `spec_only`.
   - Uniview: `spec_only`, from the storage driver in Uniview's own firmware.
-  - TP-Link: `detected_not_parsed`; its index is read when plain (from the VIGI firmware), but no footage is placed.
+  - TP-Link: `spec_only`, from the VIGI firmware: footage placed from each zone's own GOP index and extracted; at the firmware's own geometry (a sparse image laid out as a 1 TB disk, data zones from 0x33200000), 8 s of real x264 and 8 s of real x265 video packed into VIGI GOPs came back through `cli.py parse` and `cli.py extract` byte-identical, and ffmpeg decoded all 200 frames of each (VALIDATION_REPORT §8f).
   - Matrix: `spec_only`, from Matrix's own documents (its recording tree).
   - Godrej: `spec_only`, from Qualvision's firmware (Godrej's SeeThru
     recorders run Qualvision's software): footage found and dated, no camera.
@@ -330,7 +330,7 @@ as unique.
 | HeimVision (beyond the eight) | `spec_only` | read off a real public NIST image; drop-in plugin |
 | Honeywell | `spec_only` | drop-in plugin from Yoon & Hwang (DFRWS USA 2026); older units were Dahua-built until April 2022, so the Dahua parser may apply |
 | Uniview | `spec_only` | drop-in plugin from the storage driver in Uniview's own firmware (static disassembly); footage found with or without its index (VALIDATION_REPORT §8f) |
-| TP-Link | `detected_not_parsed` | drop-in plugin from the VIGI firmware: format sector and index detected, a plain index read (recordings, system log); footage not placed - `carve-annexb`; an encrypted index is reported as such |
+| TP-Link | `spec_only` | drop-in plugin from the VIGI firmware: footage placed from each zone's GOP index, extracted frame by frame, and found without the index; a plain database read (cameras, system log), an encrypted one reported as such; at the firmware's own geometry (a sparse image laid out as a 1 TB disk, data zones from 0x33200000), 8 s of real x264 and 8 s of real x265 video packed into VIGI GOPs came back through `cli.py parse` and `cli.py extract` byte-identical, and ffmpeg decoded all 200 frames of each |
 | Matrix | `spec_only` | drop-in plugin from Matrix's own documents: the CameraNN/date/hour tree of .stm files, read on ext2/3/4 (incl. one RAID 1 mirror); .stm extracted as stored (VALIDATION_REPORT §8h) |
 | Godrej | `spec_only` | drop-in plugin from Qualvision's own firmware (Godrej SeeThru runs Qualvision's software): disk head, frame chain, dated runs; cameras and the index not decoded (VALIDATION_REPORT §8j) |
 

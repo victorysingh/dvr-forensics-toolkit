@@ -62,12 +62,14 @@ VENDOR_MATRIX = {
                   "parser": "Honeywell", "parser_status": "spec_only", "media": "none",
                   "basis": "plugins/honeywell.py, written from Yoon & Hwang, DFRWS USA 2026 "
                            "(arXiv:2605.07430); no Honeywell disk read by the team"},
-    "TP-Link": {"family": "TP-Link in-house TPFS (raw or ext4; SQLite index in a TpFile header)",
-                "parser": "TP-Link", "parser_status": "detected_not_parsed", "media": "none",
+    "TP-Link": {"family": "TP-Link in-house TPFS (raw: 1 GiB zones, each with its own GOP index; "
+                          "SQLite database in a TpFile header)",
+                "parser": "TP-Link", "parser_status": "spec_only", "media": "none",
                 "basis": "plugins/tplink.py, from the VIGI NVR1008H V2 240119 firmware (static "
-                         "disassembly): detects the format sector and the index, and reads the "
-                         "index and system log when they are plain SQLite; footage is not "
-                         "placed on the disk (zone geometry not recovered) - carve-annexb"},
+                         "disassembly of liblayouthddb.so, libstorage.so, nvrcore): places the "
+                         "footage from each zone's GOP index and extracts it frame by frame; "
+                         "reads the database and system log when plain SQLite; no VIGI disk "
+                         "read by the team"},
     "Godrej": {"family": "Qualvision QVFS (Godrej SeeThru runs Qualvision's software)",
                "parser": "Godrej", "parser_status": "spec_only", "media": "none",
                "basis": "plugins/godrej.py, from Qualvision firmware NVR401L-4P4 20240531 "

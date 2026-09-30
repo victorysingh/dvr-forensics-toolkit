@@ -3981,14 +3981,18 @@ def test_uniview(tmp: str) -> None:
 def test_tplink(tmp: str) -> None:
     """The TP-Link plugin against disks built to what the VIGI firmware shows:
     it finds the format sector and the index, reads a plain index by its
-    columns, and reports an unreadable one as such - never a guess."""
+    columns, reports an unreadable one as such - never a guess - and places
+    the footage: the data zones from the database area's record, each zone's
+    own GOP index, recordings per event and stream, extraction that checks
+    every frame, and GOPs no index lists."""
     print("\n[TP-Link plugin (from the VIGI firmware)]")
+    import hashlib
     from report.case import vendor_matrix
     from tests import synth_tplink as ST
 
     def parser():
         p = get_parser("TP-Link")
-        p.format_at = ST.FORMAT_AT             # the fixture's 1 MiB, not 512 MiB
+        ST.configure(p)                        # the fixture's small geometry, not the firmware's
         return p
 
     img = os.path.join(tmp, "tplink.img")
@@ -4008,16 +4012,59 @@ def test_tplink(tmp: str) -> None:
           and [e["detail"] for e in idx["system_log"]][-1] == "system time changed"
           and idx["cameras"][0]["first_clock"] == "2024-07-01 10:40:00"
           and idx["cameras"][0]["time_unit"] == "s", str(idx.get("cameras")))
-    check("no footage is placed on the disk: the zone geometry was not recovered",
-          res.recordings == [] and any("carve-annexb" in n for n in res.notes))
+    foot = v["footage"]
+    geo = foot["geometry"]
+    check("the data zones start where resetDBAreaInfo puts them: the database area's start plus "
+          "twice its size, the size read from the area record (CRC-32 checked)",
+          geo["data_zone_at"] == ST.DATA_ZONE_AT and geo["area_bytes_from"] == "area record"
+          and geo["area_record"] == "record" and geo["zones"] == ST.ZONES, str(geo))
+    check("each zone's own GOP index is read; the recycled zone with a blank index has none",
+          foot["zones_with_index"] == {1: 13, 2: 12} and foot["gops"] == 25
+          and foot["entries_rejected"] == 0, str(foot["zones_with_index"]))
+    recs = {r.id: r for r in res.recordings}
+    check("a recording per event and stream, the camera from tEventInfo, the codec from the "
+          "frame header, the frames from the index",
+          sorted(recs) == ["tpl-e000001-main", "tpl-e000001-sub"] + [
+              f"tpl-e{e:06d}-main" for e in range(2, 7)]
+          and recs["tpl-e000001-main"].camera_id == "ch0" and recs["tpl-e000004-main"].camera_id == "ch1"
+          and recs["tpl-e000001-main"].codec == "h264" and recs["tpl-e000005-main"].codec == "h265"
+          and recs["tpl-e000001-main"].frame_count == 4 * ST.GOP_FRAMES
+          and recs["tpl-e000001-main"].duration_s == 8.0
+          and res.indexed_extents and all(n > 0 for _, n in res.indexed_extents),
+          str({k: (r.camera_id, r.codec, r.frame_count) for k, r in recs.items()}))
+    out = os.path.join(tmp, "tpl_e1")
+    with BlockDevice(img) as dev:
+        s1 = p.extract_recording(dev, "tpl-e000001-main", out)
+        s5 = p.extract_recording(dev, "tpl-e000005-main", os.path.join(tmp, "tpl_e5"))
+    es1 = open(os.path.join(tmp, s1["file"]), "rb").read()
+    check("extraction walks every GOP's frames and writes the H.264 payloads, headers removed: "
+          "byte for byte what the camera's frames were",
+          s1["file"] == "tpl_e1.h264" and s1["gops"] == 4 and s1["gops_failing_checks"] == 0
+          and s1["frames"] == 24 and hashlib.sha256(es1).hexdigest() == truth["es"]["tpl-e000001-main"]
+          and s1["first_time_local"] == "2024-07-01 10:40:00", str(s1))
+    check("a GOP with a damaged start code is left out and counted, the rest extracted",
+          s5["gops"] == 3 and s5["gops_failing_checks"] == 1
+          and s5["sha256"] == truth["es"]["tpl-e000005-main"]
+          and "does not start 00 00 00 01" in s5["failures"][0], str(s5))
+    with BlockDevice(img) as dev:
+        runs = parser().recover_video_area(dev)
+    orphan = [r for r in runs if r.offset == truth["orphan"][0]]
+    check("--remnants finds GOPs by their frame headers in every zone - including the recycled "
+          "zone's old GOP that no index lists - camera unknown, as fragments",
+          len(runs) == 3 and len(orphan) == 1 and orphan[0].codec == "h265"
+          and orphan[0].frame_count == ST.GOP_FRAMES and orphan[0].state == "fragment"
+          and orphan[0].camera_id.startswith("unknown"), str([(r.id, r.offset) for r in runs]))
 
     enc = os.path.join(tmp, "tplink_encrypted.img")
     ST.build(enc, encrypted=True)
     with BlockDevice(enc) as dev:
         re_ = parser().parse(dev)
-    check("an index that is not plain SQLite is reported as encrypted or unreadable, not parsed",
-          re_.validation_status == "detected_not_parsed" and re_.volume["index"] is None
-          and "encrypted" in re_.volume["databases"][0]["status"], re_.volume["databases"][0]["status"])
+    check("an index that is not plain SQLite is reported as encrypted, not parsed - and the "
+          "footage is still placed from the zones' own indexes, the camera unknown",
+          re_.validation_status == "spec_only" and re_.volume["index"] is None
+          and "encrypted" in re_.volume["databases"][0]["status"] and len(re_.recordings) == 7
+          and all(r.camera_id == "unknown (database not read)" for r in re_.recordings),
+          re_.volume["databases"][0]["status"])
 
     v0 = os.path.join(tmp, "tplink_v0.img")
     ST.build(v0, with_format=False)
@@ -4025,13 +4072,16 @@ def test_tplink(tmp: str) -> None:
         pp = parser()
         alone, hinted = pp.detect(dev), pp.detect(dev, [ST.DB_AT])
         rv = pp.parse(dev, hint_offsets=[ST.DB_AT])
-    check("with no format sector, the index is found at the offset the scan reports",
-          not alone and hinted and rv.volume["index"]["database_at"] == ST.DB_AT)
+    check("with no format sector, the index is found at the offset the scan reports, and no "
+          "footage is placed (no zone layout without it)",
+          not alone and hinted and rv.volume["index"]["database_at"] == ST.DB_AT
+          and rv.recordings == [] and rv.volume["footage"] is None)
     with BlockDevice(os.path.join(tmp, "unknown_vendor.img")) as dev:
         check("a disk with no VIGI marker is not detected", not parser().detect(dev))
     row = next(r for r in vendor_matrix() if r["vendor"] == "TP-Link")
-    check("the matrix lists the plugin but keeps TP-Link at detected_not_parsed: no footage placed",
-          row["parser"] == "TP-Link" and row["parser_status"] == "detected_not_parsed", str(row))
+    check("the matrix lists TP-Link as spec_only: footage placed from the firmware, no disk read",
+          row["parser"] == "TP-Link" and row["parser_status"] == "spec_only"
+          and row["media"] == "none", str(row))
 
 
 def test_ext4(tmp: str) -> None:

@@ -14,6 +14,8 @@ Needs `pip install capstone pyelftools` (not needed by the tool itself).
 | Uniview | `NVR301_04LS3_W_General-B3612.1.21.220408.zip` (download.aras.nl/Video/Uniview/Recorders/Firmware/) → `Program.bin` → SquashFS | `/driverfile/comm.ko` | `56b84ede4893acf0c2f5fffe6e2235f2b0b9a6ac9dee55166449ec53043ac3fc` |
 | TP-Link | archive.org `TP-Link_VIGINVR1008HV2_240119_cc1d1` → `nvr1008hv2_en_1_0_7_up_boot_24011951953-signed.bin` → SquashFS at 0x18A600 | `/usr/lib/liblayouthddb.so` | `df6c5bd2518b908a879de8908b675337d3fe2a3c2bb1410f04e11dad20c3b169` |
 | TP-Link | (same) | `/usr/lib/libsqlite3.so.0.8.6` | `4754d86ab6476fd4b8997de9e3c52b0dc94209bb936a2234934e8de8d8c00ea0` |
+| TP-Link | (same) | `/usr/lib/libstorage.so` | `be790e1f72fc13e219714b7b7c43ef38dc4f3fe778b5719b8b21f070c8ae71fb` |
+| TP-Link | (same) | `/bin/nvrcore` | `49a5b249481783ad09d89fbb979c36971bfd4f94994220b2f79b340da1361c32` |
 
 How they were fetched and unpacked is in `../datasets.md`, which also has
 the other firmware hunted for.
@@ -66,11 +68,21 @@ python so.py liblayouthddb.so syms rawDiskLayout
 | Key slots | `libsqlite3.so` `getTpFileKey`, `setTpFileKey` | big-endian reads (`rev`) at +0x20/+0x24/+0x28 |
 | Encryption | `libsqlite3.so` `CodecAES`, `sqlite3_key`; `liblayouthddb.so` `set_key_to_db`, `key_info_init_v1` | the default key string in `key_info_init_v1` |
 | Tables | `liblayouthddb.so` strings | `CREATE TABLE IF NOT EXISTS %s(...)` and the `t*Info` names |
+| Format sector's other fields | `rawDiskLayout_diskInfoFormat` | `movw 0x5450` to +0x80; the disk size to +0x84; 0x40000000 to +0x8C; 0x8000000 to +0x90 |
+| Database-area record | `rawDiskLayout_resetDBAreaInfo`, `rawDiskLayout_DBAreaInfoInit` | first extent 0x23201000 (bytes 00 10 20 23), length area − 0x1000 at +8; read from disk-info start + 0x400, journal + 0x600; `calculate_CRC32(rec, 0x1FC)` vs +0x1FC |
+| Data-zone start | `rawDiskLayout_resetDBAreaInfo` ("disk%d start_addr"), run at mount by `layout_fs_init_resource_v1` (`io_init`, then the PLT stub of `resetDBAreaInfo`) | 0x23200000, plus the area size twice |
+| Zone address | `rawDiskLayout_io_read` | `uxth zone`; `umlal` with 0x40000000; plus `getDataZoneStartAddr`; the log "zone_id %u addr %lld ... rawDiskAddr" |
+| Zone GOP index | `write_raw_disk_data_index`, `insert_gop_index_v1`, `get_gop_index_v1` | 0x50 per entry, (offset + count) × 0x50 ≤ 0x100000; the stores to entry −0x50 … −0x20; the reader's filter on +0x04 (event) and +0x18 (stream) and its log "st%lld et%lld offset%d" |
+| GOP length | `layout_read_data_by_index` | "start get data len ... goplen" from the struct's +8, which `get_gop_index_v1` fills from entry +0x20 |
+| Frames in a GOP | `nvrcore` `web_parse_gop_data_frm` (ET_EXEC, read with `exe.py`); `libstorage.so` `extend_iter_i_frame_in_gop`, `extend_get_frame_type` | next frame = header + 0x20 + align8(length at +8); bytes +0x20..+0x23 must be 00 00 00 01; codec at +0x10; key frame when +0x0D is 0 or 2; the key-frame table's 8-byte entries at the GOP's end |
 
-Not recovered, and so not used by the plugin: TP-Link's database-area record
-(`rawDiskLayout_DBAreaInfoInit`, `rawDiskLayout_restoreDBAreaInfo`), which
-holds where the zones start and how large a zone is; and TP-Link's GOP
-header.
+`exe.py` is `so.py` for a fixed-address executable such as `nvrcore`: a
+literal that points at a string is shown as the string. `rng.py`
+disassembles an address range, for a static function such as
+`libstorage.so`'s GOP writer at 0x9e94.
+
+Still not recovered: the frame header's other bytes, the index entry's
+32-bit fields at +0x24 and +0x28, and audio.
 
 ## Where each Qualvision (Godrej) structure comes from (`Sofia`)
 

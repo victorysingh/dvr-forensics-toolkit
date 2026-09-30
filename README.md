@@ -42,7 +42,7 @@ One read-only pass does the work of five, and recovery does not depend on the in
 | Uniview | from its firmware's storage driver | `spec_only` |
 | Godrej | from Qualvision's firmware | `spec_only` |
 | Matrix | from its own documents | `spec_only` |
-| TP-Link | index read from its firmware | `detected_not_parsed` |
+| TP-Link | from its firmware: each zone's GOP index, extraction, carving | `spec_only` |
 | Any other vendor | raw H.264/H.265 carver, no parser needed | `synthetic_only` |
 
 **The honesty rule:** `validated` (byte-matched to the recorder's own export) › `spec_only` (from research, firmware or documents) › `detected_not_parsed` › `synthetic_only`. The weakest piece of evidence sets the status, and this is enforced in code (`detect/engine.py::_weakest`), not only in prose.
@@ -74,7 +74,7 @@ Measured on two real 1 TB surveillance drives the team acquired, and on NIST's p
 | Hostile input | **12,800** damaged disks, streams and E01 sets: no crash, no hang (after fixing the 144 crashes and 1 hang they found) |
 | People in real recorder frames | **44 of 57** labelled frames (first version: 0); **810 of 1,089** people on held-out CAVIAR footage |
 | Face search by photo | on LFW faces made recorder-sized: same person passes in **97.8%** of pairs (eyes ≥ 12 px), **no** pair of different people passes; on real footage, **1** false candidate (an upside-down head at a fisheye's edge) |
-| Regression suite | **661 tests** (663 with ffmpeg), no hardware, on Linux and Windows CI |
+| Regression suite | **666 tests** (668 with ffmpeg), no hardware, on Linux and Windows CI |
 
 Nothing is `validated` yet: that needs a byte-match between recovered footage and the recorder's own export (`validate-export`), not yet run on a real export. Every number's source is in [`docs/VALIDATION_REPORT.md`](docs/VALIDATION_REPORT.md) and [`docs/STATUS.md`](docs/STATUS.md).
 
@@ -239,7 +239,7 @@ The forensic core has **zero dependencies**: a bare Python 3.11+ install on an a
 git clone https://github.com/victorysingh/dvr-forensics-toolkit.git
 cd dvr-forensics-toolkit
 
-python tests/test_pipeline.py       # 661 tests (663 with ffmpeg), no hardware
+python tests/test_pipeline.py       # 666 tests (668 with ffmpeg), no hardware
 python demo/stage_demo.py           # every capability in eight steps, ~5 s, synthetic disks
 python cli.py serve                 # case console on http://127.0.0.1:8150
 python cli.py serve --require-access   # ...behind a supervisor's approval, 8 h (docs/ACCESS_CONTROL.md)
@@ -295,7 +295,7 @@ report/      HTML + JSON report, BSA s.63 certificate, CASE/UCO, NIST CCTV expor
 validate/    real-media checks, export byte-match, fuzzing, ffmpeg cross-checks
 formats/     Kaitai Struct definitions of the vendor formats
 viewer/ ui/  case console (stdlib server + React build)
-tests/       580 regression tests and synthetic DVR disk generators
+tests/       666 regression tests and synthetic DVR disk generators
 demo/        stage, tamper and single-pass benchmark demos
 packaging/   single-file executable build
 docs/        architecture, SOPs, validation, OEM comparison, final report
