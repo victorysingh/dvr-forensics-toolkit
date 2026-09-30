@@ -250,7 +250,7 @@ def configure(vendor: str, parser):
     puts the format sector at 1 MiB, not the real disk's 512 MiB."""
     if vendor == "TP-Link":
         from tests import synth_tplink
-        parser.format_at = synth_tplink.FORMAT_AT
+        synth_tplink.configure(parser)
     return parser
 
 
@@ -274,7 +274,13 @@ def seed(vendor: str, workdir: str) -> tuple[bytes, list, float]:
     p = configure(vendor, get_parser(vendor))
     t = time.perf_counter()
     p.detect(dev)
-    p.parse(dev)
+    res = p.parse(dev)
+    # what run_case does next, so its damage is aimed at the footage too
+    if res.recordings and hasattr(p, "extract_recording"):
+        with tempfile.TemporaryDirectory() as d:
+            p.extract_recording(dev, res.recordings[0].id, os.path.join(d, "rec"))
+    if hasattr(p, "recover_video_area"):
+        p.recover_video_area(dev)
     took = time.perf_counter() - t
     return data, log, took
 
@@ -327,8 +333,10 @@ def mutate(data: bytes, reads: list, rnd: random.Random) -> tuple[dict, int, lis
 
 
 def run_case(vendor: str, data: bytes, patches: dict, size: int) -> dict:
-    """detect() then parse() on one damaged disk; anything raised other than a
-    device error is a crash."""
+    """detect() then parse() on one damaged disk, then what the tool does next
+    where the plugin can: extract the first recording, and walk the video
+    area for footage no index lists.  Anything raised other than a device
+    error is a crash."""
     import parsers  # noqa: F401
     from acquire.device import DeviceError
     from parsers.base import ParseResult, get_parser
@@ -347,7 +355,15 @@ def run_case(vendor: str, data: bytes, patches: dict, size: int) -> dict:
             return {"outcome": "bad-return", "detail": f"parse returned {type(res).__name__}"}
         if res.stopped:
             return {"outcome": "stopped", "error": res.stopped, "where": "parse"}
-        return {"outcome": "ok", "recordings": len(res.recordings), "errors": len(res.errors)}
+        extracted = remnants = None
+        if res.recordings and hasattr(p, "extract_recording"):
+            with tempfile.TemporaryDirectory() as d:
+                extracted = p.extract_recording(dev, res.recordings[0].id,
+                                                os.path.join(d, "rec"))["bytes"]
+        if hasattr(p, "recover_video_area"):
+            remnants = len(p.recover_video_area(dev))
+        return {"outcome": "ok", "recordings": len(res.recordings), "errors": len(res.errors),
+                "extracted_bytes": extracted, "remnants": remnants}
     except DeviceError as exc:
         return {"outcome": "device-error", "detail": str(exc)[:200]}
     except BaseException as exc:                   # noqa: BLE001 - that is the point

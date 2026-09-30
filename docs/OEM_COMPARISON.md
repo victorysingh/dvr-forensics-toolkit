@@ -152,7 +152,7 @@ paper. Detail and what is tested: VALIDATION_REPORT §8f.
 | Camera | a 4-number channel id in each block header **F** | `channelId` in the index **F** |
 | Time | Unix s + ms, the recorder's kernel clock; zone not in the code **F** | integers in the index; zone kept in flash, not on the disk (inferred) |
 | Integrity | CRC-16 on the superblock, each abstract group and each block header **F** | CRC-32 on the format sector **F** |
-| Plugin | `plugins/uniview.py`, `spec_only`: recordings, extraction, footage without the index | `plugins/tplink.py`, `detected_not_parsed`: index and system log read when plain; no footage placed |
+| Plugin | `plugins/uniview.py`, `spec_only`: recordings, extraction, footage without the index | `plugins/tplink.py`, `spec_only`: recordings from each zone's GOP index, extraction, footage without the index; database and system log read when plain |
 
 ## 4d. Matrix, from its own documents (29 Sep)
 

@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 605 pass, 0 fail: 582 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 610 pass, 0 fail: 587 on generated data with known ground truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -37,7 +37,7 @@ Two different things are validated here, and they must not be confused:
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
-| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container, index records and full-filesystem parser `spec_only` (the parser not yet run on an intact Hikvision disk); HeimVision `spec_only`, observed on a third real image (§8e); Uniview `spec_only` and TP-Link's index, from the vendors' own firmware (§8f); Matrix `spec_only`, from Matrix's own documents (§8h) |
+| Vendor formats | none `validated`; Dahua/CP Plus `spec_only`; Hikvision container, index records and full-filesystem parser `spec_only` (the parser not yet run on an intact Hikvision disk); HeimVision `spec_only`, observed on a third real image (§8e); Uniview and TP-Link `spec_only`, from the vendors' own firmware (§8f); Matrix `spec_only`, from Matrix's own documents (§8h) |
 
 ## 2. Environment
 
@@ -1139,16 +1139,42 @@ as older footage (research gap G2, `docs/research/papers_usp.md`).
 | The index | SQLite behind a 512-byte "TpFile" header: magic "TP-Link format1", then key slots (big-endian type, encrypt, length, data) (`sqliteTpFileInit`, `getTpFileKey`) |
 | Encryption | TP's SQLite build carries an AES codec (`CodecAES`, `sqlite3_key`); the layout library calls `db_encrypt()` with a key taken from the header's slots |
 | Tables | `tEventInfo` (recording per camera), `tGopInfo` (each GOP's zone, offset, length), `tZoneInfo`, `tSlogInfo` (the system log, on the disk) - from the CREATE TABLE statements |
-| Not recovered | the zone geometry (data-zone start, zone size): loaded at run time from an on-disk record whose layout was not read; the GOP header |
+| Where the database is (30 Sep) | a 512-byte record at the format sector + 0x400 (journal copy at + 0x600): up to 31 (start, length) u64 extents, CRC-32 at +0x1FC; the first extent at 0x23201000, the backup after each (`rawDiskLayout_resetDBAreaInfo`, `rawDiskLayout_DBAreaInfoInit`) |
+| Where the zones are (30 Sep) | from 0x23200000 + 2 × the database area (64 MiB below 32 GiB of disk, 128 MiB below 3 TiB, else 256 MiB), set at every mount (`layout_fs_init_resource_v1` → `resetDBAreaInfo`); zone *z* is the 1 GiB at that start + *z* × 0x40000000 (`rawDiskLayout_io_read`: "zone_id ... rawDiskAddr") |
+| Each zone's GOP index (30 Sep) | on this layout the GOP table is not in SQLite (`create_gop_table_v1` is empty): the zone's first 1 MiB holds one 80-byte entry per GOP - zone, event, start and end time, stream (0 main, 1 sub), offset, length, frame count (`insert_gop_index_v1`, `get_gop_index_v1`, `write_raw_disk_data_index`; "start get data len ... goplen" in `layout_read_data_by_index`) |
+| The GOP (30 Sep) | frames back to back: a 32-byte header (+0 u64 time, +8 payload length, +0x0D frame type, +0x10 codec 0 H.264 / 1 H.265) and the payload, which must start 00 00 00 01, padded to 8; a key-frame table closes it (`web_parse_gop_data_frm` in `nvrcore`; `extend_iter_i_frame_in_gop` in `libstorage.so`) |
 
-So the TP-Link plugin reads the index where it is plain SQLite, finds its
-tables by their columns, and reports each camera's recordings and the system
-log as the index states them. It places **no** footage on the disk; video is
-recovered by `carve-annexb`. Where the index is encrypted it says so, and
-stops.
+Until 30 Sep the TP-Link plugin read only the index and placed no footage;
+the rows marked 30 Sep, read from `liblayouthddb.so`, `libstorage.so` and the
+recorder's main program `nvrcore`, close that. The plugin now:
+- places the footage from each zone's own GOP index, using an entry only if it
+  names its own zone, fits in the zone after the index, and has the 28 bytes
+  the firmware never fills set to zero;
+- reports a recording per event and stream, with the camera from `tEventInfo`
+  when the database is readable (unknown when it is encrypted, since the
+  zones' indexes do not go through the database's codec);
+- extracts a recording frame by frame, checking every start code, and leaves
+  out any GOP that fails;
+- with `--remnants`, finds GOPs by their frame headers in every zone, indexed
+  or not (a recycled zone's old footage).
+
+The index is still read where it is plain SQLite and reported as encrypted
+where it is not. That GOP data begins after the zone's 1 MiB index is an
+inference: the index is written there, so footage cannot be.
+
+**End to end, at the firmware's own geometry** (`docs/research/tplink/realgeo.py`):
+a sparse image laid out as a 1 TB VIGI disk - format sector at 512 MiB,
+database area at 0x23200000 (128 MiB), data zones from 0x33200000 - held 8 s
+of real x264 video (camera 0, zone 0) and 8 s of real x265 (camera 1, zone 3)
+packed into VIGI GOPs. `cli.py parse` found both recordings, with their
+cameras and times from the database, at 0x33300000 and 0xF3300000. `cli.py
+extract` returned both streams **byte-identical** to what went in, and ffmpeg
+decoded **200 of 200 frames** of each with no error. `--remnants` found the
+same two runs with no index. Parse and both extractions took 9 s. The video
+and the database rows are ours; only the layout is the firmware's.
 
 **What is tested**: disks built to these readings (`tests/synth_uniview.py`,
-`tests/synth_tplink.py`, 18 tests). They prove the code follows the firmware
+`tests/synth_tplink.py`, 23 tests). They prove the code follows the firmware
 as read. They cannot prove every model and firmware version writes the same,
 and nothing here has met a real Uniview or VIGI disk. The first such disk
 is the test: its superblock CRC, group CRCs and GOP trailers either check or
@@ -1888,6 +1914,15 @@ in a damaged set would have escaped as a raw exception. Fixed
 (`acquire/device.py`): the file is closed, and any failure to open a set is a
 device error that names it.
 
+**TP-Link's footage path (30 Sep).** A fuzz case now also does what the
+tool does after a parse, wherever the plugin can: it extracts the first
+recording and walks the video area for footage no index lists. The clean run
+that aims the damage does the same, so the damage lands on GOPs and frame
+headers as well as on the index (62 read ranges on the TP-Link disk, 20
+before). TP-Link, whose footage path is new: **800 damaged disks (two seeds),
+no crash and no hang**. The other plugins were fuzzed before this change,
+through their parse only.
+
 **Result:** 3,200 damaged inputs (400 per target, two seeds), after the fix: no crash and no hang. The carvers handled all 2,400 cleanly. The damage did change what they recovered (for example 2-6 DHAV streams where the clean input gives 5), so it reached them; they split or dropped what was damaged, as designed. Of 800 damaged E01 sets, 605 were refused cleanly and 195 read. The test suite runs 8 damaged inputs per target on a fixed seed, and checks that a refused E01 set leaves no file open (that test fails on the old code).
 
 ## 9. Vendor format status
@@ -1902,7 +1937,7 @@ device error that names it.
 | HeimVision (K9604-W) | `spec_only` | `plugins/heimvision.py`, read off the NIST CFReDS image (§8e); every field observed on real media; not byte-matched to a HeimVision export |
 | Honeywell | `spec_only` | `plugins/honeywell.py`, written from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430); tested on a disk built to the paper's description (10 tests, including recovery after a format); no Honeywell disk read |
 | Uniview | `spec_only` | `plugins/uniview.py`, from the storage driver in Uniview's own firmware (§8f); tested on a disk built to it (11 tests, including footage found with the index wiped); no Uniview disk read |
-| TP-Link | `detected_not_parsed` (index: `spec_only`) | `plugins/tplink.py`, from the VIGI firmware (§8f): the format sector and the index are detected, and a plain index is read (recordings per camera, GOP rows, system log); footage is not placed on the disk, because the zone geometry was not recovered - `carve-annexb` recovers it; an encrypted index is reported as encrypted |
+| TP-Link | `spec_only` | `plugins/tplink.py`, from the VIGI firmware (§8f): footage placed from each zone's own GOP index and extracted frame by frame; GOPs no index lists found by their headers; a plain database read (cameras, system log), an encrypted one reported as such; end to end at the firmware's geometry with real video, byte-identical and fully decoded; no VIGI disk read |
 | Matrix | `spec_only` | `plugins/matrix.py`, from Matrix's own documents (§8h): the recording tree on ext2/3/4, incl. one RAID 1 mirror; the .stm container is not published and is extracted as stored; tested on disks built to the documents (8 tests); no Matrix disk read, and the recorder's filesystem type is not documented |
 | Godrej (Qualvision QVFS) | `spec_only` | `plugins/godrej.py`, from Qualvision's own firmware (§8j); tested on a disk built to it; no Godrej or Qualvision disk read; cameras and the index not decoded |
 
