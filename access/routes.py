@@ -30,7 +30,8 @@ from access import pages
 from access.policy import (ACCESS_WINDOW_HOURS, MIN_PASSWORD_LEN,
                            RATE_DECIDE_PER_MIN, RATE_GENERAL_PER_MIN,
                            ROLE_ADMIN, seconds_left)
-from access.service import AccessControl, check_csrf, csrf_token
+from access.service import (AccessControl, check_csrf, csrf_token,
+                            open_control)
 
 #: The session cookie.  Named for the product, not for a framework.
 COOKIE = "anokhidrishti_access"
@@ -451,7 +452,8 @@ class Gate:
 
 
 def build_gate(directory: str, cookie_secure: bool = False,
-               allow_signup: bool = True) -> Gate:
-    """Open the store in `directory` and return a gate over it."""
-    return Gate(AccessControl(directory), cookie_secure=cookie_secure,
-                allow_signup=allow_signup)
+               allow_signup: bool = True, backend: str = "sqlite",
+               supabase_env: str = "") -> Gate:
+    """Open the store (in `directory`, or Supabase) and return a gate over it."""
+    return Gate(open_control(directory, backend, supabase_env),
+                cookie_secure=cookie_secure, allow_signup=allow_signup)

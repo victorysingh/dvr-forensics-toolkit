@@ -152,10 +152,13 @@ def new_public_id(rand=secrets) -> str:
 class AccessControl:
     """Users, requests, sessions and the decisions about them."""
 
-    def __init__(self, directory: str, store: Optional[Store] = None):
+    def __init__(self, directory: str, store: Optional[Store] = None,
+                 audit: Optional[A.AccessAudit] = None):
+        # store/audit default to SQLite and a JSONL file in `directory`;
+        # open_control() passes Supabase's instead (same methods, same rows).
         self.dir = directory
         self.store = store or open_store(directory)
-        self.audit = open_audit(directory)
+        self.audit = audit or open_audit(directory)
         self.rate = RateLimiter()
         self._sweep_lock = threading.Lock()
         self._last_sweep = 0.0
@@ -678,5 +681,23 @@ class AccessControl:
         return stats
 
 
-def open_control(directory: str) -> AccessControl:
-    return AccessControl(directory)
+#: Where accounts, requests, sessions and the audit log can be kept.
+BACKENDS = ("sqlite", "supabase")
+
+
+def open_control(directory: str, backend: str = "sqlite",
+                 supabase_env: str = "") -> AccessControl:
+    """The access layer over the store named by `backend`.
+
+    sqlite, the default, keeps everything in `directory` on this machine - the
+    only choice on an air-gapped workstation.  supabase keeps it in a Supabase
+    project (access/supabase.py) and is used only when asked for by name, so
+    no test and no stray environment variable ever writes to a cloud database.
+    """
+    if backend == "sqlite":
+        return AccessControl(directory)
+    if backend == "supabase":
+        from access.supabase import open_supabase
+        store, audit = open_supabase(supabase_env)
+        return AccessControl(directory, store=store, audit=audit)   # type: ignore[arg-type]
+    raise ValueError(f"unknown access store {backend!r}; one of {', '.join(BACKENDS)}")
