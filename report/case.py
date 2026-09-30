@@ -434,7 +434,10 @@ def list_cases(root: str) -> list[dict]:
         state = _load(os.path.join(d, "scan_state.json")) or {}
         ident = state.get("identity", {})
         done = state.get("blocks_done", 0) * ident.get("block_size", 0)
+        top = (scan.get("detections") or [{}])[0]      # the detector's best match
         out.append({"id": name, "case_id": scan.get("case", {}).get("case_id", ""),
+                    "vendor": top.get("vendor", ""),
+                    "vendor_confidence": top.get("confidence", 0),
                     "device": (scan.get("device") or {}).get("path") or ident.get("path", ""),
                     "size_bytes": (scan.get("device") or {}).get("size_bytes")
                     or ident.get("size_bytes", 0),

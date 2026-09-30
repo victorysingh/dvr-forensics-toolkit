@@ -379,6 +379,13 @@
 
   /* Prose that should not run the full width of a 1080p screen. */
   .measure { max-width: 68ch; }
+
+  /* The screen rail slides in when a case is opened (the home has none). */
+  .rail-in { animation: rail-in 0.18s ease-out; }
+}
+
+@keyframes rail-in {
+  from { opacity: 0; transform: translateX(-10px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

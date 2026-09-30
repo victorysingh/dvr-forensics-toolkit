@@ -5091,6 +5091,269 @@ def test_access(tmp: str) -> None:
           not any(s in nasty for s in ("http://", "https://", "//cdn")))
 
 
+def test_access_supabase(tmp: str) -> None:
+    """The access gate's Supabase store (access/supabase.py), without a network.
+
+    The live round trip is validate/access_supabase.py, against a real project.
+    What is checked here is what must hold even with no network at all: the
+    cloud store is never chosen by accident, its secret key never leaks into a
+    message, database refusals map onto the same exceptions as SQLite's, and
+    the audit log it writes follows the ledger's chain rule - against a fake
+    table that refuses what the real one's triggers refuse.
+    """
+    print("\n[temporary access control on Supabase - offline]")
+
+    import hashlib as _hl
+    from urllib.parse import parse_qs as _pq, urlsplit as _us
+
+    from access import supabase as SB
+    from access.audit import open_audit
+    from access.service import AccessControl, open_control
+    from access.store import (PublicIdTaken, Store, StoreError, UsernameTaken)
+    from acquire.ledger import GENESIS_PREV
+
+    secret = "sb_secret_" + "k" * 31
+    saved = {k: os.environ.pop(k, None) for k in (SB.ENV_URL, SB.ENV_KEY)}
+    try:
+        # -- choosing the store --------------------------------------------
+        os.environ[SB.ENV_URL] = "https://example.supabase.co"
+        os.environ[SB.ENV_KEY] = secret
+        ac = open_control(os.path.join(tmp, "access-sb-default"))
+        check("with Supabase credentials in the environment, the default is "
+              "still the local SQLite store", isinstance(ac.store, Store))
+        try:
+            open_control(os.path.join(tmp, "x"), "mongodb")
+            check("an unknown store name is refused", False)
+        except ValueError:
+            check("an unknown store name is refused", True)
+
+        cfg = SB.load_config("/nonexistent/supabase.env")
+        check("credentials come from the environment first",
+              cfg.url == "https://example.supabase.co" and cfg.source == "environment")
+        check("the secret key never appears in the config's repr",
+              secret not in repr(cfg) and "<hidden>" in repr(cfg))
+        for k in (SB.ENV_URL, SB.ENV_KEY):
+            os.environ.pop(k, None)
+
+        # -- the credentials file ------------------------------------------
+        env = os.path.join(tmp, "sb.env")
+        with open(env, "w", encoding="utf-8") as fh:
+            fh.write(f"# comment\nSUPABASE_URL=https://abc.supabase.co/\n"
+                     f"SUPABASE_SERVICE_KEY=\"{secret}\"\n")
+        os.chmod(env, 0o600)
+        cfg = SB.load_config(env)
+        check("the file is read when the environment has nothing",
+              cfg.url == "https://abc.supabase.co" and cfg.key == secret
+              and cfg.source == env)
+
+        def refused(path: str) -> str:
+            try:
+                SB.load_config(path)
+            except SB.SupabaseConfigError as exc:
+                return str(exc)
+            return ""
+
+        if os.name == "posix":
+            os.chmod(env, 0o644)
+            msg = refused(env)
+            check("a credentials file other users can read is refused",
+                  "chmod 600" in msg and secret not in msg, msg)
+            os.chmod(env, 0o600)
+        msg = refused(os.path.join(tmp, "missing.env"))
+        check("missing credentials say where to put them",
+              SB.ENV_URL in msg and SB.ENV_KEY in msg, msg)
+        for bad, why in (("SUPABASE_URL=http://abc.supabase.co\nSUPABASE_SERVICE_KEY=" + secret,
+                          "https"),
+                         ("SUPABASE_URL=https://abc.supabase.co\nSUPABASE_SERVICE_KEY="
+                          "sb_publishable_xyz", "publishable")):
+            with open(env, "w", encoding="utf-8") as fh:
+                fh.write(bad)
+            msg = refused(env)
+            check(f"a wrong credential is refused ({why})",
+                  why in msg and "sb_publishable_xyz" not in msg, msg)
+        check("a missing-credentials error is a StoreError, so the CLI reports it",
+              issubclass(SB.SupabaseConfigError, StoreError))
+
+        # -- headers and filters -------------------------------------------
+        new = SB.Rest(SB.SupabaseConfig("https://abc.supabase.co", secret))
+        old = SB.Rest(SB.SupabaseConfig("https://abc.supabase.co", "eyJhbGciOi.jwt.sig"))
+        check("a new-style secret key goes in apikey alone",
+              new._headers["apikey"] == secret and "Authorization" not in new._headers)
+        check("a legacy JWT key is also sent as a bearer token",
+              old._headers.get("Authorization") == "Bearer eyJhbGciOi.jwt.sig")
+        w = SB._where(expires_utc=("gt", "2026-09-30T12:00:00.000Z"),
+                      status=("in", ("pending", "active")), revoked_utc=("is", "null"))
+        check("filters are encoded so a timestamp survives the query string",
+              _pq(w) == {"expires_utc": ["gt.2026-09-30T12:00:00.000Z"],
+                         "status": ["in.(pending,active)"], "revoked_utc": ["is.null"]}, w)
+
+        # -- database refusals map onto the store's exceptions -------------
+        class Canned:
+            url = "https://abc.supabase.co"
+
+            def __init__(self, *replies):
+                self.replies, self.calls = list(replies), []
+
+            def call(self, method, path, body=None, prefer=""):
+                self.calls.append((method, path, body, prefer))
+                return self.replies.pop(0)
+
+        dup = (409, {"code": "23505", "message": "duplicate key value"})
+        try:
+            SB.SupabaseStore(Canned(dup)).create_user("alice", "h")
+            check("a taken username raises UsernameTaken, as SQLite does", False)
+        except UsernameTaken:
+            check("a taken username raises UsernameTaken, as SQLite does", True)
+        try:
+            SB.SupabaseStore(Canned(dup)).create_request("123456789", 1, "a", "b")
+            check("a colliding 9-digit identifier raises PublicIdTaken", False)
+        except PublicIdTaken:
+            check("a colliding 9-digit identifier raises PublicIdTaken", True)
+        try:
+            SB.SupabaseStore(Canned((503, {"code": "PGRST000", "message": "db down"}))).user_by_id(1)
+            check("any other failure is a StoreError, and says what failed", False)
+        except StoreError as exc:
+            check("any other failure is a StoreError, and says what failed",
+                  "503" in str(exc) and "db down" in str(exc) and secret not in str(exc))
+        s = SB.SupabaseStore(Canned((200, [])))
+        check("deciding a request that is no longer pending returns None",
+              s.decide_request(1, "approved", "sup", "t", "t") is None)
+        method, path, body, prefer = s.rest.calls[0]
+        check("...and the pending test is part of the same UPDATE",
+              method == "PATCH" and "status=eq.pending" in path
+              and "return=representation" in prefer)
+
+        # -- the audit log -------------------------------------------------
+        class FakeTable:
+            """access_audit and access_audit_seal, refusing what the triggers refuse."""
+            url = "https://abc.supabase.co"
+
+            def __init__(self):
+                self.rows, self.seals, self.before_insert = [], {}, None
+
+            def call(self, method, path, body=None, prefer=""):
+                parts = _us(path)
+                table, q = parts.path.strip("/"), _pq(parts.query)
+                if table == "access_audit" and method == "GET":
+                    order = q.get("order", ["seq.asc"])[0]
+                    rows = sorted(self.rows, key=lambda r: r["seq"],
+                                  reverse=order.endswith("desc"))
+                    off = int(q.get("offset", ["0"])[0])
+                    lim = int(q.get("limit", [str(len(rows))])[0])
+                    return 200, [dict(r) for r in rows[off:off + lim]]
+                if table == "access_audit" and method == "POST":
+                    if self.before_insert:
+                        hook, self.before_insert = self.before_insert, None
+                        hook()
+                    if any(r["seq"] == body["seq"] for r in self.rows):
+                        return 409, {"code": "23505", "message": "duplicate key"}
+                    if _hl.sha256(body["entry"].encode()).hexdigest() != body["entry_hash"]:
+                        return 400, {"code": "P0001", "message": "entry_hash does not match"}
+                    prev = [r for r in self.rows if r["seq"] == body["seq"] - 1]
+                    want = prev[0]["entry_hash"] if prev else GENESIS_PREV
+                    if body["prev_hash"] != want or (body["seq"] and not prev):
+                        return 400, {"code": "P0001", "message": "does not link"}
+                    self.rows.append(dict(body))
+                    return 201, None
+                if table == "access_audit":
+                    return 403, {"code": "42501", "message": "permission denied"}
+                if table == "access_audit_seal" and method == "GET":
+                    return 200, [dict(v, key_id=k) for k, v in self.seals.items()]
+                if table == "access_audit_seal" and method == "PATCH":
+                    kid = q["key_id"][0].split(".", 1)[1]
+                    below = int(q["count"][0].split(".", 1)[1])
+                    if kid in self.seals and self.seals[kid]["count"] < below:
+                        self.seals[kid].update(body)
+                        return 200, [{"key_id": kid}]
+                    return 200, []
+                if table == "access_audit_seal" and method == "POST":
+                    self.seals.setdefault(body["key_id"],
+                                          {k: v for k, v in body.items() if k != "key_id"})
+                    return 201, None
+                return 404, {"code": "PGRST205", "message": "no such table"}
+
+        table = FakeTable()
+        log = SB.SupabaseAudit(table)
+        for i in range(3):
+            log.record("access.login_ok", f"user{i}", {"n": i, "name": "ಅನೋಖಿ"})
+        v = log.verify()
+        check("entries written to the table form an intact chain", v["valid"], str(v))
+        file_log = open_audit(os.path.join(tmp, "access-sb-shape"))
+        file_log.record("access.login_ok", "x", {})
+        check("each entry has exactly the fields the file log's entries have",
+              set(log.entries[0]) == set(file_log.entries[0]))
+        check("the stored text is exactly what the hash covers",
+              all(_hl.sha256(r["entry"].encode()).hexdigest() == r["entry_hash"]
+                  for r in table.rows))
+        check("a fresh reader re-verifies the chain from the table alone",
+              SB.SupabaseAudit(table).verify()["valid"])
+
+        other = SB.SupabaseAudit(table)
+        table.before_insert = lambda: other.record("access.logout", "racer", {})
+        log.record("access.login_fail", "loser-of-the-race", {})
+        fresh = SB.SupabaseAudit(table)
+        check("two writers racing for one entry number: the loser re-reads and "
+              "follows on, and the chain stays intact",
+              len(table.rows) == 5 and fresh.verify()["valid"]
+              and [e["actor"] for e in fresh.entries[-2:]] == ["racer", "loser-of-the-race"])
+
+        saved_page = SB.PAGE
+        SB.PAGE = 2
+        try:
+            check("a long log is read back in pages, all of it",
+                  len(SB.SupabaseAudit(table).entries) == 5)
+        finally:
+            SB.PAGE = saved_page
+        check("recent() is newest first",
+              [e["seq"] for e in log.recent(2)] == [4, 3])
+        check("recent() can be narrowed to one kind of event",
+              [e["actor"] for e in log.recent(10, "access.logout")] == ["racer"])
+
+        seal = log.verify_seal()
+        check("every append re-seals, and the seal covers the whole log",
+              seal["valid"] and seal.get("count") == 5, str(seal))
+        log._seal_row(1, table.rows[0]["entry_hash"])
+        check("a late re-seal never moves the seal backwards",
+              list(table.seals.values())[0]["count"] == 5)
+
+        original = table.rows[1]["entry"]
+        table.rows[1]["entry"] = original.replace("user1", "someone-else")
+        broken = SB.SupabaseAudit(table).verify()
+        check("an entry edited behind the database's back is caught, at its number",
+              not broken["valid"] and broken["broken_at_seq"] == 1, str(broken))
+        table.rows[1]["entry"] = original
+        table.rows.pop()
+        cut = SB.SupabaseAudit(table)
+        check("entries cut off the end are caught by the seal, not by the chain",
+              cut.verify()["valid"] and not cut.verify_seal()["valid"])
+
+        # -- wired through the service -------------------------------------
+        ac = AccessControl(os.path.join(tmp, "access-sb-wired"), audit=SB.SupabaseAudit(FakeTable()))
+        ac.create_user("wired", "wiredpassword1", role="admin")
+        check("the service writes its audit events through the injected log",
+              [e["action"] for e in ac.audit.entries] == ["access.user_created"])
+
+        # -- behind a reverse proxy ----------------------------------------
+        from access.routes import Gate
+
+        class _H:
+            client_address = ("127.0.0.1", 5555)
+            headers = {"X-Forwarded-For": "203.0.113.7, 76.76.21.9"}
+
+        check("by default the rate limits key on the connecting address",
+              Gate(ac)._client(_H()) == "127.0.0.1")
+        check("--trust-proxy keys them on the visitor the first proxy saw",
+              Gate(ac, trust_proxy=True)._client(_H()) == "203.0.113.7")
+        check("--cookie-secure marks the session cookie Secure, and only then",
+              "Secure" in Gate(ac, cookie_secure=True)._cookie_header("t", 60)
+              and "Secure" not in Gate(ac)._cookie_header("t", 60))
+    finally:
+        for k, v in saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     # seal keys go under the test folder, never into the examiner's own ~/.ps26150
@@ -5163,6 +5426,7 @@ def main() -> int:
         test_godrej(tmp)
         test_daylight(tmp)
         test_access(tmp)
+        test_access_supabase(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -161,7 +161,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
-          access_dir: str = "", allow_signup: bool = True) -> None:
+          access_dir: str = "", allow_signup: bool = True,
+          access_store: str = "sqlite", supabase_env: str = "",
+          cookie_secure: bool = False, trust_proxy: bool = False) -> None:
     """Serve the console on loopback, optionally behind the approval gate.
 
     `access_dir` defaults to a dot-directory inside the case folder.  It holds
@@ -176,18 +178,22 @@ def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
         from access.routes import build_gate
 
         directory = access_dir or os.path.join(out_root, ".access")
-        Handler.gate = build_gate(directory, allow_signup=allow_signup)
+        Handler.gate = build_gate(directory, allow_signup=allow_signup,
+                                  backend=access_store, supabase_env=supabase_env,
+                                  cookie_secure=cookie_secure, trust_proxy=trust_proxy)
         if not Handler.gate.ac.has_admin:
             print("  WARNING: no administrator account exists, so no request "
                   "can ever be approved.")
-            print("           create one first:  "
-                  "cli.py access-admin --username <name>")
+            print("           create one first:  cli.py access-admin "
+                  + ("--access-store supabase " if access_store == "supabase" else "")
+                  + "--username <name>")
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"AnokhiDrishti on http://127.0.0.1:{port}/  (cases from {os.path.abspath(out_root)})")
     if require_access:
         print(f"  approval gate ON - sign in at http://127.0.0.1:{port}/access/login")
         print(f"  administrators approve at http://127.0.0.1:{port}/admin")
+        print(f"  accounts and audit log kept in {Handler.gate.ac.store.path}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

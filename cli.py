@@ -855,8 +855,16 @@ def cmd_report(args) -> int:
 def cmd_serve(args) -> int:
     """Start the local web UI (loopback only, read-only viewer)."""
     from viewer.server import serve
-    serve(args.out, args.port, require_access=args.require_access,
-          access_dir=args.access_dir, allow_signup=not args.no_signup)
+    try:
+        serve(args.out, args.port, require_access=args.require_access,
+              access_dir=args.access_dir, allow_signup=not args.no_signup,
+              access_store=args.access_store, supabase_env=args.supabase_env,
+              cookie_secure=args.cookie_secure, trust_proxy=args.trust_proxy)
+    except Exception as exc:                               # noqa: BLE001
+        from access.store import StoreError   # imported only if the gate was asked for
+        if isinstance(exc, StoreError):
+            raise SystemExit(f"  [!] access store: {exc}")
+        raise
     return 0
 
 
@@ -866,10 +874,14 @@ def cmd_serve(args) -> int:
 # HTTP, so an attacker who can reach the sign-up form cannot mint one.
 # ---------------------------------------------------------------------------
 def _access(args):
-    from access.service import AccessControl
+    from access.service import open_control
+    from access.store import StoreError
 
     directory = args.access_dir or os.path.join(args.out, ".access")
-    return AccessControl(directory)
+    try:
+        return open_control(directory, args.access_store, args.supabase_env)
+    except StoreError as exc:           # includes missing Supabase credentials
+        raise SystemExit(f"  [!] access store: {exc}")
 
 
 def _ask_password(confirm: bool = True, from_stdin: bool = False) -> str:
@@ -2522,6 +2534,29 @@ def main() -> int:
     p.add_argument("--no-signup", action="store_true",
                    help="with --require-access, close the sign-up form so "
                         "only 'access-user --action add' can make an account")
+
+    def _store_args(parser):
+        parser.add_argument("--access-store", default="sqlite",
+                            choices=["sqlite", "supabase"],
+                            help="where accounts, requests and the access audit "
+                                 "log live: sqlite in the access directory "
+                                 "(default; offline), or a Supabase project "
+                                 "(hosted deployments; needs its credentials)")
+        parser.add_argument("--supabase-env", default="",
+                            help="with --access-store supabase: a file holding "
+                                 "SUPABASE_URL and SUPABASE_SERVICE_KEY, read when "
+                                 "they are not in the environment (default "
+                                 "~/.config/anokhidrishti/supabase.env)")
+
+    _store_args(p)
+    p.add_argument("--cookie-secure", action="store_true",
+                   help="with --require-access, mark the session cookie Secure: "
+                        "for a deployment reached over HTTPS through a proxy "
+                        "(a browser drops a Secure cookie on plain HTTP)")
+    p.add_argument("--trust-proxy", action="store_true",
+                   help="with --require-access, key the per-address rate limits "
+                        "on X-Forwarded-For: only behind a reverse proxy, where "
+                        "every request otherwise shares the proxy's address")
     p.set_defaults(func=cmd_serve)
 
     # -- temporary access control ------------------------------------------
@@ -2531,6 +2566,7 @@ def main() -> int:
                                  "to <out>/.access")
         parser.add_argument("--access-dir", default="",
                             help="explicit access store directory")
+        _store_args(parser)
 
     p = sub.add_parser("access-admin",
                        help="create or promote an administrator who can "

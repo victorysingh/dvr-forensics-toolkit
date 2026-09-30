@@ -1,0 +1,19 @@
+# HTTPS in front of the console.  SITE is the server's public name, set by
+# deploy/setup_server.sh (an <ip>.sslip.io name unless a domain is given);
+# Caddy obtains and renews its certificate on its own.
+{
+	# Vercel forwards visitors here; keep the address Vercel saw at the
+	# front of X-Forwarded-For so the app's --trust-proxy can key on it.
+	servers {
+		trusted_proxies static 0.0.0.0/0 ::/0
+	}
+}
+
+{$SITE} {
+	encode gzip
+	reverse_proxy 127.0.0.1:8150
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
