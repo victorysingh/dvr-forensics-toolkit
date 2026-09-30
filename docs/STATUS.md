@@ -104,11 +104,12 @@ validate-export                      recovered footage byte-matched against the 
 combine                              several recorders in one view - on one axis only where
                                      every case states its recorder's timezone
 report / verify / prove / serve      report, re-verification, Merkle proofs, viewer
+access-admin / -user / -request      temporary approved access to the console (docs/ACCESS_CONTROL.md)
 survey                               draft the layout of an unknown vendor's disk
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 580 tests, no hardware, ~1 minute (582 with ffmpeg on PATH). Parsers against corrupted disks: `python -m validate.fuzz_parsers` (VALIDATION_REPORT §8o).
+`python tests/test_pipeline.py` — 661 tests, no hardware, ~1 minute (663 with ffmpeg on PATH). Parsers against corrupted disks: `python -m validate.fuzz_parsers` (VALIDATION_REPORT §8o).
 
 ## 4. Things learned the hard way
 

@@ -358,7 +358,21 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
             "thumbnails": [_labelled_thumb(t, c) for c in an.get("clips", [])
                            for t in c.get("thumbnails", [])][:60],
             "parked": [dict(s, clip=c["clip"]) for c in an.get("clips", [])
-                       for s in c.get("parked_vehicles", [])][:100]}
+                       for s in c.get("parked_vehicles", [])][:100],
+            # How the detector was run, and what it declined to count.  The UI
+            # has to be able to say these: a recall figure means nothing
+            # without the tiling and the sampling rate that produced it, and a
+            # total that quietly folded in static boxes would overstate what
+            # was found.  All of it is passed through as the layer wrote it.
+            "model_set": an.get("model_set"),
+            "rule": an.get("rule"),
+            "sample_fps": an.get("sample_fps"),
+            "tiling": an.get("tiling"),
+            "rotation": an.get("rotation"),
+            "static_totals": an.get("static_totals", {}),
+            "static_rule": an.get("static_rule"),
+            "not_counted": an.get("flagged_not_counted", {}),
+            "implausible_rule": an.get("implausible_rule")}
 
     fs = _load(j("analytics", "face_search.json"))
     if fs:

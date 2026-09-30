@@ -50,17 +50,63 @@ export default function AILeads({ c }) {
             src="analytics/analytics.json" />
         ))}
         <Kpi label="Frames analysed" value={an.frames_analysed}
-          sub={`${num(an.clips)} clip(s)`} src="analytics/analytics.json" />
+          sub={`${num(an.clips)} clip(s)${
+            an.sample_fps ? ` at ${an.sample_fps} fps` : ""}`}
+          src="analytics/analytics.json" />
       </div>
 
-      <Section>
+      {/* What the detector saw but did not count. Folding these into the
+          totals above would overstate what was found, so they are shown
+          apart, with the rule that excluded them. */}
+      {(Object.keys(an.static_totals || {}).length > 0
+        || Object.keys(an.not_counted || {}).length > 0) && (
+        <Section title="Seen, but not counted"
+          hint="kept out of the totals above, with the rule that excluded each">
+          <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(215px,1fr))]">
+            {Object.entries(an.static_totals || {}).map(([k, v]) => (
+              <Kpi key={`s-${k}`} label={`static ${k.replace(/_/g, " ")}`} value={v}
+                sub="same box, many frames" src="analytics/analytics.json" />
+            ))}
+            {Object.entries(an.not_counted || {}).map(([k, v]) => (
+              <Kpi key={`n-${k}`} label={`implausible ${k.replace(/_/g, " ")}`} value={v}
+                sub="failed the plausibility rule" src="analytics/analytics.json" />
+            ))}
+          </div>
+          {(an.static_rule || an.implausible_rule) && (
+            <Card className="mt-3">
+              <DL rows={[
+                an.static_rule && ["Static rule", an.static_rule],
+                an.implausible_rule && ["Implausible rule", an.implausible_rule],
+              ]} />
+            </Card>
+          )}
+        </Section>
+      )}
+
+      <Section title="How it was run"
+        hint="a recall figure means nothing without these">
         <Card>
           <DL rows={[
             ["Status", <Pill status={an.status} />],
+            an.model_set && ["Model set", <span className="font-mono">{an.model_set}</span>],
+            an.rule && ["Rule", an.rule],
+            an.tiling && ["Tiling", <>
+              {an.tiling.grid}
+              <div className="dim text-[11.5px]">
+                {an.tiling.overlap != null && <>overlap {an.tiling.overlap} &middot; </>}
+                decoded at {an.tiling.decoded_at}
+              </div>
+              {an.tiling.how && <div className="dim text-[11.5px]">{an.tiling.how}</div>}
+            </>],
+            an.rotation && ["Rotation", <>
+              {an.rotation.mode}
+              {an.rotation.frames_turned != null && <>
+                {" "}&middot; {num(an.rotation.frames_turned)} frames turned</>}
+              {an.rotation.rule && (
+                <div className="dim text-[11.5px]">{an.rotation.rule}</div>)}
+            </>],
             ["Thresholds",
               <span className="font-mono break-all">{JSON.stringify(an.thresholds || {})}</span>],
-            an.tiling && ["Tiling",
-              <span className="font-mono break-all">{JSON.stringify(an.tiling)}</span>],
             ["Report", <Hash value={an.sha256} len={10} />],
           ]} />
         </Card>

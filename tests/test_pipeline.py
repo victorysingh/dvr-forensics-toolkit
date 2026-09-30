@@ -4666,6 +4666,431 @@ def test_case_export(tmp: str) -> None:
           {n["@id"] for n in doc["@graph"]} <= {n["@id"] for n in again["@graph"]})
 
 
+def test_access(tmp: str) -> None:
+    """Temporary, administrator-approved access to the console (access/).
+
+    The properties checked here are the ones the whole feature rests on: a
+    correct password alone opens nothing, the 9-digit identifier is not a
+    credential, the eight hours are enforced from the stored deadline rather
+    than from a timer, revocation lands on the very next request, and the
+    audit chain survives several writers at once.
+    """
+    print("\n[temporary access control]")
+
+    import http.cookiejar
+    import re as _re
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from access import pages
+    from access.audit import open_audit
+    from access.passwords import (hash_password, needs_rehash, verify_password)
+    from access.policy import (ACCESS_WINDOW_HOURS, ACTIVE, EXPIRED, PENDING,
+                               RATE_AUTH_BURST_PER_MIN, RATE_AUTH_PER_MIN,
+                               RATE_DECIDE_PER_MIN, REJECTED, REVOKED,
+                               is_past, now, parse, plus, stamp)
+    from access.routes import COOKIE, Gate
+    from access.service import (AccessControl, check_csrf, csrf_token,
+                                new_public_id)
+
+    root = os.path.join(tmp, "access")
+
+    # -- passwords ---------------------------------------------------------
+    h = hash_password("a decent passphrase")
+    check("a password verifies against its own hash and nothing else",
+          verify_password("a decent passphrase", h)
+          and not verify_password("a decent passphras", h)
+          and not verify_password("", h))
+    check("a malformed hash record reads as a wrong password, not a crash",
+          not verify_password("x", "garbage") and not verify_password("x", "")
+          and not verify_password("x", "scrypt$1$2$3$zz$zz"))
+    check("two hashes of the same password differ (per-record salt)",
+          hash_password("same password here") != hash_password("same password here"))
+    check("today's parameters do not ask to be rehashed", not needs_rehash(h))
+    check("a weaker stored record does ask to be rehashed",
+          needs_rehash("pbkdf2_sha256$1000$aa$bb"))
+
+    # -- the clock ---------------------------------------------------------
+    check("an unreadable deadline is never treated as elapsed",
+          not is_past("") and not is_past("not a date") and not is_past(None))
+    check("a deadline in the past is elapsed, one in the future is not",
+          is_past(stamp(plus(now(), seconds=-1)))
+          and not is_past(stamp(plus(now(), hours=1))))
+
+    # -- identifiers -------------------------------------------------------
+    ids = [new_public_id() for _ in range(500)]
+    check("the request identifier is 9 digits and never starts with a zero",
+          all(len(i) == 9 and i.isdigit() and i[0] != "0" for i in ids))
+    check("identifiers are drawn at random, not counted up",
+          len(set(ids)) > 480)
+
+    # -- the state machine -------------------------------------------------
+    ac = AccessControl(root)
+    check("a fresh store has no administrator, so nothing could be approved",
+          not ac.has_admin)
+    check("an administrator is made from the command line only",
+          ac.create_user("super", "supersecret123", role="admin").ok
+          and ac.has_admin)
+    check("a self-made account is a plain user, never an administrator",
+          ac.signup("alice", "alicepassword1").ok
+          and ac.store.user_by_name("alice")["role"] == "user")
+    check("a short password is refused", not ac.signup("bob", "short").ok)
+    check("a username that is not a username is refused",
+          not ac.signup("Bob Smith!", "longenoughpassword").ok)
+    check("the same username cannot be taken twice",
+          not ac.signup("alice", "anotherpassword1").ok)
+
+    logged = ac.login("alice", "alicepassword1", "127.0.0.1", "UA/1")
+    tok_a, req_a = logged.data["token"], logged.data["request"]
+    check("a correct password produces a PENDING request, not access",
+          logged.ok and req_a["status"] == PENDING)
+    d = ac.authorize(tok_a, "127.0.0.1", "/")
+    check("a signed-in user with a pending request is refused the console",
+          not d.allowed and d.reason == PENDING
+          and d.redirect == "/" + req_a["public_id"])
+    check("signing in again reuses the same waiting room",
+          ac.login("alice", "alicepassword1").data["request"]["public_id"]
+          == req_a["public_id"])
+
+    check("an unknown user and a wrong password give the identical message",
+          ac.login("nobody", "whatever").message
+          == ac.login("alice", "wrongpassword").message)
+
+    # -- approval ----------------------------------------------------------
+    check("a plain user cannot approve their own request",
+          ac.store.user_by_name("alice")["role"] != "admin")
+    check("approving a request that does not exist fails",
+          not ac.approve("000000001", "super").ok)
+    ap = ac.approve(req_a["public_id"], "super")
+    check("an administrator approves, and the grant carries a deadline",
+          ap.ok and ap.data["request"]["access_expires_utc"])
+    check("the same request cannot be approved twice",
+          not ac.approve(req_a["public_id"], "super").ok)
+    check("an approved request cannot then be rejected",
+          not ac.reject(req_a["public_id"], "super").ok)
+
+    d = ac.authorize(tok_a, "127.0.0.1", "/")
+    check("the approved user reaches the console, and the row becomes ACTIVE",
+          d.allowed and d.request["status"] == ACTIVE)
+    check("the session token is rotated the first time a grant is used",
+          bool(d.new_token) and d.new_token != tok_a)
+    check("the token held before approval is dead after the rotation",
+          not ac.authorize(tok_a, "127.0.0.1", "/").allowed)
+    tok_a2 = d.new_token
+    check("the rotated token works, and does not rotate again",
+          ac.authorize(tok_a2).allowed
+          and ac.authorize(tok_a2).new_token is None)
+
+    granted = ac.store.request_by_public_id(req_a["public_id"])
+    span = (parse(granted["access_expires_utc"])
+            - parse(granted["decided_utc"])).total_seconds()
+    check(f"the grant is {ACCESS_WINDOW_HOURS} hours from approval, not from "
+          f"the request", abs(span - ACCESS_WINDOW_HOURS * 3600) < 5,
+          f"{span}s")
+
+    # -- the eight hours are enforced from the stored deadline -------------
+    with ac.store._conn() as c:                       # noqa: SLF001
+        c.execute("UPDATE requests SET access_expires_utc=? WHERE id=?",
+                  (stamp(plus(now(), seconds=-1)), granted["id"]))
+    d = ac.authorize(tok_a2, "127.0.0.1", "/")
+    check("a grant whose deadline has passed stops working immediately",
+          not d.allowed and d.reason == EXPIRED)
+    check("... and the row is moved to EXPIRED",
+          ac.store.request_by_public_id(req_a["public_id"])["status"] == EXPIRED)
+    check("... and its sessions are dead, not merely ignored",
+          ac.store.session_by_token(tok_a2) is None)
+
+    # -- a pending request times out on its own ---------------------------
+    ac.rate.reset()          # dozens of sign-ins from one address here
+    ac.signup("carol", "carolpassword1")
+    tok_c = ac.login("carol", "carolpassword1").data["token"]
+    req_c = ac.store.live_request_for_user(
+        ac.store.user_by_name("carol")["id"])
+    with ac.store._conn() as c:                       # noqa: SLF001
+        c.execute("UPDATE requests SET request_expires_utc=? WHERE id=?",
+                  (stamp(plus(now(), seconds=-1)), req_c["id"]))
+    check("a request nobody decided in time expires by itself",
+          ac.status_of(req_c["public_id"])["status"] == EXPIRED)
+    check("... and can no longer be approved",
+          not ac.approve(req_c["public_id"], "super").ok)
+    check("... and grants nothing", not ac.authorize(tok_c).allowed)
+
+    # -- rejection ---------------------------------------------------------
+    ac.rate.reset()
+    ac.signup("dave", "davepassword123")
+    tok_d = ac.login("dave", "davepassword123").data["token"]
+    req_d = ac.store.live_request_for_user(ac.store.user_by_name("dave")["id"])
+    check("a rejected request is refused and says so",
+          ac.reject(req_d["public_id"], "super", "not on this case").ok
+          and ac.authorize(tok_d).reason == REJECTED)
+
+    # -- revocation is immediate ------------------------------------------
+    ac.rate.reset()
+    ac.signup("erin", "erinpassword123")
+    tok_e = ac.login("erin", "erinpassword123").data["token"]
+    req_e = ac.store.live_request_for_user(ac.store.user_by_name("erin")["id"])
+    ac.approve(req_e["public_id"], "super")
+    in_e = ac.authorize(tok_e)
+    check("erin is in", in_e.allowed)
+    tok_e = in_e.new_token or tok_e       # the grant rotated her token
+    rev = ac.revoke(req_e["public_id"], "super", "shift ended")
+    check("revoking reports the sessions it killed",
+          rev.ok and rev.data["sessions_revoked"] >= 1)
+    check("a revoked user is refused on the very next request, and told why",
+          ac.authorize(tok_e).reason == REVOKED)
+    check("nothing is left to revoke afterwards",
+          not ac.revoke(req_e["public_id"], "super").ok)
+
+    # -- administrators do not queue --------------------------------------
+    ac.rate.reset()
+    tok_s = ac.login("super", "supersecret123").data["token"]
+    ds = ac.authorize(tok_s, "127.0.0.1", "/admin")
+    check("an administrator reaches the console without an approval",
+          ds.allowed and ds.by_role and ds.request is None)
+
+    # -- brute force -------------------------------------------------------
+    ac.rate.reset()
+    ac.signup("frank", "frankpassword123")
+    for _ in range(5):
+        ac.login("frank", "wrongpassword")
+    locked = ac.login("frank", "frankpassword123")
+    check("five wrong passwords lock the account, even against the right one",
+          not locked.ok and "Try again in" in locked.message)
+    check("... and the lock is recorded, not just remembered",
+          ac.store.user_by_name("frank")["locked_until_utc"])
+    ac.store.clear_lock(ac.store.user_by_name("frank")["id"])
+    check("... and clearing the lock lets the right password back in",
+          ac.login("frank", "frankpassword123").ok)
+
+    ac.rate.reset()
+    check("a disabled account cannot sign in",
+          ac.set_disabled("frank", True).ok
+          and not ac.login("frank", "frankpassword123").ok)
+    check("the last administrator cannot be disabled or demoted",
+          not ac.set_disabled("super", True).ok
+          and not ac.set_role("super", "user").ok)
+
+    check("changing a password ends every session it had opened",
+          ac.set_password("erin", "erinbrandnewpass").data["sessions_revoked"] >= 0
+          and not ac.authorize(tok_e).allowed)
+
+    # -- what the waiting room may reveal ---------------------------------
+    pub = ac.status_of(req_e["public_id"])
+    check("the public status of a request names no user and no session",
+          "username" not in pub and "user_id" not in pub
+          and "token" not in json.dumps(pub))
+    check("an identifier that was never issued reads as absent",
+          ac.status_of("000000000") is None)
+
+    # -- CSRF --------------------------------------------------------------
+    check("a form token matches only the session it came from",
+          check_csrf(tok_s, csrf_token(tok_s))
+          and not check_csrf(tok_s, csrf_token("other"))
+          and not check_csrf(tok_s, ""))
+
+    # -- rate limiting -----------------------------------------------------
+    ac.rate.reset()
+    allowed = sum(1 for _ in range(40) if ac.rate.allow("auth:1.2.3.4", 10))
+    check("a rate-limit bucket stops at its ceiling", allowed == 10)
+    check("... and a different key is unaffected",
+          ac.rate.allow("auth:5.6.7.8", 10))
+
+    # Everything reaches a loopback server from 127.0.0.1, so keying the
+    # sign-in limit by address alone would make it one bucket for the whole
+    # machine: one person fumbling a password would lock out everybody else.
+    ac.rate.reset()
+    spent = sum(1 for _ in range(RATE_AUTH_PER_MIN + 4)
+                if ac.auth_allowed("127.0.0.1", "gail"))
+    check("sign-in is limited per account, not per machine",
+          spent == RATE_AUTH_PER_MIN
+          and ac.auth_allowed("127.0.0.1", "someone-else"),
+          f"gail spent {spent}")
+    check("... but one address cannot dodge it by rotating usernames",
+          not all(ac.auth_allowed("127.0.0.1", f"u{i}")
+                  for i in range(RATE_AUTH_BURST_PER_MIN + 2)))
+    ac.rate.reset()
+    check("an administrator's decisions have their own, roomier budget",
+          all(ac.rate.allow("decide:127.0.0.1", RATE_DECIDE_PER_MIN)
+              for _ in range(RATE_DECIDE_PER_MIN))
+          and ac.auth_allowed("127.0.0.1", "gail"))
+
+    # -- the audit log -----------------------------------------------------
+    fresh = open_audit(root)
+    v = fresh.verify()
+    check("every access decision is on a hash chain that verifies",
+          v["valid"] and len(fresh.entries) > 20, v["message"])
+    actions = {e["action"] for e in fresh.entries}
+    check("the log names the events an auditor would look for",
+          {"access.login_ok", "access.login_fail", "access.request_created",
+           "access.request_approved", "access.request_rejected",
+           "access.request_revoked", "access.activated",
+           "access.lockout"} <= actions,
+          str(sorted(actions)))
+    whole = json.dumps(fresh.entries)
+    secrets_used = ("alicepassword1", "supersecret123", "carolpassword1",
+                    "davepassword123", "erinpassword123", "frankpassword123",
+                    "scrypt$", "pbkdf2_sha256$", tok_s, tok_a, tok_a2)
+    check("no password, stored hash or session token reaches the log",
+          not any(sec and sec in whole for sec in secrets_used),
+          str([sec[:12] for sec in secrets_used if sec and sec in whole]))
+
+    line = os.path.join(root, "access_audit.jsonl")
+    body = open(line, encoding="utf-8").read().splitlines()
+    body[3] = json.dumps({**json.loads(body[3]), "actor": "someone else"},
+                         sort_keys=True, separators=(",", ":"))
+    open(line + ".tampered", "w", encoding="utf-8").write("\n".join(body) + "\n")
+    from access.audit import AccessAudit
+    bad = AccessAudit(line + ".tampered").verify()
+    check("editing one past entry is detected, and the entry named",
+          not bad["valid"] and bad["broken_at_seq"] == 3, str(bad))
+
+    # two writers, one file: the chain must still verify afterwards
+    w1, w2 = open_audit(root), open_audit(root)
+    before = len(open_audit(root).entries)
+    for i in range(6):
+        (w1 if i % 2 else w2).record("access.login_ok", f"w{i % 2}", {"i": i})
+    after = open_audit(root)
+    check("two writers on one log interleave without breaking the chain",
+          after.verify()["valid"] and len(after.entries) == before + 6,
+          after.verify()["message"])
+
+    # -- over real HTTP ----------------------------------------------------
+    from viewer.server import Handler
+
+    class _H(Handler):
+        out_root = "out"
+        gate = Gate(AccessControl(os.path.join(tmp, "access-http")))
+
+    _H.gate.ac.create_user("boss", "bosspassword123", role="admin")
+    _H.gate.ac.signup("gail", "gailpassword123")
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _H)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+
+    def _open():
+        jar = http.cookiejar.CookieJar()
+        return urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(jar), _NoRedirect())
+
+    def _go(op, path, data=None):
+        rq = urllib.request.Request(base + path, data=data,
+                                    method="POST" if data else "GET")
+        if data:
+            rq.add_header("Content-Type", "application/x-www-form-urlencoded")
+        try:
+            with op.open(rq) as r:
+                return r.status, r.headers, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read()
+
+    try:
+        op = _open()
+        st, hd, _ = _go(op, "/")
+        check("over HTTP, the console itself is behind the gate",
+              st == 303 and hd.get("Location") == "/access/login", f"{st}")
+        st, hd, _ = _go(op, "/api/cases")
+        check("over HTTP, so is the JSON the console reads",
+              st == 303, f"{st}")
+
+        st, hd, body = _go(op, "/access/login")
+        tokf = _re.search(rb'name="csrf" value="([^"]*)"', body).group(1).decode()
+        check("the login form is served to an anonymous browser", st == 200)
+        check("its cookie is HttpOnly and SameSite=Strict",
+              "HttpOnly" in hd.get("Set-Cookie", "")
+              and "SameSite=Strict" in hd.get("Set-Cookie", ""))
+        check("a content-security policy is sent with it",
+              "Content-Security-Policy" in hd
+              and "frame-ancestors 'none'" in hd["Content-Security-Policy"])
+
+        st, _, _ = _go(op, "/access/login",
+                       b"csrf=wrong&username=gail&password=gailpassword123")
+        check("a login post without the form token is refused", st == 400, f"{st}")
+
+        st, hd, _ = _go(op, "/access/login",
+                        f"csrf={tokf}&username=gail&password=gailpassword123"
+                        .encode())
+        loc = hd.get("Location", "")
+        check("a correct password redirects to a 9-digit waiting room",
+              st == 303 and bool(_re.fullmatch(r"/[1-9]\d{8}", loc)), f"{st} {loc}")
+        pid = loc[1:]
+
+        st, _, body = _go(op, loc)
+        check("the waiting room renders and shows the identifier",
+              st == 200 and pid.encode() in body
+              and b"Waiting for administrator approval" in body)
+        st, _, body = _go(op, f"/access/status/{pid}")
+        check("the status endpoint answers with the state and nothing else",
+              json.loads(body)["status"] == PENDING
+              and "username" not in body.decode())
+
+        stranger = _open()
+        st, hd, _ = _go(stranger, "/")
+        check("knowing the identifier gains a stranger nothing",
+              st == 303 and hd.get("Location") == "/access/login", f"{st}")
+
+        _H.gate.ac.approve(pid, "boss")
+        st, hd, body = _go(op, "/")
+        check("once approved, the browser is served the real console",
+              st == 200 and b'id="root"' in body, f"{st}")
+        check("and its token is rotated on that first authorised request",
+              COOKIE + "=" in hd.get("Set-Cookie", ""))
+        st, _, _ = _go(op, "/api/cases")
+        check("the case API answers an approved browser", st == 200, f"{st}")
+
+        _H.gate.ac.revoke(pid, "boss", "test")
+        st, hd, _ = _go(op, "/")
+        check("a revoked browser loses the console on its next request",
+              st == 303, f"{st}")
+        st, _, _ = _go(op, "/api/cases")
+        check("... and the API with it", st == 303, f"{st}")
+
+        adm = _open()
+        st, _, body = _go(adm, "/access/login")
+        tok2 = _re.search(rb'name="csrf" value="([^"]*)"', body).group(1).decode()
+        st, hd, _ = _go(adm, "/access/login",
+                        f"csrf={tok2}&username=boss&password=bosspassword123"
+                        .encode())
+        check("an administrator is sent straight to the panel",
+              st == 303 and hd.get("Location") == "/admin", f"{st}")
+        st, _, body = _go(adm, "/admin")
+        check("the panel renders and reports the chain state",
+              st == 200 and b"Access administration" in body
+              and b"chain intact" in body)
+        st, _, _ = _go(adm, "/admin/decide",
+                       b"csrf=nope&public_id=1&action=approve")
+        check("a decision without the form token changes nothing", st == 200)
+
+        # A revoked browser is nobody, and nobody is redirected rather than
+        # refused - so the role check needs a plain user who is signed in now.
+        _H.gate.ac.signup("hank", "hankpassword123")
+        plain = _open()
+        st, _, body = _go(plain, "/access/login")
+        tok3 = _re.search(rb'name="csrf" value="([^"]*)"', body).group(1).decode()
+        _go(plain, "/access/login",
+            f"csrf={tok3}&username=hank&password=hankpassword123".encode())
+        st, _, body = _go(plain, "/admin")
+        check("a signed-in plain user is refused the panel outright",
+              st == 403 and b"cannot approve" in body, f"{st}")
+    finally:
+        httpd.shutdown()
+
+    # -- escaping ----------------------------------------------------------
+    nasty = pages.waiting_page("123456789", PENDING, "x",
+                               username="<img src=x onerror=alert(1)>").decode()
+    check("a hostile username is escaped, never rendered as markup",
+          "<img src=x" not in nasty and "&lt;img" in nasty)
+    check("no page in the gate reaches for anything off this machine",
+          not any(s in nasty for s in ("http://", "https://", "//cdn")))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     # seal keys go under the test folder, never into the examiner's own ~/.ps26150
@@ -4737,6 +5162,7 @@ def main() -> int:
         test_heimvision(tmp)
         test_godrej(tmp)
         test_daylight(tmp)
+        test_access(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
