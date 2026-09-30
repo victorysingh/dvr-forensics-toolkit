@@ -128,6 +128,38 @@ deliberately *not* named `custody_ledger.jsonl`: `report.case.list_cases`
 treats any directory holding a file of that name as a case, and the access log
 would otherwise appear in the console's own case list.
 
+## Hosted deployments: the Supabase store
+
+The workstation keeps everything above in `<out>/.access/`. A hosted
+demonstration cannot: its machine's disk does not survive a restart. So the
+same store and log also exist over a Supabase project (`access/supabase.py`),
+method for method and row for row, and everything above the store is
+unchanged.
+
+```bash
+# once, in the project's SQL editor: access/supabase_schema.sql
+cli.py access-admin --access-store supabase --username supervisor
+cli.py serve --require-access --access-store supabase     # + --cookie-secure --trust-proxy behind HTTPS
+```
+
+* **Never by accident.** SQLite stays the default; Supabase is used only with
+  `--access-store supabase`, never picked up from the environment, so no test
+  run or offline machine writes to a database whose log cannot be cleaned.
+* **The key** is the project's secret key. It comes from `SUPABASE_URL` /
+  `SUPABASE_SERVICE_KEY` or a `0600` file (`--supabase-env`, default
+  `~/.config/anokhidrishti/supabase.env`), and it never appears in a message.
+* **The database enforces the log as well.** Row-level security is on with
+  no policies, and the public roles are revoked. Triggers refuse any UPDATE,
+  DELETE or TRUNCATE on `access_audit`, even by the owner, and any row whose
+  hash or link is wrong. The server's own key can only SELECT and INSERT
+  there. The seal moves to `access_audit_seal`.
+* **Behind a proxy**, `--cookie-secure` marks the cookie Secure and
+  `--trust-proxy` keys the per-address limits on `X-Forwarded-For`. A client
+  that reaches the origin directly can set that header, so only those limits
+  lean on it; the per-account limit and the stored lockout do not.
+* `deploy/` holds the hosted setup: Ubuntu, systemd and Caddy for HTTPS, with
+  synthetic cases only, and Vercel forwarding to it.
+
 ## The policy numbers
 
 | Setting | Value | Why |
@@ -147,8 +179,9 @@ would otherwise appear in the console's own case list.
 * **Loopback only.** The server binds `127.0.0.1`, so the administrator
   approves from the same machine. That matches the SOP — a supervising
   officer signs off at the workstation — and it keeps the console's
-  "offline · read-only" badge honest. There is no remote-admin mode, and
-  adding one would need TLS before the cookie promises meant anything.
+  "offline · read-only" badge honest. That is the workstation. A hosted
+  demonstration (above) still binds loopback, but a TLS proxy in front of it
+  makes it reachable, and the console then reads "demo · synthetic data".
 * **Rate limiting is in memory.** It is lost on restart. The account lockout,
   which is persisted, is the durable control; the limiter only stops a script
   on this machine walking the password list. Its *keying* matters more than
@@ -172,3 +205,9 @@ full state machine, both expiry deadlines, the lockout, the admin bypass,
 token rotation, CSRF, the rate limit, escaping, the audit chain under
 concurrent writers, and the whole flow over real HTTP against the actual
 server.
+
+`test_access_supabase` covers the Supabase store offline: credentials, never
+being chosen by accident, error mapping, and the audit chain, race, paging,
+seal and tamper detection against a fake table that refuses what the triggers
+refuse. `python -m validate.access_supabase` runs the whole flow live against
+a real project. It writes no audit rows and deletes what it made.

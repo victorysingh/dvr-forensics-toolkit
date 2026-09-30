@@ -86,6 +86,10 @@ def _read_env_file(path: str) -> dict:
         raise SupabaseConfigError(
             f"no Supabase credentials: set {ENV_URL} and {ENV_KEY}, or write "
             f"them to {path}") from None
+    except PermissionError:
+        raise SupabaseConfigError(
+            f"{path} exists but this user cannot read it (check the file's and "
+            "its folder's owner and mode)") from None
     if os.name == "posix" and st.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
         raise SupabaseConfigError(
             f"{path} can be read by other users; it holds a secret key - "

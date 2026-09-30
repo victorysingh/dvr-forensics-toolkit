@@ -162,7 +162,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
           access_dir: str = "", allow_signup: bool = True,
-          access_store: str = "sqlite", supabase_env: str = "") -> None:
+          access_store: str = "sqlite", supabase_env: str = "",
+          cookie_secure: bool = False, trust_proxy: bool = False) -> None:
     """Serve the console on loopback, optionally behind the approval gate.
 
     `access_dir` defaults to a dot-directory inside the case folder.  It holds
@@ -178,7 +179,8 @@ def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
 
         directory = access_dir or os.path.join(out_root, ".access")
         Handler.gate = build_gate(directory, allow_signup=allow_signup,
-                                  backend=access_store, supabase_env=supabase_env)
+                                  backend=access_store, supabase_env=supabase_env,
+                                  cookie_secure=cookie_secure, trust_proxy=trust_proxy)
         if not Handler.gate.ac.has_admin:
             print("  WARNING: no administrator account exists, so no request "
                   "can ever be approved.")

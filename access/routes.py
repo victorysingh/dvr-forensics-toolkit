@@ -55,10 +55,11 @@ class Gate:
     """The authorisation layer in front of the viewer."""
 
     def __init__(self, control: AccessControl, cookie_secure: bool = False,
-                 allow_signup: bool = True):
+                 allow_signup: bool = True, trust_proxy: bool = False):
         self.ac = control
         self.cookie_secure = cookie_secure
         self.allow_signup = allow_signup
+        self.trust_proxy = trust_proxy
 
     # -- request helpers ---------------------------------------------------
     @staticmethod
@@ -73,8 +74,20 @@ class Gate:
     def _token(self, h) -> str:
         return self._cookies(h).get(COOKIE, "")
 
-    @staticmethod
-    def _client(h) -> str:
+    def _client(self, h) -> str:
+        """The address the per-address rate limits are keyed on.
+
+        Behind a reverse proxy every request arrives from the proxy, so all
+        visitors would share one bucket; with trust_proxy the left-most
+        X-Forwarded-For entry - the visitor, as the first proxy saw it - is
+        used instead.  A client that reaches this server directly can put any
+        value there, so only the per-address limits lean on it: the
+        per-account limit and the stored lockout do not.
+        """
+        if self.trust_proxy:
+            fwd = (h.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip()
+            if fwd:
+                return fwd[:64]
         try:
             return h.client_address[0]
         except Exception:                                  # noqa: BLE001
@@ -453,7 +466,8 @@ class Gate:
 
 def build_gate(directory: str, cookie_secure: bool = False,
                allow_signup: bool = True, backend: str = "sqlite",
-               supabase_env: str = "") -> Gate:
+               supabase_env: str = "", trust_proxy: bool = False) -> Gate:
     """Open the store (in `directory`, or Supabase) and return a gate over it."""
     return Gate(open_control(directory, backend, supabase_env),
-                cookie_secure=cookie_secure, allow_signup=allow_signup)
+                cookie_secure=cookie_secure, allow_signup=allow_signup,
+                trust_proxy=trust_proxy)

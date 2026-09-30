@@ -5332,6 +5332,21 @@ def test_access_supabase(tmp: str) -> None:
         ac.create_user("wired", "wiredpassword1", role="admin")
         check("the service writes its audit events through the injected log",
               [e["action"] for e in ac.audit.entries] == ["access.user_created"])
+
+        # -- behind a reverse proxy ----------------------------------------
+        from access.routes import Gate
+
+        class _H:
+            client_address = ("127.0.0.1", 5555)
+            headers = {"X-Forwarded-For": "203.0.113.7, 76.76.21.9"}
+
+        check("by default the rate limits key on the connecting address",
+              Gate(ac)._client(_H()) == "127.0.0.1")
+        check("--trust-proxy keys them on the visitor the first proxy saw",
+              Gate(ac, trust_proxy=True)._client(_H()) == "203.0.113.7")
+        check("--cookie-secure marks the session cookie Secure, and only then",
+              "Secure" in Gate(ac, cookie_secure=True)._cookie_header("t", 60)
+              and "Secure" not in Gate(ac)._cookie_header("t", 60))
     finally:
         for k, v in saved.items():
             os.environ.pop(k, None)

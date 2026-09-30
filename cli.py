@@ -858,7 +858,8 @@ def cmd_serve(args) -> int:
     try:
         serve(args.out, args.port, require_access=args.require_access,
               access_dir=args.access_dir, allow_signup=not args.no_signup,
-              access_store=args.access_store, supabase_env=args.supabase_env)
+              access_store=args.access_store, supabase_env=args.supabase_env,
+              cookie_secure=args.cookie_secure, trust_proxy=args.trust_proxy)
     except Exception as exc:                               # noqa: BLE001
         from access.store import StoreError   # imported only if the gate was asked for
         if isinstance(exc, StoreError):
@@ -2548,6 +2549,14 @@ def main() -> int:
                                  "~/.config/anokhidrishti/supabase.env)")
 
     _store_args(p)
+    p.add_argument("--cookie-secure", action="store_true",
+                   help="with --require-access, mark the session cookie Secure: "
+                        "for a deployment reached over HTTPS through a proxy "
+                        "(a browser drops a Secure cookie on plain HTTP)")
+    p.add_argument("--trust-proxy", action="store_true",
+                   help="with --require-access, key the per-address rate limits "
+                        "on X-Forwarded-For: only behind a reverse proxy, where "
+                        "every request otherwise shares the proxy's address")
     p.set_defaults(func=cmd_serve)
 
     # -- temporary access control ------------------------------------------
