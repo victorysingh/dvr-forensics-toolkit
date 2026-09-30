@@ -20,12 +20,18 @@ format. We built a vendor-agnostic tool that:
   per-block Merkle map;
 - identifies the vendor by scored evidence and the recorder model from the
   disk and the unit;
-- parses Dahua/CP Plus and Hikvision structures, HeimVision's (read off a
-  public NIST image), and Honeywell's from published research;
+- has a plugin for all eight named OEMs: Dahua/CP Plus and Hikvision read off
+  real drives, HeimVision off a public NIST image, Honeywell from published
+  research, Uniview, TP-Link's index and Godrej from the vendors' own firmware,
+  and Matrix from its own documents;
 - recovers deleted footage without an index, including from a drive that
   another recorder had reformatted;
 - builds a timeline that refuses to invent a time zone;
-- keeps a hash-chained custody record of every action;
+- keeps a hash-chained custody record of every action, sealed with a key kept
+  outside the case folder, so an entry edited, removed or rewritten is caught;
+- survives damaged evidence: its parsers, carvers and E01 reader were fed
+  12,800 corrupted disks and files, and the 144 crashes and 1 hang that found
+  were fixed;
 - reports in HTML and JSON, with a draft BSA 2023 s.63 certificate.
 
 It was run on two real 1 TB surveillance drives:
@@ -96,7 +102,7 @@ one case view.
 | Recovery | `recover/carver.py` (DHAV), `recover/pscarve.py` (MPEG-PS, Hikvision), `recover/annexb.py` (raw H.264/H.265 for vendors with no parser), `recover/preserve.py` (metadata) |
 | Timeline Analysis | `analyse/timeline.py` (clock rule, gaps, recurring patterns, coverage), `analyse/combined.py` (several recorders) |
 | Reporting | `report/` (HTML + JSON, hashed into the ledger), `report/s63.py` (certificate draft), `viewer/` |
-| Machine Learning | `analyse/activity.py` (motion from frame sizes); `analytics/` (faces, objects, on-screen text), all labelled leads |
+| Machine Learning | `analyse/activity.py` (motion from frame sizes); `analytics/` (faces, objects, on-screen text, and face search by a reference photo), all labelled leads |
 | Validation | `validate/exportmatch.py` (recovered footage against the recorder's export) |
 
 ## 4. Results on real media
@@ -112,7 +118,9 @@ Sources: `STATUS.md` §2, `VALIDATION_REPORT.md` §3, §7, §8, `FORENSIC_IMAGE.
 | Deleted footage | 349.5 M frames carved without the index; **2,246 streams (5.4 GB) outside every index**, March to August 2026, all extracted |
 | Timeline | 6 recorder-wide gaps (three on 23 Sep, the day the drive was pulled); a nightly 02:00–02:09 interruption across all three cameras; 2 streams dated 2000-01-01 05:30, a reset clock whose 05:30 suggests the zone is IST (an inference, not applied) |
 | Checked against the picture | decoded frame's burned-in clock `01/05/2026 01:20:26 PM` equals its DHAV date `2026-05-01 13:20:26` to the second |
-| Analytics (leads) | 4,802 sampled frames of recovered footage: a person in 51, a car in 63 |
+| Unit identity | the unit, a CP Plus `CP-UNR-104F1` NVR (Dahua-built, agreeing with the DHFS on the disk), recorded from its label and System Info. A search of all 76.67 GiB of the drive's non-video blocks found **none of its serial, device ID or MAC and no model string**: the disk does not say which unit wrote it (`VALIDATION_REPORT.md` §2) |
+| Second implementation | ffmpeg's own `dhav` reader and ours agree on **all 719,097 video frames** it emits from the 2,246 carved streams, and on 995,224 audio frames; the published format definitions (Kaitai) agree with the parser on 119,229 cluster records |
+| Analytics (leads) | 4,802 sampled frames of recovered footage, current detector (30 Sep): a person in 191, a car in 289, a motorcycle in 65, a face in 23, and 49 parked-vehicle places (first detector: person 51, car 63). Scored on 210 frames of the three cameras with labels checked by a person (§8a): the current detector finds **both people** (the old one found none) and has **no face false alarms** (the old one had 7); it calls a dog and a tree trunk a person, and the car parked in full view at night, once missed, is now reported as a parked vehicle in 26 of its 35 frames |
 
 ### 4.2 Drive 2: Hikvision footage under a Dahua-family format (Seagate ST1000VX005, s/n `Z9C2632A`)
 
@@ -147,7 +155,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 551 in all: 528 on generated data with known ground
+- **Automated tests:** 605 in all: 582 on generated data with known ground
   truth (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -155,6 +163,7 @@ Full account: `VALIDATION_REPORT.md`.
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the
   CASE/UCO export and the certificate.
+- **Damaged or tampered disks:** 9,600 corrupted disks fed to all 8 vendor parsers (`VALIDATION_REPORT.md` §8o). The first 3,200 found 144 crashes and 1 hang in 22 places, all fixed. None crashes or hangs now, and a parser can no longer end in a traceback. The three carvers and the E01 reader were fuzzed too: one bug, a damaged E01 set left its evidence file open, fixed.
 - **Write blocking:** root writes refused on a sacrificial loop device, and
   the block re-applied automatically after 2 of 2 real reconnects.
 - **Reproducibility:** five independent reads over three days agree bit for
@@ -178,7 +187,12 @@ Full account: `VALIDATION_REPORT.md`.
 - **Checked without an export** (`VALIDATION_REPORT.md` §8g), as SWGDE
   18-Q-001 and ISO/IEC 17025 allow when no reference export exists:
   - ffmpeg's `dhav` demuxer, a second implementation, agrees with ours frame
-    for frame on two real Dahua recordings (726 and 104 video frames);
+    for frame on two real Dahua recordings (726 and 104 video frames), and on
+    all 719,097 video frames it emits from the CP Plus drive's own 2,246
+    carved streams;
+  - the published format definitions (Kaitai `.ksy`, compiled by the official
+    compiler) read both drives' images exactly as the parsers do: 119,229
+    DHFS cluster records, 3,000 DHAV frames, 115,004 Hikvision PS packs;
   - on three Hikvision-made files, our carve decodes identically to the
     vendor's file (463/463, 215/215 frames), and the `HK` time equals the
     painted clock, trails it by a constant 1 s, or equals the recorder's own
@@ -205,6 +219,17 @@ measured 23.4 MiB/s on drive 1, a 1 TB drive takes:
 
 The saving is fewer reads of the evidence. On fast media the pass is
 CPU-bound (26.7 MiB/s measured), and `TECH_STACK.md` records the planned fix.
+
+Two later steps, measured on the same drive on 29 Sep:
+- **Searching the whole drive for the unit's model and identifiers**
+  (`identify-model`, 77 GiB of non-video blocks). It was CPU-bound at
+  5.6 MiB/s, about 4 h; spread over worker processes it ran at 42 MiB/s,
+  **about 35 min**. The result is identical, checked on 768 MiB of real data
+  against the single-process code.
+- **Extracting four days of footage** (301 hourly recordings). Each call used
+  to parse the whole drive first, and over USB that parse alone ran for
+  minutes. One call now parses once and extracts all 301: **about 2 h** in
+  all, with each recording's files and manifest as before.
 
 ## 7. Legal defensibility
 
@@ -323,15 +348,24 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   read, so every time is the recorder's own clock. The combined two-recorder
   view says "not aligned" for this reason. A route that needs no unit is
   built: the offset from the cameras' infrared switches at dusk and dawn
-  (`VALIDATION_REPORT.md` §8l). It is tested on generated days and real
-  night and day footage, and not yet run on our drives' outdoor cameras.
+  (`VALIDATION_REPORT.md` §8l).
+  - Run on drive 1 over four days of all three cameras, it found **no
+    switch**: the scene is lit all night, so the cameras never turn to
+    infrared at dusk.
+  - An exploratory reading of the picture's colour at dusk and dawn shows
+    the clock keeps **IST**, within a few minutes (UTC +328 min). That rules
+    out UTC or any other zone setting.
+  - The clock error is **not measured**. UTC to the minute still needs the
+    unit's clock photographed beside network time.
 - **The on-screen text reader (OCR) is weak.** Measured on six real
   recorders' files (36 painted clocks), it found the clock on 3 of the 6,
   read 5 frames exactly and 9 wrongly (a year off, or 12 hours off when "PM"
   is lost), and read no title right. The wrong readings are years or hours
   off, so the comparison with the container's own date flags them. On our
   drives it read "Camera 01" correctly and nothing on drive 1's bright
-  scenes. It remains `synthetic_only`: a lead to check, not a time source.
+  scenes: measured again on 29 Sep, it found no title or clock band on any of
+  drive 1's six clips. It remains `synthetic_only`: a lead to check, not a
+  time source.
 - **About 38% of CP Plus video frames do not decode strictly.** The cause
   is measured: 0.3-0.4% of the frames are missing from the disk, and each
   breaks the rest of its ~8.6 s group of pictures. Most have no intact copy
@@ -339,7 +373,9 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   (62.1% decode). With error concealment 99.8% of one recording displays,
   with visible damage:
   a viewing aid, not intact evidence (`VALIDATION_REPORT.md` §7).
-- **No real disk has been read for** the Honeywell plugin, and the Hikvision
+- **No real disk has been read for** the Honeywell, Uniview, TP-Link, Matrix
+  and Godrej plugins (built from a paper, the vendors' firmware and documents),
+  and the Hikvision
   full-filesystem parser has not read an intact Hikvision disk (it is written on
   drive 2's observed layout, whose primary master a reformat had overwritten). The raw H.264/H.265 carver has run on one (the
   HeimVision image): it finds the video, but cannot separate cameras that
@@ -351,13 +387,30 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
   of the 57 frames that had one.
   - It now runs YOLOX-S on the whole frame and a 2 x 2 grid of tiles, and
     YuNet for faces, and looks at a fisheye picture turned round as well.
-    It finds a person in 44 of 57, faces in 22 of 27 and vehicles in 8 of
-    12.
+    It finds a person in 44 of 57, faces in 22 of 27 and moving vehicles
+    in 7 of 12. It reports a car that stays in one place once, as a parked
+    vehicle: all 6 in a night car park, with none false on CAVIAR.
   - On CAVIAR CCTV footage that played no part in any choice, it finds 810
     of 1,089 labelled people, against 543 for the previous tiled models.
   - Its false alarms: 6 person frames, each a hand in the picture, and 1
     face frame, a head at the fisheye's edge.
   - It still misses distorted and distant people.
+  - On our own CP Plus cameras (210 frames, the deciding ones checked by a
+    person) it found both people and gave no face false alarm, but called a
+    dog a person, read a tree trunk as one in 2 frames, and reported **no
+    vehicle**: the car parked in full view at night scored 0.25-0.47, under
+    the 0.5 threshold, and the static rule removed it. Parked cars are now
+    reported as parked vehicles from 0.3. Re-scored from its stored boxes,
+    drive 1's night car is reported, as a parked vehicle, in 26 of its 35
+    frames, with no false one (§8a).
+- **Face search is measured on stand-ins.** It ranks faces by likeness to an
+  examiner's photo and calls the closest candidates, never matches. On LFW
+  faces shrunk and encoded to recorder size, the same person passes in 97.8%
+  of pairs with eyes 12 px or more apart, and no pair of different people
+  passes at any size. On strangers in 12 real surveillance clips it gave one
+  false candidate: an upside-down head at a fisheye's edge, which the
+  saved lined-up face shows is not a face. The same person in real recorder
+  footage is not measured: we hold no labelled footage of one (§8n).
   - A lead is worth reviewing; an empty list proves nothing
     (`VALIDATION_REPORT.md` §8a).
 - **On fast media the single pass is CPU-bound.**
@@ -381,10 +434,12 @@ stores standard H.264/H.265.** That is our honest answer to "five to six".
    the Dahua-family recorder that reformatted the disk kept its own log, which
    records hard-drive formatting (Dragonas et al. 2024) - on that recorder's
    disk or flash, not this one.
-3. **Make the OCR read what the eye read:** clocks with a weekday or AM/PM
-   are now read (28 Sep) and need a re-run on the reference frames. White
-   text on bright backgrounds remains open: a top-hat filter was tried and
-   did not help (VALIDATION_REPORT §8c).
+3. **Make the OCR read what the eye read.** Clocks with a weekday or AM/PM
+   now parse, and the reader was re-run on our reference frames (29 Sep): it
+   read "Camera 01" on drive 2 and found no title or clock band on drive 1,
+   where thin white text sits on bright road, sky and wall. A top-hat filter
+   did not help (VALIDATION_REPORT §8c); the next step is a stronger OCR
+   model for small, low-contrast video text.
 4. **Speed:** done in the main - the taps run in a process pool, and the NAL
    searches are one pass; threaded hashes did not matter (PERFORMANCE.md §5).
    What is left, folding the signature search into that pass, is small.

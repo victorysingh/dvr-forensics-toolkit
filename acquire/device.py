@@ -185,8 +185,14 @@ class BlockDevice:
                 if ewf.is_ewf(self.path):
                     try:
                         self._ewf = ewf.EwfImage(self.path)
-                    except ewf.EwfError as exc:
-                        raise DeviceError(str(exc)) from exc
+                    except Exception as exc:                 # noqa: BLE001
+                        # a damaged set is refused as a device error, and the
+                        # evidence file is not left open (and, on Windows, locked)
+                        self._fh.close()
+                        self._fh = None
+                        raise DeviceError(str(exc) if isinstance(exc, ewf.EwfError)
+                                          else f"{self.path}: not a readable E01 set "
+                                               f"({type(exc).__name__}: {exc})") from exc
                     self.size_bytes = self._ewf.size_bytes
                     self.sector_size = self._ewf.bytes_per_sector
                     self.model = f"EWF (E01) image, {len(self._ewf.paths)} segment(s)"

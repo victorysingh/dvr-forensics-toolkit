@@ -389,21 +389,27 @@ def _extract_with_plugin(args, plugin) -> int:
 
 
 def cmd_extract(args) -> int:
-    """Reassemble one recording into playable files, with a hashed manifest.
+    """Reassemble recordings into playable files, each with a hashed manifest.
 
     Output goes to --out, never to the device.  Two files per recording: the
     DHAV stream as stored (`.dav`, which ffmpeg's dhav demuxer reads) and the
     bare video elementary stream (`.h265`/`.h264`, playable directly).  The
     manifest records every cluster read, its hash, and what was left out.
+    Several recording ids may be given: the disk is parsed once and each is
+    reassembled in turn - over USB a whole-drive parse takes minutes, too long
+    to repeat for every hour of footage.
     """
-    from core.contract import SCHEMA_VERSION, to_dict, utc_now
-    from core.hashing import sha256_file
     from parsers import dahua, get_parser
 
+    ids = list(args.recording) if isinstance(args.recording, (list, tuple)) else [args.recording]
     if args.vendor != "Dahua":
         plugin = get_parser(args.vendor)
         if plugin is not None and hasattr(plugin, "extract_recording"):
-            return _extract_with_plugin(args, plugin)
+            rc = 0
+            for rid in ids:
+                rc = _extract_with_plugin(argparse.Namespace(**{**vars(args), "recording": rid}),
+                                          plugin) or rc
+            return rc
         print(f"[!] extract is implemented for Dahua DHFS and plugins that offer it; "
               f"{args.vendor!r} recordings can be listed with `parse` but not reassembled yet.")
         return 1
@@ -411,31 +417,46 @@ def cmd_extract(args) -> int:
     if args.tz_offset is not None:
         parser.tz_offset_min = args.tz_offset
     os.makedirs(args.out, exist_ok=True)
-    print(f"{BANNER} - {args.vendor} extract {args.recording}\n")
+    print(f"{BANNER} - {args.vendor} extract "
+          f"{' '.join(ids) if len(ids) <= 3 else f'{len(ids)} recordings'}\n")
+    failed = 0
     try:
         with BlockDevice(args.device) as dev:
             info = dev.info()
             print(f"  device        {dev.path}  ({human_size(dev.size_bytes)})")
             print(f"  write-block   {info.write_block_method}")
             result = parser.parse(dev)
-            vol, f = parser.file_for(args.recording)
-            if f is None:
-                print(f"[!] no recording {args.recording!r}. Run `parse --vendor "
-                      f"Dahua` to list recording ids.")
-                return 1
-            rec = next(r for r in result.recordings if r.id == args.recording)
-            base = os.path.join(args.out, args.recording)
-            print(f"  recording     {rec.camera_id}  {_when(rec)}  "
-                  f"{len(f.clusters)} clusters")
-            print("  reassembling  ...")
-            with open(base + ".dav", "wb") as dav, open(base + ".es", "wb") as es:
-                stats = dahua.reassemble(dev, vol, f, dav, es)
+            for k, rid in enumerate(ids):
+                if len(ids) > 1:
+                    print(f"\n=== {k + 1}/{len(ids)}  {rid} ===")
+                vol, f = parser.file_for(rid)
+                if f is None:
+                    print(f"[!] no recording {rid!r}. Run `parse --vendor "
+                          f"Dahua` to list recording ids.")
+                    failed += 1
+                    continue
+                rec = next(r for r in result.recordings if r.id == rid)
+                base = os.path.join(args.out, rid)
+                print(f"  recording     {rec.camera_id}  {_when(rec)}  "
+                      f"{len(f.clusters)} clusters")
+                print("  reassembling  ...")
+                with open(base + ".dav", "wb") as dav, open(base + ".es", "wb") as es:
+                    stats = dahua.reassemble(dev, vol, f, dav, es)
+                _extract_outputs(base, info, parser, result, rec, vol, f, stats)
     except PermissionNeeded as exc:
         print(f"[!] {exc}")
         return 2
     except DeviceError as exc:
         print(f"[!] {exc}")
         return 1
+    return 1 if failed else 0
+
+
+def _extract_outputs(base, info, parser, result, rec, vol, f, stats) -> None:
+    """One reassembled recording: the stream renamed by its codec, both files
+    hashed into its manifest, and the summary printed."""
+    from core.contract import SCHEMA_VERSION, dump_json, to_dict, utc_now
+    from core.hashing import sha256_file
 
     codec = stats.get("codec") or "bin"
     es_path = f"{base}.{codec if codec in ('h264', 'h265') else 'es'}"
@@ -470,7 +491,6 @@ def cmd_extract(args) -> int:
             f"disk (counter gaps; not interpolated)",
         ],
     }
-    from core.contract import dump_json
     mpath = base + ".manifest.json"
     dump_json(manifest, mpath)
 
@@ -500,7 +520,6 @@ def cmd_extract(args) -> int:
     if codec in ("h264", "h265"):
         print(f"  play:   ffplay {es_path}      (or: ffmpeg -f dhav -i {base}.dav "
               f"-c copy out.mp4)")
-    return 0
 
 
 def cmd_carve(args) -> int:
@@ -613,6 +632,9 @@ def cmd_verify(args) -> int:
     if not v["valid"]:
         print(f"                expected {v['expected']}")
         print(f"                found    {v['found']}")
+    seal = ledger.verify_seal()
+    print(f"custody seal  : {seal['message']}")
+    chain_ok = v["valid"] and seal["valid"]
 
     leaves, blockmap = [], os.path.join(out_dir, "blockmap.jsonl")
     if os.path.exists(blockmap):
@@ -629,8 +651,8 @@ def cmd_verify(args) -> int:
         print(f"                stored     {stored}")
         if not ok:
             print(f"                recomputed {recomputed}")
-        return 0 if (v["valid"] and ok and _verify_preserved(out_dir, ledger)) else 1
-    return 0 if v["valid"] else 1
+        return 0 if (chain_ok and ok and _verify_preserved(out_dir, ledger)) else 1
+    return 0 if chain_ok else 1
 
 
 def _verify_preserved(out_dir: str, ledger: CustodyLedger) -> bool:
@@ -1549,9 +1571,39 @@ def cmd_activity(args) -> int:
     return 0
 
 
+def _recorder_times(case_dir: str, clips: list, key: str) -> bool:
+    """Hikvision PS streams carry the recorder's clock (HK descriptor): put a
+    recorder-local time on each entry of clip[key], from the stream's first
+    keyframe.  False if the case has no PS streams."""
+    psr = os.path.join(case_dir, "carve", "ps_report.json")
+    if not os.path.exists(psr):
+        return False
+    from datetime import datetime, timedelta
+    with open(psr, "r", encoding="utf-8") as fh:
+        t0 = {x["id"]: x.get("time_first_local") for x in json.load(fh)["streams"]}
+    for c in clips:
+        start = t0.get(os.path.splitext(c["clip"])[0])
+        if start:
+            s0 = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+            for h in c[key]:
+                h["time_local"] = (s0 + timedelta(seconds=h["t_s"])).strftime("%Y-%m-%d %H:%M:%S")
+    return True
+
+
+def _extracted_clips(case_dir: str, ids: str) -> list:
+    """The clips extract-carved wrote, optionally only the ids given."""
+    import glob
+    src = os.path.join(case_dir, "carve", "streams")
+    clips = sorted(glob.glob(os.path.join(src, "*.h265")) + glob.glob(os.path.join(src, "*.h264"))
+                   + glob.glob(os.path.join(case_dir, "carve", "ps_streams", "*.ps")))
+    if ids:
+        want = set(ids.split(","))
+        clips = [c for c in clips if os.path.splitext(os.path.basename(c))[0] in want]
+    return clips
+
+
 def cmd_analyse_video(args) -> int:
     """Optional layer: faces and objects in extracted clips (lead, not evidence)."""
-    import glob
     if args.recount:
         from analytics.static import recount
         from core.hashing import sha256_file
@@ -1583,11 +1635,7 @@ def cmd_analyse_video(args) -> int:
     from core.hashing import sha256_file
 
     src = os.path.join(args.out, "carve", "streams")
-    clips = sorted(glob.glob(os.path.join(src, "*.h265")) + glob.glob(os.path.join(src, "*.h264"))
-                   + glob.glob(os.path.join(args.out, "carve", "ps_streams", "*.ps")))
-    if args.ids:
-        want = set(args.ids.split(","))
-        clips = [c for c in clips if os.path.splitext(os.path.basename(c))[0] in want]
+    clips = _extracted_clips(args.out, args.ids)
     if not clips:
         print(f"[!] no extracted clips in {src} - run `extract-carved` first")
         return 1
@@ -1605,19 +1653,7 @@ def cmd_analyse_video(args) -> int:
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"[!] {exc}")
         return 1
-    # Hikvision PS streams carry the recorder's clock (HK descriptor): put a
-    # recorder-local time on each detection, from the stream's first keyframe.
-    psr = os.path.join(args.out, "carve", "ps_report.json")
-    if os.path.exists(psr):
-        from datetime import datetime, timedelta
-        with open(psr, "r", encoding="utf-8") as fh:
-            t0 = {x["id"]: x.get("time_first_local") for x in json.load(fh)["streams"]}
-        for c in r["clips"]:
-            start = t0.get(os.path.splitext(c["clip"])[0])
-            if start:
-                s0 = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
-                for h in c["detections"]:
-                    h["time_local"] = (s0 + timedelta(seconds=h["t_s"])).strftime("%Y-%m-%d %H:%M:%S")
+    if _recorder_times(args.out, r["clips"], "detections"):
         with open(os.path.join(out_dir, "analytics.json"), "w", encoding="utf-8") as fh:
             json.dump(r, fh, indent=1)
     tot = r["frames_with_totals"]
@@ -1635,6 +1671,72 @@ def cmd_analyse_video(args) -> int:
             "frames_with": tot, "status": "lead, not evidence"},
             data_hash=sha256_file(path))
     print(f"\n[+] {path}\n  every detection is a lead for review; face DETECTION, never identification")
+    return 0
+
+
+def cmd_face_search(args) -> int:
+    """Optional layer: rank the faces in clips by likeness to a reference photo
+    (candidates for an examiner to compare by eye, never an identification)."""
+    try:
+        from analytics.face_search import run
+    except ImportError as exc:
+        print(f"[!] the optional analytics layer is not installed ({exc}).")
+        print("    It needs ffmpeg, numpy and onnxruntime - see analytics/README.md.")
+        print("    The forensic core does not need it.")
+        return 2
+    from core.hashing import sha256_file
+
+    if not os.path.isfile(args.photo):
+        print(f"[!] no photo at {args.photo}")
+        return 1
+    if args.video:
+        clips, src = list(args.video), "given"
+        missing = [c for c in clips if not os.path.isfile(c)]
+        if missing:
+            print(f"[!] no file at {', '.join(missing)}")
+            return 1
+    else:
+        clips = _extracted_clips(args.out, args.ids)
+        src = f"from {os.path.join(args.out, 'carve')}"
+        if not clips:
+            print(f"[!] no extracted clips in {src[5:]} - run `extract-carved` first, or give --video")
+            return 1
+    out_dir = os.path.join(args.out, "analytics")
+    print(f"{BANNER} - face search (candidates for review, not identification)\n")
+    print(f"  clips         {len(clips)} {src}, sampled at {args.fps} fps")
+    try:
+        r = run(args.photo, clips, out_dir, fps=args.fps, log=print, match_min=args.min_similarity)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        print(f"[!] {exc}")
+        return 1
+    path = os.path.join(out_dir, "face_search.json")
+    if _recorder_times(args.out, r["clips"], "faces"):
+        when = {(c["clip"], f["t_s"]): f.get("time_local") for c in r["clips"] for f in c["faces"]}
+        for f in r["top"]:
+            f["time_local"] = when.get((f["clip"], f["t_s"]))
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(r, fh, indent=1)
+    tot = r["totals"]
+    print(f"\n  faces compared {tot['faces_compared']}; candidates {tot['candidates']} (similarity "
+          f">= {r['match_min']}, eyes >= {r['min_eye_px']} px apart); too small to compare "
+          f"{tot['too_small']}")
+    for f in r["top"][:10]:
+        print(f"    {f['clip']}  {f['t_s']:>8.1f} s  similarity {f['similarity']:.3f}  "
+              f"eyes {f['eye_px']:.0f} px" + ("  CANDIDATE" if f["candidate"] else ""))
+    ledger = CustodyLedger(os.path.join(args.out, "custody_ledger.jsonl"))
+    if ledger.entries:
+        ledger.actor = ledger.entries[0].get("actor", "unknown")
+        ledger.case_id = ledger.entries[0].get("case_id", "")
+        ledger.append("face_search_run", {
+            "report": "analytics/face_search.json", "rule": r["rule"],
+            "photo": r["reference"]["photo"], "photo_sha256": r["reference"]["photo_sha256"],
+            "clips": len(clips), "fps": args.fps, "match_min": r["match_min"],
+            "min_eye_px": r["min_eye_px"],
+            "models": {k: v["sha256"] for k, v in r["models"].items()},
+            "totals": tot, "status": r["status"]},
+            data_hash=sha256_file(path))
+    print(f"\n[+] {path}\n  a candidate is a face to compare by eye with the photo; "
+          "face search never identifies anyone")
     return 0
 
 
@@ -1910,10 +2012,17 @@ def cmd_identify_model(args) -> int:
                     {f"{f['identifier']} {f['value']}" for f in forms}))
                       + " (record-device)")
             ms = model.ModelSearch(forms)
-            for k, (off, n) in enumerate(blocks):
-                ms.feed(off, dev.read_at(off, n))
+            # the matching is CPU-bound (~6 MiB/s a process); a whole drive
+            # needs it spread over processes to keep up with the reads
+            workers = getattr(args, "workers", 0) or (min(8, max(1, (os.cpu_count() or 1) - 1))
+                                                      if len(blocks) > 64 else 1)
+            if workers > 1:
+                print(f"  workers       {workers} processes match while this one reads")
+
+            def progress(k: int) -> None:
                 if k and k % 500 == 0:
                     print(f"    {k}/{len(blocks)} blocks", flush=True)
+            model.search_blocks(dev.read_at, blocks, ms, workers, progress)
     except (PermissionNeeded, DeviceError) as exc:
         print(f"[!] {exc}")
         return 1
@@ -1926,7 +2035,9 @@ def cmd_identify_model(args) -> int:
         print("  no model-numbered string found in what was searched")
     for c in res["candidates"][:15]:
         print(f"  {c['kind']:<9} {c['model']:<26} {c['vendor']:<10} {c['count']:>6}x  "
-              f"first at 0x{c['offsets'][0]:X}")
+              f"first at 0x{c['offsets'][0]:X}"
+              + ("  (possible chance match: short, seen once)"
+                 if c.get("possible_chance_match") else ""))
     ui = res.get("unit_identifiers")
     for r in (ui or {}).get("found", []):
         print(f"  unit's    {r['identifier'] + ' ' + r['value']:<36} {r['form']:<20} "
@@ -2122,19 +2233,20 @@ def _demux_export(path: str, out_dir: str):
     ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
     if not (ffmpeg and ffprobe):
         return None, None
-    codec = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0",
-                            "-show_entries", "stream=codec_name",
-                            "-of", "default=nw=1:nk=1", path],
-                           capture_output=True, text=True).stdout.strip()
+    from core import proc
+    codec = proc.run([ffprobe, "-v", "error", "-select_streams", "v:0",
+                      "-show_entries", "stream=codec_name",
+                      "-of", "default=nw=1:nk=1", path],
+                     timeout=proc.PROBE_S, capture_output=True, text=True).stdout.strip()
     fmt = {"h264": "h264", "hevc": "hevc"}.get(codec)
     if not fmt:
         raise ValueError(f"the export's video is {codec or 'unreadable'}; "
                          f"only H.264 and H.265 can be compared")
     dst = os.path.join(out_dir, os.path.basename(path) + (".h264" if fmt == "h264" else ".h265"))
     args = ["-v", "error", "-y", "-i", path, "-map", "0:v:0", "-c:v", "copy", "-f", fmt, dst]
-    subprocess.run([ffmpeg] + args, check=True)
-    version = subprocess.run([ffmpeg, "-version"], capture_output=True,
-                             text=True).stdout.splitlines()[0]
+    proc.run([ffmpeg] + args, timeout=proc.STREAM_S, check=True)
+    version = proc.run([ffmpeg, "-version"], timeout=proc.PROBE_S, capture_output=True,
+                       text=True).stdout.splitlines()[0]
     return dst, {"tool": version, "command": "ffmpeg " + " ".join(args)}
 
 
@@ -2353,10 +2465,12 @@ def main() -> int:
                         "(reads every indexed cluster in the image)")
     p.set_defaults(func=cmd_parse)
 
-    p = sub.add_parser("extract", help="reassemble one recording into playable files")
+    p = sub.add_parser("extract", help="reassemble recordings into playable files")
     p.add_argument("--device", required=True)
     p.add_argument("--vendor", default="Dahua")
-    p.add_argument("--recording", required=True, help="recording id from `parse`")
+    p.add_argument("--recording", required=True, nargs="+",
+                   help="recording id(s) from `parse`; several are reassembled after one "
+                        "parse of the disk")
     p.add_argument("--out", required=True, help="output directory (never the device)")
     p.add_argument("--tz-offset", type=int, default=None)
     p.set_defaults(func=cmd_extract)
@@ -2579,6 +2693,21 @@ def main() -> int:
                    help="re-apply the static/implausible rules to stored results, no decoding")
     p.set_defaults(func=cmd_analyse_video)
 
+    p = sub.add_parser("face-search",
+                       help="optional: rank faces in clips by likeness to a reference photo "
+                            "(candidates for review, never identification)")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--photo", required=True, help="the reference photo (one face; the largest is used)")
+    p.add_argument("--fps", type=float, default=1.0, help="frames searched per second of video")
+    p.add_argument("--ids", default="", help="comma-separated clip ids (default: all extracted)")
+    p.add_argument("--video", nargs="+", default=None, metavar="FILE",
+                   help="search these video files instead of the case's extracted clips")
+    from analytics.face_rules import MATCH_MIN
+    p.add_argument("--min-similarity", type=float, default=MATCH_MIN,
+                   help=f"a face at or above this is a candidate (default {MATCH_MIN}, "
+                        "OpenCV's published threshold for SFace)")
+    p.set_defaults(func=cmd_face_search)
+
     p = sub.add_parser("combine",
                        help="one view across several recorders (separate axes unless "
                             "every case states its timezone)")
@@ -2613,6 +2742,9 @@ def main() -> int:
     p.add_argument("--max-gb", type=float, default=4.0,
                    help="most bytes to read (default 4 GiB; raise it to search every "
                         "non-video block of a whole drive)")
+    p.add_argument("--workers", type=int, default=0,
+                   help="processes for the pattern matching (default: one per core, up to 8, "
+                        "for searches over 64 blocks; 1 = in this process)")
     p.set_defaults(func=cmd_identify_model)
 
     p = sub.add_parser("hik-log",

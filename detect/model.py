@@ -140,6 +140,18 @@ def identify(model: str) -> Optional[dict]:
 VIDEO_INCOMPRESSIBILITY = 0.95
 CONTEXT = 40
 OFFSETS_KEPT = 8
+# A short model-shaped string seen once is what binary data throws up by
+# chance over a whole drive: "HRG" + 3 digits has about a 1-in-3e11 chance at
+# any byte of random data, and the CP Plus drive's search covered 8.2e10 bytes
+# (it found exactly one, HRG745, among compressed bytes).  Real recorder models
+# are longer - CP-UNR-104F1 is 12 characters, DS-7B08HUHI-K1 14 - so a
+# candidate this short, found once, is listed but not used in the check.
+CHANCE_MAX_LEN = 8
+
+
+def possible_chance_match(candidate: dict) -> bool:
+    """Found once and no longer than CHANCE_MAX_LEN characters."""
+    return candidate.get("count", 0) <= 1 and len(candidate.get("model", "")) <= CHANCE_MAX_LEN
 
 
 def select_blocks(blockmap: list[dict], device_size: int, max_bytes: int,
@@ -207,6 +219,36 @@ def identifier_forms(obs: Optional[dict]) -> list[dict]:
     return out
 
 
+def _printable(b: bytes) -> str:
+    return "".join(chr(c) if 32 <= c < 127 else "." for c in b)
+
+
+def scan(buf: bytes, base: int, offset: int, identifiers: list[dict]) -> list[tuple]:
+    """Every model string and unit identifier in `buf`, as (kind, index,
+    text, at, context) in the order ModelSearch records them.
+
+    `buf` is the block at `offset`, with the previous block's tail in front
+    when the two are contiguous; `base` is where `buf` starts on the disk.  A
+    match lying wholly in that tail was the previous block's, so it is left
+    out.  Pure, so it can run in a worker process (search_blocks)."""
+    hits: list[tuple] = []
+    for i, f in enumerate(FAMILIES):
+        for m in f.pattern.finditer(buf):
+            at = base + m.start()
+            if at + len(m.group()) <= offset:        # whole match was in the tail
+                continue
+            hits.append(("model", i, m.group().decode("ascii"), at,
+                         _printable(buf[max(0, m.start() - CONTEXT):m.end() + CONTEXT])))
+    for j, spec in enumerate(identifiers):
+        for m in spec["pattern"].finditer(buf):
+            at = base + m.start()
+            if at + len(m.group()) <= offset:
+                continue
+            hits.append(("id", j, "", at,
+                         _printable(buf[max(0, m.start() - CONTEXT):m.end() + CONTEXT])))
+    return hits
+
+
 class ModelSearch:
     """Model-numbered strings - and, when given, the unit's own identifiers -
     in bytes handed in order, block by block.  A string straddling two blocks
@@ -219,54 +261,49 @@ class ModelSearch:
         self.ids: dict[tuple[str, str], dict] = {}
         self._tail, self._tail_end = b"", -1
 
-    def feed(self, offset: int, data: bytes) -> None:
+    def _chain(self, offset: int, data: bytes) -> tuple[bytes, int]:
+        """(bytes to search, where they start) for the block at `offset`: the
+        previous block's tail in front when the two are contiguous.  Moves the
+        tail on to this block."""
         if self._tail and self._tail_end == offset:
             buf, base = self._tail + data, offset - len(self._tail)
         else:
             buf, base = data, offset
-        for f in FAMILIES:
-            for m in f.pattern.finditer(buf):
-                at = base + m.start()
-                if at + len(m.group()) <= offset:        # whole match was in the tail
-                    continue
-                self._add(f, m.group().decode("ascii"), at, buf, m.start(), m.end())
-        for spec in self.identifiers:
-            for m in spec["pattern"].finditer(buf):
-                at = base + m.start()
-                if at + len(m.group()) <= offset:
-                    continue
-                self._add_id(spec, at, buf, m.start(), m.end())
-        self._tail = data[-64:]
-        self._tail_end = offset + len(data)
+        self._tail, self._tail_end = data[-64:], offset + len(data)
+        return buf, base
 
-    def _add_id(self, spec: dict, at: int, buf: bytes, s: int, e: int) -> None:
-        key = (spec["identifier"], spec["form"])
-        row = self.ids.get(key)
-        if row is None:
-            ctx = buf[max(0, s - CONTEXT):e + CONTEXT]
-            row = self.ids[key] = {
-                "identifier": spec["identifier"], "value": spec["value"], "form": spec["form"],
-                "count": 0, "offsets": [],
-                "context": "".join(chr(c) if 32 <= c < 127 else "." for c in ctx)}
-        row["count"] += 1
-        if len(row["offsets"]) < OFFSETS_KEPT:
-            row["offsets"].append(at)
+    def feed(self, offset: int, data: bytes) -> None:
+        buf, base = self._chain(offset, data)
+        self.apply(scan(buf, base, offset, self.identifiers))
 
-    def _add(self, f: ModelFamily, model: str, at: int, buf: bytes, s: int, e: int) -> None:
-        row = self.found.get((f.id, model))
-        if row is None:
-            ctx = buf[max(0, s - CONTEXT):e + CONTEXT]
-            row = self.found[(f.id, model)] = {
-                "model": model, "vendor": f.vendor, "family": f.id,
-                "kind": kind_of(f.id, model), "count": 0, "offsets": [],
-                "context": "".join(chr(c) if 32 <= c < 127 else "." for c in ctx)}
-        row["count"] += 1
-        if len(row["offsets"]) < OFFSETS_KEPT:
-            row["offsets"].append(at)
+    def apply(self, hits: list[tuple]) -> None:
+        """Record scan() hits, in the order given - the first of each keeps
+        its context."""
+        for kind, i, text, at, ctx in hits:
+            if kind == "model":
+                f = FAMILIES[i]
+                row = self.found.get((f.id, text))
+                if row is None:
+                    row = self.found[(f.id, text)] = {
+                        "model": text, "vendor": f.vendor, "family": f.id,
+                        "kind": kind_of(f.id, text), "count": 0, "offsets": [], "context": ctx}
+            else:
+                spec = self.identifiers[i]
+                key = (spec["identifier"], spec["form"])
+                row = self.ids.get(key)
+                if row is None:
+                    row = self.ids[key] = {
+                        "identifier": spec["identifier"], "value": spec["value"],
+                        "form": spec["form"], "count": 0, "offsets": [], "context": ctx}
+            row["count"] += 1
+            if len(row["offsets"]) < OFFSETS_KEPT:
+                row["offsets"].append(at)
 
     def result(self, searched: dict) -> dict:
         rows = sorted(self.found.values(),
                       key=lambda r: (r["kind"] != "recorder", -r["count"], r["model"]))
+        for r in rows:
+            r["possible_chance_match"] = possible_chance_match(r)
         out = {"rule": RULE, "status": "candidate", "searched": searched,
                "candidates": rows,
                "notes": ["a model string on the platter shows the text is on this disk, "
@@ -280,6 +317,51 @@ class ModelSearch:
             out["notes"].append("the unit's own serial, device ID or MAC on the platter shows "
                                 "this unit wrote to the disk; finding none shows nothing")
         return out
+
+
+_SCAN_IDS: list[dict] = []           # a worker's identifier forms (search_blocks)
+
+
+def _scan_init(identifiers: list[dict]) -> None:
+    global _SCAN_IDS
+    _SCAN_IDS = identifiers
+
+
+def _scan_block(buf: bytes, base: int, offset: int) -> list[tuple]:
+    return scan(buf, base, offset, _SCAN_IDS)
+
+
+def search_blocks(read_at, blocks: list[tuple[int, int]], search: ModelSearch,
+                  workers: int = 1, progress=None) -> None:
+    """Read `blocks` (offset, length) with `read_at` and feed them to `search`.
+
+    The matching is CPU-bound - one process manages about 6 MiB/s, which
+    makes a whole-drive search hours long - and the reading is not.  With
+    `workers` > 1, scan() runs in that many processes (spawn, as
+    acquire/parallel.py) while this one reads, and the hits are applied here
+    in block order: the result is the one feeding the blocks one by one
+    gives.  At most 2 x workers blocks are in flight, so memory stays
+    bounded.  `progress(k)` is called after block k is read."""
+    if workers <= 1:
+        for k, (off, n) in enumerate(blocks):
+            search.feed(off, read_at(off, n))
+            if progress:
+                progress(k)
+        return
+    import multiprocessing as mp
+    from collections import deque
+    pending: deque = deque()
+    with mp.get_context("spawn").Pool(workers, initializer=_scan_init,
+                                      initargs=(search.identifiers,)) as pool:
+        for k, (off, n) in enumerate(blocks):
+            buf, base = search._chain(off, read_at(off, n))            # noqa: SLF001
+            pending.append(pool.apply_async(_scan_block, (buf, base, off)))
+            while len(pending) > 2 * workers:
+                search.apply(pending.popleft().get())
+            if progress:
+                progress(k)
+        while pending:
+            search.apply(pending.popleft().get())
 
 
 # ---------------------------------------------------------------------------
@@ -334,14 +416,20 @@ def check(observations: list[dict], platter: Optional[dict],
                                   + ". To be explained: the disk was formatted or used by "
                                   "another recorder, or the unit is built by another vendor"})
 
-    cands = [c for c in (platter or {}).get("candidates", []) if c["kind"] == "recorder"]
+    listed = [c for c in (platter or {}).get("candidates", []) if c["kind"] == "recorder"]
+    chance = [c for c in listed if possible_chance_match(c)]
+    cands = [c for c in listed if not possible_chance_match(c)]
     if platter is None:
         out.append({"check": "model strings on the platter", "verdict": "not determined",
                     "detail": "not searched (identify-model)"})
     elif not cands:
         out.append({"check": "model strings on the platter", "verdict": "not determined",
                     "detail": f"no recorder model string in the "
-                              f"{platter['searched']['bytes']:,} bytes searched"})
+                              f"{platter['searched']['bytes']:,} bytes searched"
+                              + ("; " + ", ".join(f"{c['model']} (1x, {len(c['model'])} "
+                                                  f"characters)" for c in chance[:5])
+                                 + " listed as a possible chance match - a short string seen "
+                                   "once turns up by chance in binary data" if chance else "")})
     elif obs:
         same = [c for c in cands if c["model"].upper() == obs["model"].upper()]
         out.append({"check": "model strings on the platter vs the unit",

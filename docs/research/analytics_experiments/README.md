@@ -30,3 +30,4 @@ the tool does:
 | 3. Static rule | `static_v3.py` (box-match looseness 0.8 / 0.7 / 0.6 / 0.5), `desk_check.py` (is anyone at the reception desk?) | The rule is kept at 0.8. Loosening it did not catch the desk box, and it dropped the seated pair on set A. |
 | 4. Person threshold | `score_v3.py`, plus the `sweep` of `validate.analytics_eval` | People at 0.4, vehicles at 0.5. Seen on set A and confirmed on CAVIAR. |
 | 5. Rotation | `exp_rot.py` (the frame also turned 90/180/270 degrees; includes a self-check of the box mapping), `score_rot.py` | `--rotate auto`: round fisheye pictures only. Turning every camera added upside-down "faces" on an upright street camera. |
+| 6. Parked vehicles | `parked.py` (static car/bus/truck places at 0.5 / 0.4 / 0.3 / 0.25, on set A and CAVIAR) | Parked vehicles are their own lead, from 0.3, cars, buses and trucks only. On set A all 8 places are real cars; on CAVIAR there are 0. |

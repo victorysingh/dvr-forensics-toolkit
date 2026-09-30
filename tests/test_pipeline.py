@@ -107,6 +107,113 @@ def test_ledger(tmp: str) -> None:
           canonical_json({"b": 1, "a": 2}) == canonical_json({"a": 2, "b": 1}))
 
 
+def test_ledger_seal(tmp: str) -> None:
+    """The keyed seal catches what the chain cannot: entries cut off the end,
+    and a ledger rewritten from scratch."""
+    print("\n[custody ledger: keyed seal]")
+    from acquire import ledger as L
+    keys = os.path.join(tmp, "seal_keys")
+    key_a = os.path.join(keys, "a.key")
+    os.environ[L.SEAL_KEY_ENV] = key_a
+    path = os.path.join(tmp, "sealed", "custody_ledger.jsonl")
+    led = CustodyLedger(path, actor="JP", case_id="S-1")
+    for k in range(4):
+        led.append("step", {"k": k})
+    original_seal = open(led.seal_path, encoding="utf-8").read()
+    s = CustodyLedger(path).verify_seal()
+    check("a fresh ledger is sealed, and the seal checks",
+          os.path.exists(key_a) and s["checked"] and s["valid"] and s["count"] == 4, str(s))
+    check("the key is kept outside the case folder",
+          not os.path.abspath(key_a).startswith(os.path.dirname(os.path.abspath(path))))
+
+    # Cut the last entry off: what remains is still a valid chain.
+    lines = open(path, encoding="utf-8").read().splitlines(True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.writelines(lines[:3])
+    cut = CustodyLedger(path)
+    check("a ledger with its last entry cut off still passes the chain check alone",
+          cut.verify()["valid"])
+    check("... but not the seal: entries were removed",
+          not cut.verify_seal()["valid"] and "removed" in cut.verify_seal()["message"])
+
+    # Someone without the key writes a whole new ledger of the same length.
+    os.environ[L.SEAL_KEY_ENV] = os.path.join(keys, "someone-else.key")
+    forged = CustodyLedger(os.path.join(tmp, "forged", "custody_ledger.jsonl"),
+                           actor="someone else", case_id="S-1")
+    for k in range(4):
+        forged.append("step", {"k": k, "invented": True})
+    shutil.copyfile(forged.path, path)
+    with open(led.seal_path, "w", encoding="utf-8") as fh:
+        fh.write(original_seal)
+    os.environ[L.SEAL_KEY_ENV] = key_a
+    rew = CustodyLedger(path)
+    check("a ledger rewritten from scratch passes the chain check alone ...",
+          rew.verify()["valid"])
+    check("... but fails the seal", not rew.verify_seal()["valid"]
+          and "rewritten" in rew.verify_seal()["message"], str(rew.verify_seal()))
+
+    # Edit the seal itself.
+    data = json.loads(original_seal)
+    kid = next(iter(data["seals"]))
+    data["seals"][kid]["count"] = 3
+    with open(led.seal_path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    check("an edited seal file is caught",
+          "edited" in CustodyLedger(path).verify_seal()["message"])
+
+    # A second examiner's machine: its own key; each seal vouches for its part.
+    p2 = os.path.join(tmp, "handover", "custody_ledger.jsonl")
+    first = CustodyLedger(p2, actor="JP")
+    first.append("scan_completed")
+    first.append("report_generated")
+    os.environ[L.SEAL_KEY_ENV] = os.path.join(keys, "b.key")
+    CustodyLedger(p2, actor="Shrestha").append("certificate_drafted")
+    sb = CustodyLedger(p2).verify_seal()
+    os.environ[L.SEAL_KEY_ENV] = key_a
+    sa = CustodyLedger(p2).verify_seal()
+    check("handed over: each machine's seal checks its own part",
+          sb["valid"] and sb["count"] == 3 and sa["valid"] and sa["count"] == 2
+          and "outside this key's seal" in sa["message"], f"{sa} {sb}")
+    os.environ[L.SEAL_KEY_ENV] = os.path.join(keys, "not-here.key")
+    nk = CustodyLedger(p2).verify_seal()
+    check("with no key on this machine the seal is reported, not failed",
+          nk["valid"] and not nk["checked"] and "cannot be checked here" in nk["message"])
+    un = CustodyLedger(os.path.join(tmp, "unsealed.jsonl")).verify_seal()
+    check("a ledger written before sealing is reported as unsealed",
+          not un["sealed"] and un["valid"])
+    os.environ[L.SEAL_KEY_ENV] = os.path.join(keys, "suite.key")
+
+
+def test_proc() -> None:
+    """Outside programs are stopped when they hang, and say so."""
+    print("\n[outside programs: time limits]")
+    import subprocess as sp
+    import time
+    from core import proc
+    t0 = time.time()
+    r = proc.run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1,
+                 capture_output=True, text=True)
+    check("a program past its time limit is stopped and marked timed out",
+          r.timed_out and r.returncode == proc.TIMED_OUT and time.time() - t0 < 15
+          and "did not finish within 1 s" in r.stderr, f"{r.returncode} {r.stderr!r}")
+    try:
+        proc.run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1, check=True,
+                 capture_output=True)
+        raised = False
+    except sp.CalledProcessError:
+        raised = True
+    check("with check=True a time-out raises, as any failure would", raised)
+    check("a program that finishes is returned as usual",
+          proc.run([sys.executable, "-c", "print('ok')"], capture_output=True, text=True,
+                   timeout=30).stdout.strip() == "ok")
+    t0 = time.time()
+    with sp.Popen([sys.executable, "-c", "import sys, time; sys.stdout.buffer.write(b'x' * 8); "
+                   "sys.stdout.flush(); time.sleep(30)"], stdout=sp.PIPE) as p:
+        chunks = list(proc.read_chunks(p, 8, stall_s=1))
+    check("a streaming decoder that goes silent is stopped, keeping what it gave",
+          chunks == [b"x" * 8] and time.time() - t0 < 15, f"{chunks} {time.time() - t0:.1f}s")
+
+
 # ---------------------------------------------------------------------------
 def test_boundary_signatures() -> None:
     print("\n[signature block boundaries]")
@@ -558,6 +665,39 @@ def test_dahua_parser(tmp: str) -> None:
     check("an investigator-supplied offset converts recorder time to UTC",
           res.recordings[0].start_utc == "2026-09-03T04:30:00.000Z",
           str(res.recordings[0].start_utc))
+
+    # extract: several recordings after one parse - what a day of footage over USB needs
+    import argparse
+    import cli
+    ids = [r.id for r in res.recordings]
+
+    def ns(rec, out):
+        return argparse.Namespace(device=img, vendor="Dahua", recording=rec, out=out,
+                                  tz_offset=None)
+
+    def outputs(d):
+        got = {}
+        for fn in sorted(os.listdir(d)):
+            path = os.path.join(d, fn)
+            if fn.endswith(".manifest.json"):
+                with open(path, encoding="utf-8") as fh:
+                    m = json.load(fh)
+                m.pop("generated_utc", None)
+                got[fn] = m
+            else:
+                with open(path, "rb") as fh:
+                    got[fn] = hashlib.sha256(fh.read()).hexdigest()
+        return got
+    one, many, bad = (os.path.join(tmp, d) for d in ("x_one", "x_many", "x_bad"))
+    rcs = [cli.cmd_extract(ns(rid, one)) for rid in ids]
+    rc_many = cli.cmd_extract(ns(ids, many))
+    rc_bad = cli.cmd_extract(ns([ids[0], "dhfs-v9-c999999"], bad))
+    check("extract: three recordings after one parse give exactly what three calls give; "
+          "an unknown id among them is refused without stopping the rest",
+          rcs == [0, 0, 0] and rc_many == 0 and outputs(one) == outputs(many)
+          and len(outputs(many)) == 3 * len(ids) and rc_bad == 1
+          and os.path.exists(os.path.join(bad, ids[0] + ".dav")),
+          f"{rcs} {rc_many} {rc_bad} {sorted(outputs(many))[:4]}")
 
 
 class _BytesSink(_Sink):
@@ -1789,6 +1929,52 @@ def test_timeline_recurring() -> None:
           len(r) == 1 and r[0]["start_local"] == "02:00" and len(r[0]["days"]) == 3, str(r))
 
 
+def test_case_view() -> None:
+    """What the case console shows, as load_case builds it for the screens."""
+    print("\n[case view]")
+    from report.case import _labelled_thumb, _with_local_span, vendor_matrix
+
+    def claim(source, when):
+        return {"source": source, "raw_value": f"0x0 = {when} recorder-local"}
+
+    rec = {"id": "r", "timestamps": [claim("index", "2026-09-03 12:53:53"),
+                                     claim("index", "2026-09-03 14:00:00"),
+                                     claim("container", "2026-09-03 12:53:52")]}
+    got = _with_local_span(rec)
+    check("a recording's span is its index start and end, as the timeline takes them",
+          (got["start_time_local"], got["end_time_local"])
+          == ("2026-09-03 12:53:53", "2026-09-03 14:00:00") and "start_time_local" not in rec,
+          str(got))
+    only_frames = {"id": "h", "timestamps": [claim("container", "2026-01-02 03:04:05"),
+                                             claim("container", "2026-01-02 03:09:05")]}
+    got = _with_local_span(only_frames)
+    undated = _with_local_span({"id": "u", "timestamps": [claim("index", "not a time")]})
+    check("with no index times the span is the first and last frame; with none it is empty",
+          (got["start_time_local"], got["end_time_local"])
+          == ("2026-01-02 03:04:05", "2026-01-02 03:09:05")
+          and undated["start_time_local"] is None and undated["end_time_local"] is None,
+          f"{got} {undated}")
+
+    clip = {"clip": "c.h265", "detections": [
+        {"t_s": 5.0, "detections": [
+            {"label": "person", "score": 0.59, "static": False, "implausible": False},
+            {"label": "face", "score": 0.91, "static": True, "implausible": False}]},
+        {"t_s": 10.0, "detections": [
+            {"label": "face", "score": 0.95, "static": False, "implausible": True}]}]}
+    shown = _labelled_thumb({"file": "a.jpg", "t_s": 5.0}, clip)
+    flagged = _labelled_thumb({"file": "b.jpg", "t_s": 10.0}, clip)
+    empty = _labelled_thumb({"file": "c.jpg", "t_s": 15.0}, clip)
+    check("a thumbnail is labelled by the counted boxes on its frame, never by flagged ones",
+          (shown["label"], shown["score"], shown["clip"]) == ("person", 0.59, "c.h265")
+          and (flagged["label"], flagged["score"]) == ("flagged, not counted", None)
+          and empty["label"] is None, f"{shown} {flagged} {empty}")
+
+    hik = next(r for r in vendor_matrix() if r["vendor"] == "Hikvision")
+    check("the vendor matrix says drive 2 was read, and claims no more than spec_only for it",
+          hik["parser_status"] == "spec_only" and "not yet read" not in hik["media"]
+          and "intact" in hik["basis"], str(hik))
+
+
 def test_timeline_recorder_log() -> None:
     """The recorder's own log set against the footage: a silence on every
     camera with a logged power-on is a power cut; one without is reported as
@@ -2131,6 +2317,170 @@ def test_analytics_models() -> None:
           == (0.4, 0.5, 0.5, 0.7, 0.5, 0.8))
 
 
+def test_parked_vehicles() -> None:
+    """A car that stays in one place is a parked vehicle, reported once per
+    place; a car box under the reporting threshold is kept only for that, and
+    is not counted as a vehicle."""
+    print("\n[analytics: parked vehicles]")
+    from analytics.models import keep_threshold, mark_weak, threshold
+    from analytics.static import counted, flag_static, parked_spots
+    car = lambda s, box, label="car": {"label": label, "score": s, "box": box}
+    spot = [0.10, 0.60, 0.30, 0.80]
+    hits = [{"t_s": float(t), "detections": [car(0.3 + 0.02 * t, spot, "truck" if t == 2 else "car"),
+                                             car(0.45, [0.5, 0.1, 0.6, 0.2], "bicycle"),
+                                             car(0.8, [0.05 * t, 0.2, 0.05 * t + 0.1, 0.3])]}
+            for t in range(6)]
+    for h in hits:                                  # the bicycle stays too, the third car moves
+        h["detections"][1]["box"] = [0.5, 0.1, 0.6, 0.2]
+    flag_static(hits, 6)
+    spots = parked_spots(hits)
+    check("a car seen in one place is one parked vehicle (the frame where it was once called a "
+          "truck is not: the static rule is per label); a moving car and a static bicycle are not "
+          "parked vehicles",
+          len(spots) == 1 and spots[0]["label"] == "car" and spots[0]["frames"] == 5
+          and spots[0]["first"] == 0.0 and spots[0]["last"] == 5.0 and spots[0]["best"] == 0.4,
+          str(spots))
+    check("a car box is kept from 0.3 for parked vehicles but counts as a vehicle only from 0.5; "
+          "people keep 0.4; the classic set keeps 0.5 for everything",
+          (keep_threshold("yolox", "car"), threshold("yolox", "car"), keep_threshold("yolox", "person"),
+           keep_threshold("yolox", "bicycle"), keep_threshold("classic", "truck")) == (0.3, 0.5, 0.4, 0.5, 0.5))
+    weak, strong = mark_weak("yolox", [car(0.35, spot), car(0.6, spot)])
+    check("a box under its reporting threshold is weak and not counted; one over it is",
+          weak["weak"] and not counted(weak) and not strong["weak"] and counted(strong))
+
+
+def test_parser_safety_net() -> None:
+    """No parser may end in a traceback: data a parser cannot handle makes
+    detect() answer False and parse() return a result that says where it
+    stopped; a device error still propagates."""
+    print("\n[parsers: the safety net for damaged data]")
+    from acquire.device import DeviceError
+    from parsers.base import REGISTRY, ParseResult, VendorParser, register
+
+    class Broken(VendorParser):
+        vendor, parser_rule = "Broken-for-test", "test.broken"
+
+        def detect(self, dev, hint_offsets=None):
+            return struct.unpack("<I", b"\x01")[0] == 1          # struct.error
+
+        def parse(self, dev, hint_offsets=None):
+            if getattr(dev, "fail", False):
+                raise DeviceError("the drive went away")
+            return {}["missing"]                                 # KeyError
+
+    try:
+        register(Broken)
+        p = Broken()
+        res = p.parse(object())
+        check("a parser that raises on damaged data returns a result naming where it stopped, "
+              "detected_not_parsed, instead of a traceback",
+              isinstance(res, ParseResult) and res.stopped.startswith("KeyError")
+              and "test_pipeline.py" in res.stopped and res.validation_status == "detected_not_parsed"
+              and res.errors and p.detect(object()) is False
+              and p.detect_stopped.startswith("error"), res.stopped)
+        dev = type("Dev", (), {"fail": True})()
+        try:
+            p.parse(dev)
+            propagated = False
+        except DeviceError:
+            propagated = True
+        check("a device error still propagates: the device failed, not the data", propagated)
+    finally:
+        REGISTRY.pop("Broken-for-test", None)
+
+
+def test_parser_fuzz(tmp: str) -> None:
+    """Every parser against corrupted disks (validate/fuzz_parsers.py, a fixed
+    seed): none crashes, hangs or has to be stopped by the safety net."""
+    print("\n[parsers: fuzzed with corrupted disks]")
+    import random
+    import threading
+    from validate import fuzz_parsers as F
+    for vendor in F._seed_builders():
+        data, reads, _ = F.seed(vendor, tmp)
+        rnd = random.Random(f"{vendor}:test")
+        bad = []
+        for n in range(12):
+            patches, size, what = F.mutate(data, reads, rnd)
+            box: dict = {}
+            t = threading.Thread(target=lambda: box.update(F.run_case(vendor, data, patches, size)),
+                                 daemon=True)
+            t.start()
+            t.join(30)
+            outcome = box.get("outcome", "hang")
+            if outcome not in ("ok", "device-error"):
+                bad.append((n, outcome, box.get("error", box.get("detail", "")), what))
+        check(f"{vendor}: 12 corrupted disks - no crash, hang or safety-net stop", not bad, str(bad[:2]))
+
+
+def test_carver_fuzz(tmp: str) -> None:
+    """The three carvers and the E01 reader against damaged input
+    (validate/fuzz_parsers.py, a fixed seed): none crashes or hangs; and a
+    damaged E01 set is refused without leaving its evidence file open."""
+    print("\n[carvers and the E01 reader: fuzzed with damaged input]")
+    import random
+    import threading
+    from acquire.device import DeviceError
+    from validate import fuzz_parsers as F
+    for name in F.CARVERS:
+        data, reads, _ = F.seed(name, tmp)
+        rnd = random.Random(f"{name}:test")
+        bad = []
+        for n in range(8):
+            patches, size, what = F.mutate(data, reads, rnd)
+            box: dict = {}
+            t = threading.Thread(target=lambda: box.update(
+                F.run_carver(name, data, patches, size, F.SEGMENTS.get(name, []))), daemon=True)
+            t.start()
+            t.join(60)
+            if box.get("outcome", "hang") not in ("ok", "device-error"):
+                bad.append((n, box.get("outcome", "hang"), box.get("error", ""), what))
+        check(f"{name}: 8 damaged inputs - no crash or hang", not bad, str(bad[:2]))
+
+    from tests import synth_ewf
+    media = bytes(64 << 10)
+    first = synth_ewf.write(os.path.join(tmp, "leak"), media)[0]
+    with open(first, "r+b") as fh:                  # damage the first section's descriptor
+        fh.seek(13 + 16)
+        fh.write(b"\xff" * 8)
+    refused = released = False
+    try:
+        BlockDevice(first)
+    except DeviceError:
+        refused = True
+        try:                                        # while the refusal is still being handled
+            os.remove(first)                        # (fails on Windows if a handle is open)
+            released = True
+        except OSError:
+            pass
+    check("a damaged E01 set is refused as a device error and its evidence file is not left open",
+          refused and released, f"refused={refused} released={released}")
+
+
+def test_analytics_apply(tmp: str) -> None:
+    """`apply` scores a set sampled earlier under today's rules from its
+    stored boxes alone - no video, no frames."""
+    print("\n[analytics: apply today's rules to stored boxes]")
+    from validate import analytics_eval as E
+    out = os.path.join(tmp, "apply_set")
+    os.makedirs(out, exist_ok=True)
+    car = {"label": "car", "score": 0.35, "box": [0.1, 0.6, 0.3, 0.8]}          # parked, under 0.5
+    walker = lambda f: {"label": "person", "score": 0.45, "box": [0.1 * f, 0.1, 0.1 * f + 0.1, 0.4]}
+    stored = [{"frame": f, "clip": 0, "detections": [], "any_score": [dict(car), walker(f)]}
+              for f in range(6)]
+    json.dump({"model_set": "yolox", "clips": [{"clip": "a.dav"}], "detections": stored},
+              open(os.path.join(out, "detections.json"), "w", encoding="utf-8"))
+    E.apply(out, log=lambda *a: None)
+    det = json.load(open(os.path.join(out, "detections.json"), encoding="utf-8"))
+    first = det["detections"][0]["detections"]
+    check("apply: the parked car is kept as a weak, static box and reported once as a parked "
+          "vehicle; the moving person at 0.45 counts; the sampled original is kept",
+          len(det["clips"][0]["parked_vehicles"]) == 1 and det["clips"][0]["parked_vehicles"][0]["frames"] == 6
+          and any(d["label"] == "car" and d["weak"] and d["static"] for d in first)
+          and any(d["label"] == "person" and not d["weak"] and not d["static"] for d in first)
+          and os.path.exists(os.path.join(out, "detections.sampled.json")), json.dumps(first))
+
+
 def test_caviar_eval(tmp: str) -> None:
     """Scoring on CAVIAR: the ground truth read from its XML, a person found
     by box overlap, a static box not counted, and boxes over nobody counted
@@ -2162,6 +2512,120 @@ def test_caviar_eval(tmp: str) -> None:
           and s["frames_without_person"] == {"reported": 0, "of": 1}
           and s["frames_with_person"] == {"found": 1, "of": 1} and s["boxes_matching_no_label"] == 1,
           json.dumps(s))
+
+
+def test_face_search_rules() -> None:
+    """Face search: the alignment undoes any turn, scale and shift of a face
+    exactly; a face is a candidate only if alike enough and large enough;
+    results rank across clips; the model is pinned and analyse-video never
+    runs it."""
+    print("\n[analytics: face search rules]")
+    import math
+    from analytics.face_rules import (MATCH_MIN, MIN_EYE_PX, NOTES, TEMPLATE, apply, eye_px,
+                                      is_candidate, ranked, similarity)
+    from analytics.models import MODEL_SETS, MODELS
+    ident = similarity(TEMPLATE)
+    check("the template aligned onto itself is left where it is",
+          all(abs(x - y) < 1e-9 for r1, r2 in zip(ident, [[1, 0, 0], [0, 1, 0]]) for x, y in zip(r1, r2)),
+          str(ident))
+    th, k, sx, sy = 0.35, 0.42, 811.0, 233.5          # a small face, tilted, far into the frame
+    seen = [(k * (math.cos(th) * x - math.sin(th) * y) + sx, k * (math.sin(th) * x + math.cos(th) * y) + sy)
+            for x, y in TEMPLATE]
+    back = [apply(similarity(seen), p) for p in seen]
+    check("a face turned, shrunk and moved is brought back onto the template exactly",
+          all(abs(a - b) < 1e-6 for p, q in zip(back, TEMPLATE) for a, b in zip(p, q)), str(back))
+    try:
+        similarity([(5, 5)] * 5)
+        same_point = False
+    except ValueError:
+        same_point = True
+    check("five points in one place are refused, not divided by zero", same_point)
+    check("eye distance is measured between the two eye points",
+          eye_px([(10, 10), (13, 14), (0, 0), (0, 0), (0, 0)]) == 5.0)
+    face = lambda s, e: {"similarity": s, "eye_px": e}
+    check("a candidate needs the similarity and the size: alike and large yes, alike but "
+          "tiny no, large but unlike no, both exactly at the limits yes",
+          [is_candidate(face(0.6, 30)), is_candidate(face(0.6, MIN_EYE_PX - 0.5)),
+           is_candidate(face(MATCH_MIN - 0.01, 60)), is_candidate(face(MATCH_MIN, MIN_EYE_PX))]
+          == [True, False, False, True])
+    clips = [{"clip": "a.h264", "faces": [{"t_s": 1.0, "similarity": 0.2}, {"t_s": 5.0, "similarity": 0.7}]},
+             {"clip": "b.ps", "faces": [{"t_s": 2.0, "similarity": 0.5}]}]
+    check("faces are ranked across clips, most alike first, each with its clip",
+          [(f["clip"], f["t_s"]) for f in ranked(clips)] == [("a.h264", 5.0), ("b.ps", 2.0), ("a.h264", 1.0)])
+    check("SFace is pinned with its Apache-2.0 licence, and no analyse-video model set uses it",
+          MODELS["sface"]["license"] == "Apache-2.0" and len(MODELS["sface"]["sha256"]) == 64
+          and all("sface" not in (s["faces"], s["objects"]) for s in MODEL_SETS.values()))
+    check("every result carries the words: a candidate, not an identification",
+          "NOT AN IDENTIFICATION" in NOTES[0] and any("absent" in n for n in NOTES))
+
+
+def test_face_search_report(tmp: str) -> None:
+    """A face search result reaches the case report as candidates, with the
+    photo's hash, the models and the warning, and is listed among its inputs;
+    a PS clip's faces get the recorder's time."""
+    print("\n[analytics: face search in the report]")
+    import cli
+    from report.case import load_case
+    from report.html import render
+    case = os.path.join(tmp, "face-case")
+    os.makedirs(os.path.join(case, "analytics"), exist_ok=True)
+    os.makedirs(os.path.join(case, "carve"), exist_ok=True)
+    with open(os.path.join(case, "carve", "ps_report.json"), "w", encoding="utf-8") as fh:
+        json.dump({"streams": [{"id": "ps-00007", "time_first_local": "2024-08-30 14:00:00"}]}, fh)
+    clips = [{"clip": "ps-00007.ps", "faces": [{"t_s": 90.0, "similarity": 0.61, "eye_px": 21.0,
+                                                "candidate": True}]},
+             {"clip": "cam2.h264", "faces": [{"t_s": 3.0, "similarity": 0.12, "eye_px": 9.0,
+                                              "candidate": False}]}]
+    stamped = cli._recorder_times(case, clips, "faces")
+    check("a face in a Hikvision PS clip gets the recorder's time; a clip with no clock gets none",
+          stamped and clips[0]["faces"][0]["time_local"] == "2024-08-30 14:01:30"
+          and "time_local" not in clips[1]["faces"][0], str(clips))
+    os.remove(os.path.join(case, "carve", "ps_report.json"))   # a stand-in, not a whole carve
+    model = {"name": "SFace", "license": "Apache-2.0", "sha256": "ab" * 32, "source": "https://x"}
+    fs = {"rule": "analytics.face_search.sface.v1", "status": "candidates for review, not identification",
+          "reference": {"photo": "suspect.jpg", "photo_sha256": "cd" * 32, "faces_in_photo": 1,
+                        "turned": 0, "eye_px": 88.0},
+          "models": {"faces": dict(model, name="YuNet", license="MIT"), "recognition": model},
+          "match_min": 0.363, "min_eye_px": 12,
+          "totals": {"clips": 2, "frames_analysed": 40, "faces_compared": 2, "candidates": 1, "too_small": 1},
+          "top": [dict(f, clip=c["clip"]) for c in clips for f in c["faces"]], "clips": clips,
+          "notes": ["A CANDIDATE, NOT AN IDENTIFICATION."]}
+    with open(os.path.join(case, "analytics", "face_search.json"), "w", encoding="utf-8") as fh:
+        json.dump(fs, fh)
+    c = load_case(case)
+    page = render(c)
+    check("the case carries the face search, hashed", c.get("face_search", {}).get("sha256") is not None
+          and c["face_search"]["totals"]["candidates"] == 1)
+    check("the report shows it as candidates, with the photo's hash, the warning and the "
+          "recorder time, and lists face_search.json among its inputs",
+          "Face search — candidates, not identifications" in page and "cd" * 32 in page
+          and "it does not say who anyone is" in page and "2024-08-30 14:01:30" in page
+          and "analytics/face_search.json" in page)
+
+
+def test_face_eval(tmp: str) -> None:
+    """The face search measurement's bookkeeping: LFW's pairs file read as
+    same / different pairs, the face nearest the centre chosen, results
+    binned by eye distance."""
+    print("\n[analytics: face search measurement]")
+    from validate.face_eval import binned, central, read_pairs
+    p = os.path.join(tmp, "pairs.txt")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("2\t1\nAnn_Lee\t1\t3\nBo_Chan\t2\tCy_Das\t1\nDee_Fox\t1\t2\nEd_Gray\t4\tFay_Hu\t2\n")
+    one, both = read_pairs(p, 1), read_pairs(p, 5)
+    check("pairs.txt: a 3-field row is one person twice, a 4-field row two people; folds kept",
+          one == [(True, ("Ann_Lee", 1), ("Ann_Lee", 3)), (False, ("Bo_Chan", 2), ("Cy_Das", 1))]
+          and len(both) == 4 and both[3] == (False, ("Ed_Gray", 4), ("Fay_Hu", 2)))
+    faces = [{"box": [0.0, 0.0, 0.2, 0.2]}, {"box": [0.4, 0.45, 0.62, 0.6]}]
+    check("the face nearest the centre is the subject; none if nothing is near it",
+          central(faces) is faces[1] and central(faces[:1]) is None)
+    rows = [{"same": True, "eye_px": 9.0, "similarity": 0.2}, {"same": True, "eye_px": 30.0, "similarity": 0.7},
+            {"same": False, "eye_px": 30.5, "similarity": 0.4}, {"same": False, "eye_px": 31.0, "similarity": 0.1}]
+    b = {x["eye_px"]: x for x in binned(rows, 0.363)}
+    check("binned by eye distance: passes counted per bin for the same person and for different people",
+          b["8-10"] == {"eye_px": "8-10", "faces": 1, "same": 1, "same_pass": 0, "diff": 0, "diff_pass": 0}
+          and b["24-32"] == {"eye_px": "24-32", "faces": 3, "same": 1, "same_pass": 1, "diff": 2,
+                             "diff_pass": 1}, str(b))
 
 
 def test_hikbtree(tmp: str) -> None:
@@ -3063,6 +3527,52 @@ def test_model(tmp: str) -> None:
           and v_stale["verdict"] == "not determined" and "again" in v_stale["detail"]
           and v_none["verdict"] == "not determined" and "does not show" in v_none["detail"],
           f"{v_found} {v_stale} {v_none}")
+
+    # a short model-shaped string seen once is a possible chance match, not a reading
+    ms_c = M.ModelSearch()
+    blk = bytearray(4096)
+    blk[100:108] = b"?HRG745/"                           # as found on the CP Plus drive
+    for at in (1000, 2000):
+        blk[at:at + 16] = b" DS-7B08HUHI-K1 "
+    ms_c.feed(0, bytes(blk))
+    flags = {c["model"]: c["possible_chance_match"] for c in ms_c.result({})["candidates"]}
+
+    def platter_verdict(cands):
+        res = M.check([unit], {"searched": {"bytes": 82_323_397_632}, "candidates": cands}, dahua)
+        return next(c for c in res if c["check"].startswith("model strings on the platter"))
+    hrg = {"model": "HRG745", "vendor": "Honeywell", "family": "honeywell", "kind": "recorder",
+           "count": 1, "offsets": [1], "context": ""}
+    cpp = dict(hrg, model="CP-UNR-104F1", vendor="CP Plus", family="cpplus")
+    v_hrg, v_both = platter_verdict([hrg]), platter_verdict([cpp, hrg])
+    check("a short model string seen once is listed as a possible chance match and does not "
+          "make the check 'differ'; a real one still agrees beside it",
+          flags == {"HRG745": True, "DS-7B08HUHI-K1": False}
+          and v_hrg["verdict"] == "not determined" and "chance" in v_hrg["detail"]
+          and v_both["verdict"] == "agree", f"{flags} {v_hrg} {v_both}")
+
+    # the same search over worker processes (search_blocks) - what a whole drive needs
+    import random
+    disk = bytearray(random.Random(26150).randbytes(64 * 4096))
+    for at, s in ((5000, b" CP-UNR-104F1 "),                    # a model string
+                  (4096 * 3 - 5, b"=DS-7B08HUHI-K1;"),         # across an edge
+                  (4096 * 9 + 7, b" sn=TSTSERIAL0000001 "),    # the serial
+                  (4096 * 22 - 3, bytes.fromhex("02005E100001")),   # raw MAC, across an edge
+                  (4096 * 44 + 100, b"mac=02-00-5e-10-00-01;"),     # MAC text, lower case
+                  (4096 * 40 + 100, b" DH-XVR5104HS-X ")):     # in a block not searched
+        disk[at:at + len(s)] = s
+    blocks = [(k * 4096, 4096) for k in range(64) if k % 7 != 5]   # contiguous runs and gaps
+    one = M.ModelSearch(forms)
+    for off, n in blocks:
+        one.feed(off, bytes(disk[off:off + n]))
+    many = M.ModelSearch(forms)
+    M.search_blocks(lambda off, n: bytes(disk[off:off + n]), blocks, many, workers=2)
+    r1, r2 = one.result({}), many.result({})
+    check("the search spread over worker processes finds exactly what one process finds",
+          json.dumps(r1) == json.dumps(r2)
+          and [c["model"] for c in r1["candidates"]] == ["CP-UNR-104F1", "DS-7B08HUHI-K1"]
+          and {(r["form"], r["count"]) for r in r1["unit_identifiers"]["found"]}
+          == {("text", 1), ("6 raw bytes", 1), ("text, hyphens", 1)},
+          json.dumps(r2)[:300])
 
     case_u = os.path.join(tmp, "unit_case")
     img_u = os.path.join(tmp, "unit.img")
@@ -4583,9 +5093,13 @@ def test_access(tmp: str) -> None:
 
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
+    # seal keys go under the test folder, never into the examiner's own ~/.ps26150
+    os.environ["PS26150_SEAL_KEY"] = os.path.join(tmp, "seal_keys", "suite.key")
     try:
         test_merkle()
         test_ledger(tmp)
+        test_ledger_seal(tmp)
+        test_proc()
         test_boundary_signatures()
         test_bad_sectors(tmp)
         test_partitions()
@@ -4610,12 +5124,21 @@ def main() -> int:
         test_timeline_clock_default()
         test_timeline_recurring()
         test_timeline_recorder_log()
+        test_case_view()
         test_ps_carver(tmp)
         test_static_detections()
         test_analytics_eval(tmp)
         test_analytics_tiles()
         test_analytics_models()
         test_caviar_eval(tmp)
+        test_face_search_rules()
+        test_face_search_report(tmp)
+        test_face_eval(tmp)
+        test_parked_vehicles()
+        test_analytics_apply(tmp)
+        test_parser_safety_net()
+        test_parser_fuzz(tmp)
+        test_carver_fuzz(tmp)
         test_combined(tmp)
         test_osd_rules()
         test_osd_reader(tmp)

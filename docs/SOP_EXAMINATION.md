@@ -40,11 +40,13 @@ text before they appear in a report; they are not asserted here.
 | 2.3 | Install the adapter write-block rule for the evidence adapter (`writeblock-rule --usb-id`) | the tool refuses an adapter that holds the workstation's own disk |
 | 2.4 | Run `python tests/test_pipeline.py` | all pass; record the count and the tool's git commit |
 | 2.5 | Check free space: about 50 MB per drive for the scan, plus footage to extract | `df -h` |
+| 2.6 | The custody seal key: `~/.ps26150/ledger_seal.key` is made on the first case. Back it up with the examiner's records, never inside a case folder: without it the seal cannot be checked | `verify` on a case says "seal intact (key ...)" |
 
 ## Phase 3 — Acquisition
 
 | # | Step | Check |
 |---|---|---|
+| 3.0 | **Every session, including a re-examination days later:** a reboot clears `/run/udev/rules.d`, so re-install the write-block rule *before* connecting. `writeblock-rule --serial SERIAL` needs no drive attached. On 29 Sep drive 1 came up writable (`ro=0`) for this reason; it was blocked by hand before any read, and the kernel counted 0 writes | `ls /run/udev/rules.d` shows the rule before the drive is plugged in; `lsblk -o NAME,SERIAL,RO` shows `RO 1` once it is |
 | 3.1 | Connect the drive through the evidence adapter, with its own power supply for a 3.5" drive | — |
 | 3.2 | `python cli.py devices` — identify the drive by size, model and serial | serial matches the drive label (1.6) |
 | 3.3 | `sudo blockdev --setro /dev/sdX`; `blockdev --getro /dev/sdX` | **must print 1**. If the adapter rule (2.3) is installed, it already does |

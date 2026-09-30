@@ -7,6 +7,14 @@ import { num, bytes, hex, dur, clockTime, camColor } from "../lib/format.js";
 
 export default function Recordings({ c }) {
   const p = c.parse;
+  const hik = c.ps_carve?.labels;
+  if (!p && hik) {
+    // Say where the index went, rather than send the examiner to a command
+    // that, on a reformatted disk, finds an empty index.
+    return <Empty what={`No filesystem parse report. The recorder's HIKBTREE index
+      (${num(hik.index_records)} records) was read while labelling the carved streams:
+      the labelled streams are on Recovered, and their times on Timeline.`} />;
+  }
   if (!p) {
     return <Empty what="The filesystem index has not been parsed for this case."
       how={`cli.py parse --device <dev> --out ${c.id}`} />;
@@ -38,9 +46,14 @@ export default function Recordings({ c }) {
         {(p.summary || []).length > 0 && (
           <Card className="mt-3">
             <h3 className="dim text-[13px] uppercase font-semibold mb-2">Volume</h3>
-            <ul className="list-disc pl-5 text-[12.5px] space-y-0.5">
-              {p.summary.map((x, i) => <li key={i}>{x}</li>)}
-            </ul>
+            {/* the parser writes [key, value] pairs; an empty key continues the row above */}
+            <div className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5 text-[12.5px]">
+              {p.summary.map((x, i) => {
+                const [k, v] = Array.isArray(x) ? x : ["", x];
+                return [<span key={`k${i}`} className="dim">{k}</span>,
+                        <span key={`v${i}`}>{v}</span>];
+              })}
+            </div>
           </Card>
         )}
       </Section>

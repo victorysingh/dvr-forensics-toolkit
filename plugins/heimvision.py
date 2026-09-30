@@ -212,7 +212,10 @@ class Fat32:
         page = (c * 4) // 65536
         if page not in self._fat_cache:
             self._fat_cache[page] = self.dev.read_at(self.fat_at + page * 65536, 65536)
-        return struct.unpack_from("<I", self._fat_cache[page], (c * 4) % 65536)[0] & 0x0FFFFFFF
+        buf, at = self._fat_cache[page], (c * 4) % 65536
+        if at + 4 > len(buf):                # beyond a damaged or cut image: end of the chain
+            return 0x0FFFFFFF
+        return struct.unpack_from("<I", buf, at)[0] & 0x0FFFFFFF
 
     def extents(self, first: int, size: int) -> list[tuple[int, int]]:
         """The byte runs a file occupies, following its cluster chain."""
@@ -233,7 +236,7 @@ class Fat32:
             raw = self.dev.read_at(off, n)
             for i in range(0, len(raw), 32):
                 e = raw[i:i + 32]
-                if e[0] == 0:
+                if len(e) < 32 or e[0] == 0:
                     return
                 if e[0] in (0xE5, 0x2E) or e[11] == 0x0F:
                     continue
@@ -305,6 +308,9 @@ def _sqlite(blob: bytes, sql: str) -> list[tuple]:
         try:
             con.deserialize(blob)
             return con.execute(sql).fetchall()
+        except MemoryError as exc:
+            raise sqlite3.DatabaseError("the database's header asks for more memory than "
+                                        "there is - damaged") from exc
         finally:
             con.close()
     con.close()
@@ -408,7 +414,7 @@ class HeimVisionParser(VendorParser):
                 ext = fat.extents(f["cluster"], f["size"])
                 head = dev.read_at(ext[0][0], 0x1A0) if ext else b""
                 rec = {"path": f"{d['name']}/{f['name']}", "extents": ext, "written": f["written"]}
-                if head[:4] == FILE_MAGIC:
+                if len(head) >= 0x1A0 and head[:4] == FILE_MAGIC:
                     u = lambda o: struct.unpack_from("<I", head, o)[0]
                     rec.update(start=u(4), end=u(8),
                                ch_start=[u(0x8C + 4 * c) for c in range(CHANNELS)],

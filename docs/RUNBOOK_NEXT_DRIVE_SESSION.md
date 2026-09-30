@@ -74,6 +74,28 @@ EOF
 **Bring back:** the `score` and `sweep` printout, and `score.json` with its
 SHA-256. The frames stay on this machine: they show the site.
 
+**Parked vehicles (added 29 Sep, late).** `score` now also lists each
+**parked vehicle**: a car, bus or truck that stays in one place, reported
+once per place, from 0.3. The set sampled earlier does not need sampling
+again, because its stored boxes are enough. Pull `staging`, then:
+
+```bash
+.venv/bin/python -m validate.analytics_eval apply out/realchecks/drive1_recall_yolox
+.venv/bin/python -m validate.analytics_eval score out/realchecks/drive1_recall_yolox
+```
+
+Check that the car parked in *Parking* at night shows up as one, in how many
+of the 35 night frames, and that no parked vehicle is something else.
+
+**Done 30 Sep from the two text files:** the night car is a parked vehicle
+in 26 of 35 frames, with no false one (VALIDATION_REPORT §8a). Re-run only if
+the rules change again.
+
+**Or send the two text files instead:** `detections.json` and `labels.csv`
+from that folder. They hold boxes, scores and labels, no picture of the site.
+`apply` and `score` then run anywhere, and give the same result as a fresh
+sample (checked on set A: identical).
+
 ## 2. On-screen titles and clocks (OCR) against what the eye read
 
 The reader has been measured on six public recorders (validation report

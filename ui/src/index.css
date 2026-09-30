@@ -63,8 +63,15 @@
    The status colours are not decoration: each names how strong the evidence
    behind a claim is, and means the same thing on every screen. --lead is
    reserved for anything a model produced and is never used for anything
-   else.                                                                  */
-@theme {
+   else.
+
+   `static` (from setup): emit every variable, not only the ones a utility
+   class mentions. The camera colours are read by inline styles -
+   format.js::camColor builds var(--color-cam-N) at runtime - which Tailwind
+   cannot see, so without this the lanes and bars render with no colour.
+   The values below are the dark defaults the looks and the per-look light
+   palettes further down are written against.                              */
+@theme static {
   --color-bg: #0b0f14;
   --color-surface: #121821;
   --color-surface-2: #172030;

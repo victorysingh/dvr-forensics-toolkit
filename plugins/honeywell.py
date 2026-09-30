@@ -246,6 +246,8 @@ class HoneywellParser(VendorParser):
 
     def _header(self, dev, p1: int) -> dict:
         raw = dev.read_at(p1, 0x50)
+        if len(raw) < 0x50:                  # past the end of a damaged or cut image
+            raw = raw.ljust(0x50, b"\0")
         u = lambda o: struct.unpack_from("<I", raw, o)[0]
         return {"video_start": u(0x00) * UNIT, "next_write": u(0x08) * UNIT,
                 "available": u(0x10) * UNIT, "total": u(0x18) * UNIT,
@@ -348,6 +350,8 @@ class HoneywellParser(VendorParser):
         if base is None or not chans:
             return None
         b = dev.read_at(base + chans[0]["offset"], FRAME_HDR + 6)
+        if len(b) < FRAME_HDR + 6:           # past the end of a damaged or cut image
+            return None
         if frame_header(b) and b[FRAME_HDR:FRAME_HDR + 4] == b"\x00\x00\x00\x01":
             nh = b[FRAME_HDR + 4]
             return "h265" if not nh & 0x81 and b[FRAME_HDR + 5] in range(1, 8) else "h264"

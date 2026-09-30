@@ -42,7 +42,8 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
-from analytics.static import _iou, counted, flag_implausible, flag_static
+from core import proc
+from analytics.static import _iou, counted, flag_implausible, flag_static, parked_spots
 
 SIZE = (384, 288)                            # CAVIAR's picture
 BINS = ((0, 40, "under 40 px"), (40, 80, "40-80 px"), (80, 10 ** 6, "80 px and over"))
@@ -102,7 +103,7 @@ def run(folder: str, model_set: str | None = None, tiles: int | None = None,
     models = detect.load_models(model_set)
     xmls = {ET.parse(os.path.join(folder, x)).getroot().get("name"): os.path.join(folder, x)
             for x in sorted(os.listdir(folder)) if x.endswith(".xml")}
-    frames = []
+    frames, parked = [], []
     for clip in sorted(x for x in os.listdir(folder) if x.lower().endswith(".mpg")):
         stem = os.path.splitext(clip)[0]
         xml = xmls.get(stem) or (next(iter(xmls.values())) if len(xmls) == 1 else None)
@@ -115,8 +116,7 @@ def run(folder: str, model_set: str | None = None, tiles: int | None = None,
                "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
         mine = []
         with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
-            k = 0
-            while len(buf := p.stdout.read(w * h * 3)) == w * h * 3:
+            for k, buf in enumerate(proc.read_chunks(p, w * h * 3)):
                 if k * every in gt:
                     big = np.frombuffer(buf, np.uint8).reshape(h, w, 3)
                     rot = "on" if clip in rotate_clips else rotate
@@ -124,14 +124,16 @@ def run(folder: str, model_set: str | None = None, tiles: int | None = None,
                                                rotate=rot)
                     mine.append({"clip": clip, "frame": k * every, "gt": gt[k * every],
                                  "detections": dets})
-                k += 1
         hits = [{"detections": f["detections"]} for f in mine if f["detections"]]
         flag_static(hits, len(mine))
         flag_implausible(hits)
+        parked += [dict(s, clip=clip) for s in parked_spots(
+            [dict(f, **{"frame": f["frame"]}) for f in mine if f["detections"]], key="frame")]
         frames += mine
         log(f"{clip}: {len(mine)} frames, {sum(len(f['gt']) for f in mine)} people labelled")
     return {"model_set": model_set, "tiles": n, "every": every, "rotate": rotate,
             "rotate_clips": list(rotate_clips), "frames": len(frames),
+            "parked_vehicle_spots": parked,
             "score": score(frames), "per_frame": frames}
 
 
@@ -157,6 +159,8 @@ def main() -> int:
           f"{s['frames_without_person']['reported']} of {s['frames_without_person']['of']}")
     print(f"  boxes matching no labelled person: {s['boxes_matching_no_label']} (look at them: "
           "CAVIAR's labels miss some people)")
+    print(f"  parked-vehicle spots: {len(res['parked_vehicle_spots'])} (CAVIAR's scenes hold no "
+          "vehicle, so any spot here is a false one)")
     if a.out:
         with open(a.out, "w", encoding="utf-8") as fh:
             json.dump(res, fh, indent=1)

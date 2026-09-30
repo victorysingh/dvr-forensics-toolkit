@@ -18,18 +18,22 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 629 pass, 0 fail: 606 on generated data with known ground truth and on the access-control layer (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 686 pass, 0 fail: 663 on generated data with known ground truth and on the access-control layer (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
 | Kernel write block | root writes refused, target unchanged (sacrificial loop device, kernel 7.1.5) |
 | Write block across USB reconnects | re-applied automatically on 2 of 2 real reconnects (udev rule keyed on the drive serial) |
+| Custody ledger seal | a ledger with entries cut off the end, or rewritten from scratch, still passes the hash-chain check and **fails its keyed seal** (an HMAC with a key kept outside the case folder); an edited seal is caught too; a case passed between examiners keeps each machine's seal (10 tests) |
+| Outside programs | every ffmpeg / ffprobe / Tesseract call has a time limit, and a streaming decoder that goes silent is stopped: a hung decoder on damaged footage is reported, not left to freeze the tool (4 tests) |
 | Reproducibility of reads | every block shared by 5 independent reads over 3 days is identical, apart from two blocks — each the last block an old-code pass read as its adapter died, both zero-padded by the since-fixed bug |
-| Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4, fisheye pictures also looked at turned round): a person in **44 of 57**, faces **22 of 27**, vehicles 8 of 12; on CAVIAR **810 of 1,089** labelled people (the previous tiled models: 543), 837 with its overhead lobby camera turned round. False alarms: 6 person frames, all a hand in the picture, and 1 face frame, a head at the fisheye's edge. A lead is worth reviewing; an empty list still proves nothing |
+| Analytics (optional) | scored against 487 frames labelled by eye, and checked on CAVIAR footage never used for choosing (§8a). The first version found a person in **0 of the 57 frames** that had one. Now (YOLOX-S + YuNet, 2 x 2 tiles, people at 0.4, fisheye pictures also looked at turned round): a person in **44 of 57**, faces **22 of 27**, moving vehicles 7 of 12, and parked cars reported as a lead of their own (all 6 in the night car park; none false on CAVIAR); on CAVIAR **810 of 1,089** labelled people (the previous tiled models: 543), 837 with its overhead lobby camera turned round. False alarms: 6 person frames, all a hand in the picture, and 1 face frame, a head at the fisheye's edge. A lead is worth reviewing; an empty list still proves nothing |
+| Face search by photo (optional) | candidates, not identifications. Our numpy code reproduces OpenCV's SFace to a cosine of 0.99998. LFW made recorder-sized: the same person passes in 97.8% of pairs (4,519 of 4,619) with eyes 12 px or more apart, and no pair of different people passes at any size (0 of 9,543). Strangers in 12 real surveillance clips (529 faces x 1,833 references): 78 faces under 8 px pass, all kept out by the 12 px minimum; **1 false candidate** above it, an upside-down head at a fisheye's edge (§8n) |
 | OSD reader (optional) | rules and orchestration tested; **measured** on six recorders' own files, 36 painted clocks: the clock found on 3 of 6 recorders, 5 frames read exactly, 9 wrong, 22 unread; no title right (§8c). A clock reading is a lead to check, not a time source |
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
+| Parsers against damaged or tampered disks | **9,600 corrupted disks** fed to all 8 vendor parsers (§8o). Before the fixes: 144 crashes and 1 hang in 3,200. After, in all 9,600: **no crash and no hang**. The few cases the safety net caught were fixed at the parser too. A parser can no longer end in a traceback. The 3 carvers and the E01 reader were fuzzed too: one bug (a damaged E01 set left its evidence file open), fixed |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
@@ -42,7 +46,7 @@ Two different things are validated here, and they must not be confused:
 | Workstation | Kali Linux, kernel 7.1.5, Python 3.14.6, booting from a USB SSD (Realtek RTL9210, `0bda:9210`) |
 | Tool | `dvr-forensics-toolkit`, commit `26fb542` or later (branch `shrestha/single-pass-recovery-report-ui`) |
 | Evidence | Seagate SkyHawk ST1000VX013, 1 TB, s/n `WWD4A3NX`, from a CP Plus recorder |
-| Recorder unit (read 28 Sep) | CP Plus **`CP-UNR-104F1`**, a 4-channel NVR, hardware V1.0; firmware (System Version) **`V1.00.14.00.T`**, built 16/08/2025; SN `TSTSERIAL0000001`, DevID `0A0B0C0D`, MAC `02:00:5E:10:00:01` - from its label and its System Info screen (photos SHA-256 `2f873a693b6355d2...` and `bed79a8b0388affb...`; these are WhatsApp copies, which strip the time taken - the originals are to be hashed). A CP Plus NVR is Dahua-built, which agrees with the DHFS 4.1 on this drive. Whether this unit wrote the drive: its serial, DevID or MAC on the platter is still to be searched (`identify-model` over the whole drive) |
+| Recorder unit (read 28 Sep) | CP Plus **`CP-UNR-104F1`**, a 4-channel NVR, hardware V1.0; firmware (System Version) **`V1.00.14.00.T`**, built 16/08/2025; SN, DevID and MAC (recorded, not published here: a CP Plus serial can reach the unit through the vendor's cloud app) - from its label and its System Info screen (photos SHA-256 `2f873a693b6355d2...` and `bed79a8b0388affb...`; these are WhatsApp copies, which strip the time taken - the originals are to be hashed). A CP Plus NVR is Dahua-built, which agrees with the DHFS 4.1 on this drive. Recorded in the case with `record-device` on 29 Sep, from the values read off JP's photos (`--read-from other`: the photos are not on the examining machine; attach them with `--photo`). Whether this unit wrote the drive: **the disk does not say.** `identify-model` over the whole write-blocked drive (29 Sep, 12 worker processes, 42 MiB/s) searched all 9,814 non-video blocks, 76.67 GiB. It found none of the unit's serial, DevID or MAC (the MAC as text three ways and as its 6 raw bytes), and no model string. Its one candidate, `HRG745` at 0x6CFC3A4E2A, matches the Honeywell pattern by chance in binary data: the bytes around it are not text. The check first said "differ" because of it; the tool now lists a candidate that is short (8 characters or fewer) and seen once as a possible chance match, and keeps it out of the check, which reads "not determined" (29 Sep, §10). Result `model.json` SHA-256 `c56b3f8a…0f54741`, in the case ledger |
 | Adapter | generic USB 2.0 SATA bridge, Super Top M6116 (`14cd:6116`), 480 Mbit/s, own power supply |
 | Image | first 20 GiB of the drive, SHA-256 `c4098d59cff3973de9d281ba5613005ba52165743c36edfcf56f61aad8f4e610` (23 Sep 2026) |
 
@@ -105,6 +109,7 @@ sector 0:
 | 24 Sep 23:53, before the udev rule existed | **came back writable** (`ro=0`) as `/dev/sdc`; re-applied by hand ~20 min later. Nothing mounted it (auto-mount and udisks off) |
 | 25 Sep 00:41, with the rule | `ro=1` automatically, before any process opened it |
 | 25 Sep 02:44 (after a manual replug) | `ro=1` automatically; the scan verified and resumed |
+| 29 Sep 18:00, drive 1 connected for `identify-model`, before the rule was re-installed (it lives in `/run`, cleared by a reboot) | **came up writable** (`ro=0`); set by hand minutes later, before any tool opened it, and the rule re-installed. Nothing mounted it. The kernel's own counters for the drive showed **0 writes completed** for the whole session, while 85.6 GB were read. Before reading, its first block and a block at 500 GB were hashed and matched the full scan's block map |
 
 The first row is why the rule exists. The rule matches on the drive's own
 serial (or on the evidence adapter's USB id); `udevadm test` confirms it
@@ -291,7 +296,7 @@ list of moments to watch and nothing more. These clips' on-screen clocks read
 **9 August 2026** — a month before anything the index describes — and the
 cameras' burned-in titles are *Parking*, *Road View 1* and *Road View 2*.
 
-**Full drive:** the 2,025 decodable outside-index streams sampled at one frame
+**Full drive, first detector (26 Sep):** the 2,025 decodable outside-index streams sampled at one frame
 every 5 s — 4,802 frames: a person in 51, a car in 63, faces in none (4 more
 car detections sat fixed in place through their clip — flagged static, e.g. a
 parked car, and not counted). The two
@@ -300,6 +305,23 @@ walking along the road (on-screen clock 13/08/2026 05:59 PM, *Road View 1*);
 **0.83** is a small shape by a distant fence, too small to confirm. Nearly
 equal scores, very different certainty — a score ranks what to watch first;
 it is not a measure of truth.
+
+**Full drive, current detector (30 Sep):** the same 2,025 streams and 4,802
+frames, re-run with YOLOX-S + YuNet (2 x 2 tiles; person 0.4, objects 0.5,
+faces 0.7, parked vehicles 0.3; `analyse-video --fps 0.2`, about 0.7 s a
+frame on the laptop's CPU). Frames with a person **191** (51 before), a car
+**289** (63), a motorcycle 65, a face 23 (none), a bicycle 14, a truck 3; **49
+parked-vehicle places**. Flagged static and not counted: car 756, truck 38,
+motorcycle 19, person 4. These counts are leads, not a measure - the labelled
+sample below gives the detector's rates. The strongest of three classes,
+looked at by Claude (not yet by a person): person **0.93** is plainly a man
+holding a hose (*Road View 2*); face **0.83** sits on the head of a rider
+coming towards the camera on a two-wheeler (*Road View 1*), too small to
+tell a face from a helmet; bicycle **0.81** is two small figures at the far
+end of *Road View 2*, too small to confirm the bicycle. The first report is
+kept in the case folder (`analytics_classic_26sep/`, SHA-256 `9afc450d…`, the
+hash the custody ledger recorded for it); the re-run is the ledger's 23rd entry
+(`1eef57d3…`), and the chain verifies.
 
 ### Measured against labels (29 Sep)
 
@@ -668,19 +690,236 @@ looking up into the lens is upside down in it.
   below, small and bent by the lens) and 1 face (the installer upside down
   and blurred close to the lens).
 
-### On our own drive (29 Sep - sampled, labels pending)
+### Parked vehicles (29 Sep)
 
-The runs above are public clips. The same measurement on the team's own
-cameras is set up: `analytics_eval` sampled 35 keyframes evenly from each of
-six indexed drive-1 recordings - *Road View 1*, *Road View 2* and *Parking*,
-at 17:00 and at 22:00 on 3 Sep 2026 (`out/realchecks/analytics_eval/`, 210
-frames). It ran before tiling was merged, so it must be re-sampled with the
-current detector before the labels are scored. One result needs no labels:
-on all 35 night frames of *Parking*, where a car is parked in full view, the
-object model said *suitcase* and never *car* - the same miss as the parked
-cars in the Hikvision night clip above. Evenly sampled quiet hours hold few
-people, so person recall from this set must be reported with its count.
+**Why.** On our own drive, the car parked in full view in *Parking* at night
+was boxed by YOLOX in all 35 frames, at 0.25-0.47. It was never reported,
+for two reasons:
+- its scores were under the 0.5 vehicle threshold;
+- a parked car is static by definition, and the static rule (made for a
+  steel pot scored as a face) removes it.
 
+On set A the rule likewise dropped the parked cars in the night car park.
+
+**The change** (`analytics/static.py` `parked_spots`).
+- A car, bus or truck seen in the same place through much of a clip (the
+  static rule's own test) is reported **once per place, as a parked
+  vehicle**: a lead of its own, with its first and last time and the number
+  of frames it was seen in.
+- Its boxes are kept from 0.3 (`parked_min`). A box that comes back at the
+  same place frame after frame is stronger evidence than one box at that
+  score.
+- A car box under 0.5 that is not part of a parked vehicle is marked
+  "weak" and not counted.
+- Moving vehicles are counted frame by frame as before, from 0.5.
+- Bicycles and motorcycles are not parked leads. At low scores the model
+  called chair legs in the studio clip "bicycle", in the same place.
+
+**Measured with the tool:**
+
+| | Result |
+|---|---|
+| Set A: parked vehicles | **8 places, all real cars**: the 6 cars in the night infrared car park, each seen in 5-6 of its 6 frames (0.37-0.84; before this, a vehicle was counted in only 2 of those frames), and the car parked at the Swann/Lorex street edge (0.87-0.88; set A's labels leave it out by their ~15-pixel rule) |
+| CAVIAR (no vehicle in any scene) | **0 parked-vehicle places**, so none false |
+| Set A: moving vehicles | 7 of 12 frames (8 before). One night-car-park frame's car is now recognised as parked and reported as such, not as a moving vehicle |
+| People and faces | unchanged: 44 of 57, 22 of 27 |
+
+**On our own drive (30 Sep), re-scored from the stored boxes.**
+- `validate.analytics_eval apply` re-applies today's thresholds and rules to
+  the boxes a sample stored. Its `detections.json` and `labels.csv` are
+  enough, with no frames or video.
+- On set A, `apply` then `score` on the earlier sample gives exactly the
+  result of a fresh run of the current tool.
+- For drive 1, Shrestha sent the two text files of the YOLOX set (210
+  frames): `detections.json`, SHA-256 `b8680a61…2175cde`; Claude's
+  `labels.csv`, `7295e5ef…`; and his reviewed labels, `d381a9f1…0db0ebba`.
+
+| | Claude's labels | Shrestha's reviewed labels |
+|---|---|---|
+| **Parked vehicles** | **1: the car parked in *Parking* at night**, seen in 26 of its 35 frames (up to 0.47). All 33 frames in its span are labelled as holding a vehicle. No other parked vehicle, so none false. | the same |
+| Person | 2 of 3 found | **2 of 2** |
+| Person false alarms | 3 of 207 frames | 3 of 208 |
+| Face | none to find; 0 false alarms | 0 of 1 (a ~5 px head in shadow); 0 false alarms |
+| Moving vehicles | 0 of 100 | 0 of 92 |
+
+- **The night car, missed until now, is reported.** It is boxed in all 35
+  frames at 0.23-0.47, and 26 reach the parked threshold (0.3).
+- **The person false alarms are two things.** One is a dog (0.71). The
+  other is the tree trunk in front of the red car, in frames 54, 59 and 62:
+  the static rule flags that spot in most frames, but its box shifts enough
+  in these three to escape it. Both are the static rule's known gap.
+- **The moving-vehicle misses are the far car** (~19 x 9 px, which the
+  person's review reads as no vehicle at all) **and the red car half-hidden
+  by a tree**, parked in daylight. Its boxes stay under 0.3, so it is not a
+  parked vehicle either.
+
+### On our own drive (29 Sep): 210 frames of the CP Plus cameras
+
+The runs above are public clips. This is the same measurement on the team's
+own cameras. `analytics_eval sample --frames 35` took six indexed drive-1
+recordings - *Road View 1*, *Road View 2* and *Parking*, at 17:00 and at
+22:00 on 3 Sep 2026 - with the tool's 3 x 3 tiling
+(`out/realchecks/drive1_recall/`: `labels.csv` SHA-256 `7295e5ef…cab81f`,
+`detections.json` `8505aeef…fb132cb`).
+
+**Who labelled it: Claude, an AI model, at the user's request - not a
+person.** Every frame was viewed at its stored size. Distant areas were
+enlarged on every frame, and candidates at 4-6x. A change map against each
+camera's median frame, independent of the detector, pointed at small
+movers. The per-frame detections were not read until every label was
+written (`LABELS.md` beside the labels). A person then checked the frames
+the scores turn on (below); the other frames are the model's labels only.
+
+What the 210 frames hold:
+- a person in 3: one about 14 px tall beside a cow in a far field, and two
+  walkers on *Road View 2*, one partly behind a tree;
+- no face;
+- a vehicle in 100:
+  - the car parked in *Parking* at night, in full view (35 frames);
+  - a small car at the far end of *Road View 1* (5);
+  - a red car parked past the gate on *Road View 2*, partly hidden by a tree
+    (60, marked borderline).
+
+| Class | Found, as the tool reports | False alarms | Found, as the models said (before the rules) |
+|---|---|---|---|
+| Person | **0 of 3** (0 of 2 without the borderline frame) | **2 of 207** - the *dog* in frame 59 (0.75), and a smear in a corrupted frame (0.54) | 0 of 3 |
+| Face | none to find | **7 of 210** - one patch of grass between branches on *Road View 1*, 0.81-0.95, in 7 of 35 frames | - |
+| Vehicle | **1 of 100** (0 of 40 without the red car) | 0 of 110 | 15 of 100 (14 of 40) |
+
+What this adds to the public-clip results:
+- **The static rule has a gap.** The 7 "faces" sit on one fixed patch of grass.
+  They recur in 7 of 35 frames, under the rule's 25% share (`STATIC_SHARE`),
+  so every one is
+  reported. On the public clips no false alarm got through; here 7 of 210
+  frames carry one.
+- **The one vehicle "found" is the right frame, the wrong place.** Frame 68
+  holds the red car, but the box is on a small grey lump at the roadside,
+  there in other frames too. By object, the tool found none of the vehicles.
+- **Parked vehicles are removed by design.** The model sees the *Parking* car
+  in 14 of 35 night frames after tiling (0 before it: it said *suitcase*).
+  The static rule then removes every one, as on the public clips.
+- **No person was found**, and one of the two person reports is a dog. The
+  people here are small or partly hidden; the sweep finds none at any
+  threshold down to 0.2, where the false alarms rise to 10.
+- **The sweep:** vehicles as the models said rise to 50 of 100 at 0.2-0.3,
+  with no false alarm, and 22 of 100 remain after the rules. These are
+  frame-level: a box anywhere in the frame counts, so some may be boxes on
+  something else, as in frame 68. Faces at 0.5 give 14 false alarms.
+
+**Checked by a person (Shrestha, 29 Sep).** The review covered 22 frames:
+the 20 the scores turn on, plus 2 controls. They were shuffled and shown plain,
+with neither the labels nor the detector's boxes, and a 4x magnifier on hover
+(`out/realchecks/drive1_recall_review/`, `review_labels.shrestha.csv`
+SHA-256 `c90d8b3b…fb0`).
+
+The person agreed on **12 of 22 frames**, and by class on:
+- person, 21 of 22;
+- face, 21 of 22;
+- vehicle, 14 of 22.
+
+| Confirmed by the person | Different reading |
+|---|---|
+| All 7 face false alarms: no face (11, 12, 13, 18, 19, 22, 26) | Frame 1: no person (the ~14 px figure beside a cow, marked borderline) |
+| Both person false alarms: no person (6, the corrupted frame; 59, the dog) | Frame 48: **a face** - the walker faces the camera; the head is ~5 px and in shadow |
+| Both walkers: a person (48, 51) | The far car (30, 32, 34): no vehicle - a ~19 x 9 px dark shape |
+| The *Parking* car (control 190), the empty control (90), the infrared frame with no car visible (150), and the red car in 48 and 68 | The half-hidden red car in 35, 51, 59, 142, 162: no vehicle (marked borderline) |
+
+Every difference is an object at the edge of what the frame shows at its
+size: the person looked at 1.25x with a magnifier, the labels were made at
+4-6x. On the person's reading - no far car, no borderline frames, and a face
+in frame 48 - the tool reports:
+
+| Class | Found, as the tool reports | False alarms |
+|---|---|---|
+| Person | **0 of 2** | 2 of 207 |
+| Face | **0 of 1** | 7 of 209 |
+| Vehicle | **0 of 35**, the parked *Parking* car; 14 of 35 before the static rule | 0 of 110 |
+
+No conclusion above changes. The false alarms the findings rest on are
+confirmed by a person, and the tool found none of the people or vehicles on
+any of the three readings.
+
+Before any label, re-sampling the same 210 keyframes before and after tiling
+showed what tiling changes:
+
+| Clip | Before tiling (models said) | With tiling (models said) | With tiling, reported |
+|---|---|---|---|
+| *Parking*, 22:00 (a car parked in full view in every frame) | *suitcase* 35 of 35, *car* 0 | *car* 14, *suitcase* 23, *backpack* 1 | *backpack* 1 - every *car* flagged static |
+| *Road View 1*, 17:00 | *person* 1 | *person* 1, *face* 7 | the same |
+| *Road View 2*, 17:00 | *person* 1 | *person* 2, *car* 1 | *person* 1, *car* 1 |
+| the other three | nothing | *suitcase* 1 (*Road View 2*, 22:00) | the same |
+
+### On our own drive, with the new detector (29 Sep, evening)
+
+The same 210 frames were scored again with the tool's new default:
+- YOLOX-S (`c5c2d13e…`) and YuNet (`ebafce4e…`);
+- 2 x 2 tiles;
+- people at 0.4, other objects at 0.5, faces at 0.7;
+- rotation `auto`.
+
+`analytics_eval sample --frames 35` over the same six recordings took **the same keyframes**. Every
+row's clip and position match, and all 210 frame JPEGs are byte-identical
+(`out/realchecks/drive1_recall_v3/`).
+
+The frames were scored against two label sets:
+- **Claude's** labels;
+- **reviewed**: the same labels with the person's 22-frame review applied
+  (`labels.reviewed.csv`). That changes 10 labels: 8 vehicles to *no*, frame 1's
+  person to *no*, and frame 48's face to *yes*. Frames outside the review keep
+  Claude's labels.
+
+As the tool reports:
+
+| Class | Labels | Old: SSD-MobileNet + UltraFace, 3 x 3 | New: YOLOX-S + YuNet, 2 x 2 |
+|---|---|---|---|
+| Person | Claude's | 0 of 3 found; 2 false alarms in 207 | **2 of 3** found; 3 false alarms in 207 |
+| Person | reviewed | 0 of 2; 2 in 208 | **2 of 2**; 3 in 208 |
+| Face | Claude's | none to find; **7 false alarms** in 210 | none to find; **0** false alarms |
+| Face | reviewed | 0 of 1; 7 in 209 | 0 of 1; **0** in 209 |
+| Vehicle | Claude's | 1 of 100 (wrong box); 0 in 110 | **0 of 100**; 0 in 110 |
+| Vehicle | reviewed | 1 of 92; 0 in 118 | **0 of 92**; 0 in 118 |
+
+Every false alarm and every miss, looked at by eye:
+
+- **People found: both walkers.** Frame 48 at 0.79 and frame 51 at 0.43;
+  the second is the one partly behind a tree. The ~14 px figure beside a
+  cow (frame 1: Claude *yes*, the person *no*) gets a box on it only at 0.20.
+- **The dog is still a person**: frame 59 at 0.71. **A new false alarm:**
+  the tree trunk in front of the parked red car on *Road View 2*, at
+  0.41-0.58, in frames 54 and 62 and as a second box in 48 and 59. The static
+  rule flags that trunk in 22 other frames; these four slip through, the same
+  gap as the grass patch below (`STATIC_SHARE`, and box sizes that vary).
+  The old detector's person in the corrupted frame 6 is gone.
+- **The grass-patch "face" is gone.** No face box lands on that patch at
+  any score from 0.5, and there are no face reports at 0.7. Between 0.5 and
+  0.7 YuNet gives 8 boxes in 7 frames, none on a face: five specks of ~3 px,
+  two on a brown sack of coir on *Road View 2*'s parapet (0.51, 0.60), and
+  one on the smear of the corrupted frame 6. The one face the person marked
+  (frame 48, a ~5 px head in shadow) gets no box.
+- **The parked car at night is still missed.** YOLOX boxes it in all 35
+  night frames, but at 0.25-0.47, under the 0.5 object threshold, so it is
+  never reported. At a lower threshold the static rule would remove it as
+  parked. The red car half-hidden behind a tree, and the small far car, get
+  no box at 0.5 either.
+
+The sweep, on the reviewed labels:
+- **Person:** 2 of 2 found at every threshold from 0.2 to 0.4, with 15, 4
+  and 3 false alarms; 1 of 2 at 0.5 and above.
+- **Vehicle, as the models said:** 42, 26 and 9 of 92 at 0.2, 0.3 and 0.4,
+  with 8, 4 and 1 false alarms (at 0.24 a stack of paving blocks reads as a
+  *truck*). After the rules, 15 of 92 at 0.2 and none above.
+- **Face:** 7 false-alarm frames at 0.5 and 2 at 0.6 (the boxes above); the
+  frame-48 face is found at no threshold.
+
+**In short, on these cameras** the new detector:
+- finds the people the old one missed;
+- ends the face false alarms;
+- still calls the dog a person, and adds a tree trunk;
+- reports no vehicle at all. The one that matters, a car parked in full view,
+  scores under its threshold.
+
+The set, detections and both label files are in `out/realchecks/`
+(`detections.json` SHA-256 `b8680a610497d004…`).
 
 ## 8b. Second drive: Hikvision footage under a Dahua-family format
 
@@ -999,6 +1238,7 @@ streams no index accounts for.
 | Measured on six recorders' own files (29 Sep, Tesseract 5.5.3, `python -m validate.osd_eval`) | The six public clips of §8a (Intelbras/Dahua, Amcrest, Swann, Lorex, two Hikvision), each calibrated on its own as `read-osd` calibrates a case, 6 frames each; every painted clock and title read by eye on the same frames. **Clock found on 3 of 6 recorders; of 36 frames with a clock, 5 read exactly, 9 wrong, 22 unread. Titles: 0 of 5 right** ("amelek.net" read "ame leknet") |
 | Why, clip by clip | Intelbras: 5 of 6 exact, one year read 2071. Hikvision 2018: the year read **2016** on all 6 frames (a pixel font's 8 as 6) and two seconds wrong. Swann: the clock is top-centre, across both top corners, and its "PM" is lost, so 7 PM reads 07:11 (2 frames). Hikvision 2015: the date reads, a Chinese weekday comes out as junk, and the time runs past the corner band. Amcrest: white text on a bright wall. Lorex: text about 8 px high. The wrong readings are years or 12 h off, which the comparison with a container's own date reports as a disagreement; a stream with no container date (an AVI export) has no such check |
 | Changed after the measurement | `08/ 14/ 2021 07: 11: 22 PM` (a space after each separator) now parses; full-width top and bottom strips are tried beside the four corners (the Swann clock is found; exact reads did not rise); the reader opens containers (`.dav`, `.mp4`, `.avi`) as well as extracted streams. Rule `osd.tesseract_title_clock.v2`. The limit is Tesseract on small, compressed video text, not the rules |
+| On our own drives (29 Sep, after the changes above) | Drive 2's reference streams (`read-osd --ids ps-00321,ps-03023`): *Camera 01* read on `ps-00321`, matching the eye; no title on `ps-03023` (white on a light wall); calibration found **no clock band**, so no clock was compared - the same as on 28 Sep. Drive 1's six clips (`validate.osd_eval sample`, 6 frames each, `out/realchecks/osd_drive1/`): calibration found **neither a title nor a clock band on any of the six**, though every frame carries *Road View 1/2* or *Parking* bottom-left and a 12-hour clock top-right - 0 of 6 titles, 0 of 6 clocks. The failure is in finding the band, before any reading: thin semi-transparent white text over bright road, sky and wall |
 | Status | `synthetic_only` — measured on real frames and short of `spec_only`: a clock is a lead to be checked against the container and the eye, and a title is not reliable |
 
 **To reach `spec_only`:** run it over the same streams whose frames were
@@ -1112,6 +1352,30 @@ This makes the DHAV frame walk two independent implementations agreeing on
 719,097 of this drive's own frames. The field layout both use still comes
 from `dhav.c` (see above), so Dahua / CP Plus stays `spec_only`.
 
+**On the drive's indexed recordings too (29 Sep).** The 301 hourly
+recordings extracted for §8l (14-17 Sep, all three cameras, 131 GiB of
+`.dav`, reassembled through the index) were run through the same check.
+Results are in `out/realchecks/xcheck_indexed/`.
+
+| | Result |
+|---|---|
+| Files identical frame for frame | **300 of 301** |
+| Video frames ffmpeg emitted | **25,758,151, every one identical to ours** |
+| Ours that ffmpeg did not emit | 34,579: 34,550 before a first keyframe, and the 29 of the one other file, a 59 KB recording with no keyframe (ffmpeg emits no video from it, by design) |
+| Audio | **25,901,562 frames, identical in all 301 files** |
+| Other | 129,704 `0xF1` aux frames, ours only; no truncated last frame |
+| Time | 25,709,656 of 25,758,151 (99.8%) inside their own DHAV second; the largest offset is 1.96 s, in 50 files. Unlike the carved streams, no frame is missing there. **The recorder's own clock steps**: between consecutive frames, with the frame and millisecond counters running on, the date repeats a second (-1 s, 6 times) or skips one (+2 s, 3 times). Each step falls at about ten past the hour (01:10, 03:10, 05:10, 09:10, 12:10, 20:10 on 14-16 Sep) and is shared by the cameras. ffmpeg keeps its time monotonic and waits for the date to catch up (1.96 s). The other offsets in those files were not traced |
+
+**What the steps suggest.** They are the signature of a periodic clock
+synchronisation, corrected both ways by a second or two, for example NTP or
+the recorder syncing with its cameras. The disk does not say which, so it
+is not a result. If it is a network time server, the clock stays within a
+couple of seconds of it between syncs; the unit's time settings screen
+(NTP on or off, which server) settles it. Clock steps: `out/realchecks/xcheck_indexed/clock_steps.json`.
+
+So on the reassembled recordings, the extraction path an examiner uses most,
+the two implementations agree on every frame ffmpeg reads.
+
 ## 8j. Godrej, from Qualvision's firmware
 
 Godrej publishes no format and no firmware. But its SeeThru cloud portal
@@ -1198,7 +1462,7 @@ The whole workflow, run as an examiner would run it: from `ps26150-dvr.exe`
   case folder's top level. It now looks one folder down, and it leaves out
   (and says so) any footage whose manifest names another device.
 
-**Re-run on 29 Sep evening, from `staging` (`e9a7527`).** The executable was
+**Re-run on 29 Sep evening, from `staging` (`a7cfb41`; `e9a7527` before the 30 Sep history rewrite).** The executable was
 rebuilt with the permanent build environment. It ran with no Python on the
 path, into fresh folders; the demo copies were not touched.
 
@@ -1254,8 +1518,65 @@ alias.
 - Estimating clocks from daylight is not new (Sundial, EWSN 2009); reading it
   from a DVR's infrared switches is the application here.
 
-**Not yet run on our drives.** It needs days of the CP Plus unit's outdoor
-cameras (*Parking*, *Road View*) and the site's latitude and longitude.
+**Run on drive 1 (29 Sep): no infrared switch, so no estimate.**
+
+What was run:
+- Site: Bengaluru, 12.97 N 77.59 E.
+- Footage: four whole days, 14-17 Sep 2026 (recorder clock), of all three
+  cameras, *Road View 1*, *Road View 2* and *Parking*: 301 hourly recordings.
+- Extracted from the write-blocked drive with one `extract` call (the disk
+  parsed once), each recording with its manifest.
+- Sampled every 120 s: 8,632 samples, one series per camera.
+- `switches()` sorts everything it is given into one timeline, so two cameras
+  in one series would make switches of their own. Each camera was estimated
+  separately.
+
+| Camera | Samples | At or below the infrared threshold (chroma 4.0) | Switches | `estimate` |
+|---|---|---|---|---|
+| *Road View 1* | 2,878 | 1: a single grey decode at 11:54 on a sunny noon, not infrared | 0 dusk, 0 dawn | refused: needs a dusk and a dawn |
+| *Road View 2* | 2,878 | 0 (lowest 6.2) | 0 | refused |
+| *Parking* | 2,876 | 0 (lowest 5.3) | 0 | refused |
+
+**Why.** The cameras do have infrared: on 3 Sep at 22:08 both road cameras
+turned black and white for about 14 minutes (the AI sample frames, §8a),
+when the lighting went off. But the scene is lit all night, so at dusk the
+light never falls to the camera's threshold. Night chroma sits around
+7-9 (*Road View*) and 16 (*Parking*); daylight is 18-22. This is the limit
+stated above: a street-lit scene gives no switch.
+
+**Exploratory, not the method: the colour crossing.** The picture's
+colourfulness still follows the daylight: it rises near 06:00 and falls near
+18:30. `out/realchecks/daylight/lightlevel.py` takes each camera's first
+sustained crossing of the level midway between its night and day chroma:
+- a dawn after 03:00;
+- a dusk after 15:00, before the evening lights lift the chroma again.
+
+The tool's own `estimate()` then fits the offset.
+
+Five of the 24 crossings were looked at in the frame and flagged:
+- on 14 Sep evening the sky is grey (overcast), so all three dusks came early
+  (17:33-18:23);
+- on *Road View 2* a light switched on at 03:57 on 16 Sep and at 05:31 on 17
+  Sep, well before dawn.
+
+| | Crossings | Offset | Against IST | Level reached at sun elevation | Per-crossing offsets |
+|---|---|---|---|---|---|
+| All 24, as found | 12 dusk, 12 dawn | UTC +317 min | -13 min | -4.2 deg (spread 6.6) | median +328, range +212 to +334 |
+| 19, the flagged 5 left out | 9 dusk, 10 dawn | **UTC +328 min** | **-2 min** | -4.0 deg (spread 0.85) | median +328, middle half +327 to +329, range +321 to +334 |
+| per camera, flagged left out | 7, 5, 7 | +329, +330, +325 | -1, 0, -5 | -4.1, -4.5, -3.4 | ranges 327-333, 326-332, 321-327 |
+
+**What it shows:** the recorder's clock keeps **IST**, and, read this way,
+is within a few minutes of it. It excludes a clock set to UTC or to any other
+zone.
+
+**What it does not:** a colour crossing is not the infrared switch the
+method rests on. Street lights, exposure and white balance move it, and 5
+crossings were left out after looking at their frames. So the clock error is
+**not measured**. Stating UTC to the minute still needs the unit's clock set
+beside network time (SOP 1.2).
+
+Series SHA-256: CH01 `ed6f260d2362cc7a…`, CH02 `25f255e37832853c…`, CH03 `7cc5c65313d09780…`
+(`out/realchecks/daylight/`).
 
 ## 8m. Other tools on the same data (research gap G5, 29 Sep)
 
@@ -1299,6 +1620,275 @@ What this does and does not show:
 - **The SIH comparison is on the same public image.** It uses the other
   teams' own published figures. They were not re-run here, because both need
   the 150 GB E01 streamed through their own readers.
+
+## 8n. Face search by a reference photo (optional layer — candidates, not identifications; 30 Sep)
+
+`cli.py face-search --out CASE --photo P` scores every face found in a case's
+clips against the face in a photo the examiner supplies:
+
+- YuNet finds each face and five points on it (eyes, nose tip, mouth corners).
+- The face is lined up on those points onto ArcFace's 112 x 112 template.
+- SFace (OpenCV Zoo, Apache-2.0, pinned by SHA-256) turns it into 128 numbers.
+- Two faces are compared by the cosine between their vectors.
+
+A face is a **candidate** when the cosine is at least **0.363**, the threshold
+OpenCV publishes for SFace, and its eyes are at least **12 px** apart in the
+recording (`analytics/face_rules.py`). Every other face is listed with its
+score and never called a candidate. The photo's SHA-256, both models' and the
+thresholds go into the custody ledger, and the report gains section 6b-ii.
+
+A stranger at or above the threshold is a **false candidate**; the same person
+below it is a **miss**. Both are measured below with
+`python -m validate.face_eval`, which runs the tool's own code.
+
+**The same computation as OpenCV.** The tool runs the two ONNX models with
+numpy, without OpenCV. It was checked against OpenCV 5.0's own
+`FaceDetectorYN` and `FaceRecognizerSF` on three versions of one
+public-domain photo (NASA's astronaut portrait at 512 px, at 150 px, and
+tilted):
+- the five points agree within 0.005 px, and the detector scores to the third
+  decimal;
+- the face vectors agree to a cosine of 0.99998-0.99999;
+- the match score between two versions is 0.9509 in both, and 0.8298
+  (OpenCV) against 0.8303 (ours).
+
+The script is `docs/research/face_search/check_opencv.py`.
+
+**Data.** LFW (Huang et al. 2007), the benchmark SFace is published with. It
+is not in the repository: `lfw.tgz` SHA-256
+`055f7d9c632d7370e6fb4afc7468d40f970c34a80d4c6f50ffec63f5a8d536c0` and
+`pairs.txt` SHA-256
+`ea42330c62c92989f9d7c03237ed5d591365e89b3e649747777b70e692dc1592`, the
+files scikit-learn's `fetch_lfw_pairs` downloads. The first 4 of its
+10 folds are used: 2,400 pairs, 1,200 of the same person
+and 1,200 of two different people.
+
+### Measurement 1: LFW, as photos and at recorder size
+
+- **As photos** (a check that the set-up is right): the same person passes in
+  **1,179/1,200 (98.2%)** of pairs and two different people in
+  **0/1,200 (0.0%)**.
+- **At recorder size:**
+  - The second photo of each pair was scaled to 8 sizes (0.12 to 0.75 of its
+    own), placed on a 704 x 576 grey picture, encoded as H.264 at CRF 28, and
+    decoded the way face search reads a recording (1320 x 1080).
+  - The first photo stays the reference, as an examiner's photo would.
+  - 19,085 of 19,200 small faces were found; the 115 misses are all at
+    the 0.12 and 0.16 scales.
+
+Binned by the distance between the eyes in the recording:
+
+| Eyes apart (px, in the recording) | Same person: passes | Different people: pass |
+|---|---|---|
+| 0-8 | 1,454/2,583 (56.3%) | 0/2,544 (0.0%) |
+| 8-10 | 1,044/1,126 (92.7%) | 0/1,130 (0.0%) |
+| 10-12 | 1,159/1,214 (95.5%) | 0/1,239 (0.0%) |
+| 12-14 | 876/908 (96.5%) | 0/883 (0.0%) |
+| 14-16 | 446/457 (97.6%) | 0/498 (0.0%) |
+| 16-20 | 948/967 (98.0%) | 0/956 (0.0%) |
+| 20-24 | 715/727 (98.3%) | 0/687 (0.0%) |
+| 24-32 | 905/925 (97.8%) | 0/983 (0.0%) |
+| 32 or more | 629/635 (99.1%) | 0/623 (0.0%) |
+
+### Measurement 2: strangers in real surveillance footage
+
+- **What was compared:** every face the tool finds in 12 real
+  clips, sampled at 2 frames a second, against all 1,833 reference
+  faces of those 2,400 pairs.
+- **Why each hit is false:** nobody in these clips is an LFW public figure,
+  so every score at or above 0.363 is a false candidate.
+- **The clips:** the six public recorder clips of set A (§8a) and the six
+  CAVIAR clips of set B.
+- **Left out:** R2's carved stream was run too but is not counted, because it
+  is cut from the 2017 Dahua clip already in set A.
+
+| Eyes apart (px) | Faces | Comparisons | At or above 0.363 | Faces with any |
+|---|---|---|---|---|
+| 0-8 | 524 | 960,492 | 134 | 78 |
+| 8-10 | 4 | 7,332 | 0 | 0 |
+| 32 or more | 1 | 1,833 | 1 | 1 |
+
+- **Small faces are where strangers pass.**
+  - Of 524 faces with eyes under 8 px apart, 78
+    scored at or above 0.363 against at least one reference
+    (134 of 960,492 comparisons):
+    9 of 13 faces in `dav-sample.dav`, 37 of 290 faces in `ThreePastShop1cor.mpg`, 32 of 210 faces in `WalkByShop1cor.mpg`.
+  - None of these became a candidate: all are under the 12 px minimum.
+  - LFW made small does not show this: 0 of 2,544 different-person
+    pairs under 8 px pass. Real footage is noisier than a shrunk photo, and
+    that is why this second measurement exists.
+- **One false candidate above the size limit.**
+  - What it is: a head upside down at the top edge of the 2017 fisheye
+    picture (`ffmpeg_t6144_19.25.00-19.25.50[R].dav`, 44.5 s, eyes 41.5 px
+    apart), a person looking up into the camera. It scored 0.404 against one
+    reference.
+  - Why: the face detector's five points are wrong on an upside-down face,
+    so the lined-up face it compares is a smear, not a face. The same head
+    in R2's carved copy of the clip, sampled at a slightly different
+    moment, scored at most 0.30.
+  - What catches it: not the size limit. The tool saves the lined-up face
+    beside every ranked result for the examiner to look at, and this one
+    would be rejected at a glance.
+  - The fix: search a fisheye picture turned round as well, as
+    `analyse-video` does (§8a). Not done yet (§10).
+- **Faces between 8 and 32 px are rare in these clips** (4,
+  all between 8 and 10 px), so the real-footage rate at those sizes is not
+  measured.
+
+### What sets the thresholds
+
+- **0.363** is OpenCV's published threshold, kept as it is. On LFW no pair of
+  different people passes it at any size: 0 of 1,200 as photos and 0
+  of 9,543 at recorder size.
+- **12 px** between the eyes:
+  - At and above it, the same person passes in 96.5% or more of pairs
+    in every bin (4,519 of 4,619 overall, 97.8%), and no different pair
+    passes (0 of 4,630).
+  - Below it the pass rate falls: 95.5% at 10-12 px, 92.7% at
+    8-10 px and 56.3% under 8 px. Under 8 px, strangers pass on real
+    footage.
+  - The real clips have too few faces between 8 and 12 px to say whether 10
+    would do as well, so 12 is the cautious choice.
+
+### End to end, on a real recorder clip
+
+The astronaut photo was pasted into a real recorder clip
+(`ffmpeg_t4182_20150327215559_ch01.mp4`, from 4 to 9 s). `face-search` was
+then run with the original photo on that clip and on a second real clip:
+
+- **Pasted at 260 px:**
+  - found in all 5 sampled frames it is on screen (4-8 s), similarity
+    0.871-0.872, eyes 21 px apart: **5 candidates**;
+  - the second clip: no face, and no candidate.
+- **Pasted at 110 px:**
+  - found in the same 5 frames, similarity 0.388-0.403, which is above the
+    threshold;
+  - but its eyes are 8 px apart, so **0 candidates** and 5 "too small to
+    compare": the size rule at work.
+
+### What this does not show
+
+- **The same person in real recorder footage is not measured.**
+  - We hold no labelled footage of one person alongside a photo of them, so
+    LFW made small stands in for it.
+  - LFW made small has no infrared, no view from above and no motion blur,
+    and its faces are mostly frontal. On real footage the same person will
+    pass less often than the table says.
+- **LFW is photographs of public figures**, mostly adult and light-skinned.
+  Face recognition errs more for some groups than for others, and the tool's
+  notes say so with every result.
+- **The numbers hold for SFace at 0.363.** `--min-similarity` changes the
+  threshold, and then these numbers no longer apply.
+
+## 8o. Parsers against corrupted disks (fuzzing, 30 Sep)
+
+Evidence arrives damaged: bad sectors, a half-overwritten index, a disk cut
+short, or bytes changed on purpose. A parser that crashes on such a disk
+shows the examiner a Python traceback and reads nothing more. Worse, a
+parser that hangs stops the case.
+
+`python -m validate.fuzz_parsers` builds each vendor's synthetic disk (the
+tests' `tests/synth_*.py`) and parses it once cleanly. While it does, it
+records every byte range the parser reads: its structures, not the video.
+It then makes corrupted copies, mostly damaging those ranges:
+- bit flips;
+- a field set to a poison value (0, all ones, the sign bit, just past the
+  disk's end);
+- runs of bytes zeroed, set to 0xFF or randomised;
+- one structure copied over another;
+- the disk cut short inside a structure.
+
+Each case runs `detect()` and `parse()` in a worker process, killed after
+30 s. The test is the contract `cli.py` relies on: `detect()` answers true
+or false, and `parse()` returns a result with any problem in its `errors`.
+Anything else raised, bar a device error, is a crash. Cases are
+reproducible (`--repro VENDOR:CASE` reruns one and, for a hang, shows where
+it is stuck).
+
+**Found: 145 failures in 3,200 cases (400 per parser), in 22 places.**
+
+| Parser | Crashes | Hangs |
+|---|---|---|
+| Dahua | 0 | 0 |
+| Godrej | 0 | 0 |
+| Matrix | 76 | 1 |
+| Hikvision | 22 | 0 |
+| HeimVision | 20 | 0 |
+| Honeywell | 20 | 0 |
+| Uniview | 5 | 0 |
+| TP-Link | 1 | 0 |
+
+What they were:
+- **Structures read past the end of a cut or damaged disk, unpacked without
+  checking the length.** The Hikvision system log's master block,
+  Honeywell's partition header, HeimVision's FAT and recording heads,
+  Uniview's GOP trailer, and the ext2/3/4 reader's inodes, group
+  descriptors and blocks.
+- **A corrupted file size taken at its word.** One ext inode claimed about
+  a terabyte. Reading by it exhausted memory, or, in the "hang", listed
+  about a billion blocks one by one.
+- **The ext reader's own refusal was not caught.** It raises "not read" for
+  what it will not guess at, but Matrix did not catch that for a single
+  damaged file or folder, so one bad file stopped the whole parse.
+- **TP-Link:** SQLite's own error message quoted the damaged bytes, and
+  Python could not decode the message.
+
+**Fixed.**
+- Each place now reads exactly or refuses. A structure past the end of the
+  image is "beyond the image - not read", and a file larger than the whole
+  disk is refused.
+- Matrix skips an unreadable file or folder and lists it in the result's
+  errors, then reads the rest.
+- TP-Link reports such an index as not readable.
+- **A safety net for every parser**, including a drop-in plugin
+  (`parsers/base.py` `_guard`). If a parser still raises on the data,
+  `detect()` answers False and `parse()` returns a result that says where it
+  stopped (`detected_not_parsed`). A device error still propagates: the
+  device, not the data, failed. The fuzzer counts these stops apart, so the
+  net does not hide a bug.
+
+**After the fixes:**
+- The same 3,200 cases: no crash, no hang.
+- 3,200 new ones (another seed): no crash, no hang.
+- 7 stops across both runs, all fixed at the parser (a FAT entry past the
+  image, Matrix's `detect()`, TP-Link's error text). Each of the 7 cases now
+  returns a clean result.
+- A third, fresh 3,200: no crash, no hang. 3 stops (a directory entry cut short, a damaged database header that made SQLite ask for more memory than there is, and a frame header cut short), each fixed at the parser and now a clean result.
+- The test suite runs 12 corrupted disks per parser on a fixed seed, and
+  tests the safety net itself.
+
+**Limits.**
+- The disks are the synthetic ones, built to each vendor's layout, not real
+  damaged recorder disks.
+- The damage is random, aimed at what the parser reads. It is not a proof
+  that no input can crash a parser.
+- The scan engine itself was not fuzzed here.
+
+### The carvers and the E01 reader, fuzzed the same way (30 Sep)
+
+The three carvers recover footage the recorder's index no longer lists:
+DHAV (Dahua family), MPEG-PS (Hikvision) and raw H.264/H.265 (any recorder).
+They read every byte, so their damage was aimed at what they recognise:
+- DHAV frame headers;
+- PS pack and stream-map headers;
+- Annex B start codes and the container around them.
+
+Each carve was followed by what the tool does with its result: report rows,
+recordings, and a stream written out. The E01 reader was given damaged
+segment files. Opening may refuse (a device error), and a damaged chunk may
+be refused on read (the reader's own error, which the scan records as
+unreadable). Anything else is a crash.
+
+**Found: one bug, in the E01 reader.** When `BlockDevice` refused a damaged
+E01 set, it left the set's first segment file open. On Windows that file (the
+evidence) stayed locked until Python happened to free it. The fuzzer found it
+because it could not delete the set afterwards (16 of the first 20 cases).
+Only the reader's own error became a clean device error; any other failure
+in a damaged set would have escaped as a raw exception. Fixed
+(`acquire/device.py`): the file is closed, and any failure to open a set is a
+device error that names it.
+
+**Result:** 3,200 damaged inputs (400 per target, two seeds), after the fix: no crash and no hang. The carvers handled all 2,400 cleanly. The damage did change what they recovered (for example 2-6 DHAV streams where the clean input gives 5), so it reached them; they split or dropped what was damaged, as designed. Of 800 damaged E01 sets, 605 were refused cleanly and 195 read. The test suite runs 8 damaged inputs per target on a fixed seed, and checks that a refused E01 set leaves no file open (that test fails on the old code).
 
 ## 9. Vendor format status
 
@@ -1380,12 +1970,22 @@ tool's own parser reads, field by field.
 - ~~All of the checks that need only the case folders (`validate.realmedia`).~~ **Run on 28 Sep.** Drive 1 `identify-model` (head image, 4 GiB of non-video blocks): no model string. Drive 2: `DS-7B08HUHI-K1`, agreeing with the unit's label and serial (§8b). `decode-check`: 365,654 of 964,635 video frames do not decode — 245,538 before the first keyframe, 119,822 after a counter gap, 294 unexplained; **a missing frame explains 99.8% of the failures after a keyframe**, the same count as the independent measurement in §7. `carve-annexb`: the default first 2 GiB of drive 1 holds no footage, so the range now extends to the first known footage; over the first 8 GiB it covers **100%** of the DHAV carve's bytes plus 48.7 MiB it did not, as **one** stream — the three cameras share identical parameter sets and the carver cannot tell them apart. OCR: §8c.
 - OSD reader: weekday and AM/PM clocks now parse, but measured on six recorders (§8c) the OCR is weak: small, compressed text, white text on bright walls. Still to run on our drives' reference frames.
 - A native export and a reference disk for the validation in §9 — the comparison itself is built (`validate-export`).
-- Recorder timezones, which are what keep the two drives on separate axes in §8d.
+- Recorder timezones, which are what keep the two drives on separate axes in §8d. Daylight (§8l, 29 Sep): drive 1's cameras never switch to infrared (street-lit), so no estimate; the exploratory colour crossing says drive 1's clock keeps IST, within a few minutes - not a measured error.
 - The CP Plus unit's own log for 23 Sep - and, better than photos of it, the log exported
-  to a USB stick from the recorder's menu (one file, hashed). Then `identify-model` over
-  the whole of drive 1 for the unit's serial, DevID and MAC.
+  to a USB stick from the recorder's menu (one file, hashed). ~~Then `identify-model` over
+  the whole of drive 1 for the unit's serial, DevID and MAC.~~ **Run 29 Sep: none of them
+  on the platter, and no model string** (drive 1 row, §2).
+- ~~`identify-model` counts any match of a model pattern as a candidate, even one in binary
+  data: on drive 1, `HRG745` (6 characters, Honeywell's pattern) turned up by chance in
+  76.67 GiB and made the check say "differ".~~ **Fixed 29 Sep:** a candidate seen once and
+  8 characters or fewer is listed as a possible chance match and kept out of the check.
+  "HRG" and three digits has about a 1-in-3e11 chance at any byte of random data, and the
+  search covered 8.2e10 bytes. Real recorder models are longer: `CP-UNR-104F1` has 12
+  characters and `DS-7B08HUHI-K1` 14. Drive 1's case report was regenerated and reads
+  "not determined".
 - The Hikvision full-filesystem parser against a disk the Hikvision unit formatted itself (the reference disk in §9).
 - ~~Kaitai `.ksy` compiled~~ **Compiled, and checked against the parsers on synthetic data (§9a).** ~~Still to run on the real images.~~ **Run 29 Sep: agree on both drives' images and on five vendor-made files (§9a).**
 - ~~The ffmpeg cross-check on drive 1's own `.dav` files.~~ **Run 29 Sep (§8g):** 719,097 of 719,097 emitted frames identical. It found one thing to fix: after a frame-counter gap the DHAV date and millisecond counter can disagree by up to ~3 s (6 files, 227 frames). Frames after such a gap should carry that wider time uncertainty in the timeline and report; today they do not.
-- Analytics recall on our own cameras: 210 drive-1 frames sampled (§8a), to be re-sampled with tiling, then labelled and scored.
+- Analytics recall on our own cameras: 210 drive-1 frames, labelled by Claude, the 20 deciding frames checked by a person, scored with both detectors (§8a). New detector: people 2 of 2 (was 0), no face false alarms (was 7), but the dog is still a person, a tree trunk is a new one, and no vehicle is reported - the parked car scores 0.25-0.47 against a 0.5 threshold. Open: the static rule's 25% share lets an intermittent fixed false alarm through.
+- Face search (§8n): search a fisheye picture turned round as well, as `analyse-video` does. The one false candidate above the size limit was an upside-down head the face detector's points misread. The same person in real recorder footage (rather than LFW made small) is not measured: that needs labelled footage of one person and a photo of them.
 - ~~Drive 2 `label-ps` re-run on the drive.~~ **Run 29 Sep (§8b):** 440 `stale_tail`, 55 `outside_index`; index unchanged since 26 Sep.

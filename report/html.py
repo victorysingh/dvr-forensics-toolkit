@@ -398,8 +398,9 @@ def render(case: dict, examiner_notes: str = "") -> str:
     if an:
         add("<h2>6b. Video analytics — leads, not evidence</h2>")
         add("<div class='box warn'>Optional layer, run on extracted clips: face "
-            "<b>detection</b> (no identification — there is no face recognition in this "
-            "tool) and object detection. Scores are the models' own confidence, not the "
+            "<b>detection</b> (where a face is, not whose) and object detection. Comparing "
+            "faces with a photo is a separate step, face search, run only when an examiner "
+            "supplies one. Scores are the models' own confidence, not the "
             "probability a detection is correct. Each row is a moment to review in the "
             "footage itself. On real footage labelled by eye it still missed many of the "
             "people in it, so <b>an empty list does not mean nobody was there</b>.</div>")
@@ -412,6 +413,43 @@ def render(case: dict, examiner_notes: str = "") -> str:
                   [[h["clip"], h["t_s"], ", ".join(f"{d['label']} {d['score']:.2f}"
                                                   for d in h["detections"])]
                    for h in an["top"][:30]]))
+        if an.get("parked"):
+            add("<h3>Parked vehicles (a lead of their own)</h3><p>A car, bus or truck seen in "
+                "the same place through much of a clip: reported once per place, not counted "
+                "above as a moving vehicle.</p>")
+            add(table(["Clip", "Vehicle", "Best score", "Frames seen", "From (s)", "To (s)"],
+                      [[s["clip"], s["label"], f"{s['best']:.2f}", s["frames"], s["first"],
+                        s["last"]] for s in an["parked"][:30]]))
+
+    fs = case.get("face_search")
+    if fs:
+        ref, tot = fs["reference"], fs["totals"]
+        add("<h2>6b-ii. Face search — candidates, not identifications</h2>")
+        add("<div class='box warn'>Optional layer, run only because the examiner supplied a "
+            "reference photo. Each face found in the clips is scored by how alike it is to the "
+            "face in the photo (SFace, cosine of two vectors; 1 = alike, 0 = unrelated). A "
+            "<b>candidate</b> is a moment for the examiner to compare by eye with the photo; "
+            "<b>it does not say who anyone is</b>. On recorder-sized faces the same person can "
+            "score below the threshold and a stranger above it, and a face turned away, "
+            "covered or too small is never compared, so <b>no candidate does not mean the "
+            "person is absent</b>.</div>")
+        add(f"<p>Reference photo <code>{e(ref.get('photo', ''))}</code>, SHA-256 "
+            f"{mono(ref.get('photo_sha256', ''))}: {ref.get('faces_in_photo', '?')} face(s) found, "
+            f"the largest used (eyes {ref.get('eye_px', 0):.0f} px apart"
+            + (f"; the photo was turned {ref['turned']} degrees to find it" if ref.get("turned") else "")
+            + ").</p>")
+        add(table(["Model", "Licence", "SHA-256"],
+                  [[m["name"], m["license"], mono(m["sha256"])] for m in fs["models"].values()]))
+        add(f"<p>{tot.get('clips', 0)} clips, {tot.get('frames_analysed', 0):,} frames, "
+            f"{tot.get('faces_compared', 0):,} faces compared: <b>{tot.get('candidates', 0)} "
+            f"candidates</b> (similarity &ge; {fs['match_min']}, eyes &ge; {fs['min_eye_px']} px "
+            f"apart); {tot.get('too_small', 0):,} faces too small to compare.</p>")
+        add(table(["Rank", "Clip", "Offset in clip (s)", "Recorder time", "Similarity",
+                   "Eyes apart (px)", "Candidate", "Picture"],
+                  [[i + 1, f["clip"], f["t_s"], f.get("time_local") or "-",
+                    f"{f['similarity']:.3f}", f"{f['eye_px']:.0f}",
+                    "yes" if f["candidate"] else "no", f.get("picture") or "-"]
+                   for i, f in enumerate(fs["top"][:20])]))
 
     osd = case.get("osd")
     if osd:
@@ -533,6 +571,8 @@ def render(case: dict, examiner_notes: str = "") -> str:
         inputs["activity.json"] = a["sha256"]
     if an:
         inputs["analytics/analytics.json"] = an["sha256"]
+    if fs:
+        inputs["analytics/face_search.json"] = fs["sha256"]
     if osd:
         inputs["analytics/osd.json"] = osd["sha256"]
     if ps:

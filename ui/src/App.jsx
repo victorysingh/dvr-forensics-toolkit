@@ -329,10 +329,15 @@ function CasesHome({ cases }) {
       )}
       <h1 className="text-[19px] font-semibold mb-3.5">Cases</h1>
       <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(290px,1fr))]">
-        {cases.map((c) => (
+        {/* finished acquisitions first; an aborted attempt stays listed, since
+            it is part of the case's history, but after the ones that count */}
+        {[...cases].sort((a, b) => (b.complete - a.complete)).map((c) => (
           <a key={c.id} href={linkTo(c.id, "dashboard")}
             className="panel p-4 hover:border-accent block">
-            <div className="text-[17px] font-semibold">{c.id}</div>
+            {/* `accent`, not a hardcoded teal: the looks redefine that token,
+                and a fixed colour here would ignore the chosen direction.
+                `break-all` is setup's fix for a long case id overflowing. */}
+            <div className="text-[17px] font-semibold break-all">{c.id}</div>
             <div className="dim font-mono text-[12px] mt-0.5 mb-2.5 break-all">
               {c.device || "—"}</div>
             <DL rows={[["Case ID", c.case_id || "—"], ["Size", bytes(c.size_bytes)]]} />

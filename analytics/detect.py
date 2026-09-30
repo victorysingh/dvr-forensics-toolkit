@@ -9,8 +9,9 @@ and reports - it just cannot run this.
 What it does: decodes extracted clips with ffmpeg at a sampled frame rate and
 runs two ONNX models on each sampled frame (analytics/models.py):
   * YuNet - face DETECTION, on the whole 1920 x 1080 frame. It finds that a
-    face is present and where. It does not identify anyone; there is no
-    recognition here.
+    face is present and where. It does not identify anyone; comparing faces
+    with a photo is face search (analytics/face_search.py), a separate step
+    run only on an examiner's photo.
   * YOLOX-S (COCO) - people, vehicles and carried objects, on the whole
     1920 x 1080 frame and on each tile of a 2 x 2 grid of overlapping tiles
     (analytics/tiles.py), so that small people are seen.
@@ -34,10 +35,11 @@ from typing import Optional
 import numpy as np
 import onnxruntime as ort
 
-from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, threshold, thresholds
+from analytics.models import DEFAULT_SET, MODEL_SETS, MODELS, keep_threshold, mark_weak, thresholds
 from analytics.static import (STATIC_IOU, STATIC_MIN_FRAMES, STATIC_SHARE, counted,
-                              flag_implausible, flag_static)
+                              flag_implausible, flag_static, parked_spots)
 from analytics.tiles import ROTATIONS, TILE_OVERLAP, merge, tiles, to_frame, unrotate
+from core import proc
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # COCO ids that matter for surveillance: SSD-MobileNet emits 1-based ids of
@@ -61,24 +63,26 @@ def sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
-def load_models(model_set: str = DEFAULT_SET) -> dict:
-    """Open the set's two models, refusing any file whose hash is not the pinned one."""
+def open_model(key: str):
+    """One model of analytics/models.py MODELS, refused unless its hash is the pinned one."""
     opts = ort.SessionOptions()
     opts.log_severity_level = 3
     # leave the rest of the machine to anything else running (e.g. a scan)
     opts.intra_op_num_threads = int(os.environ.get("PS26150_ANALYTICS_THREADS", "4"))
+    m = MODELS[key]
+    path = os.path.join(HERE, "models", m["file"])
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"model {m['file']} missing - see analytics/README.md")
+    got = sha256_file(path)
+    if got != m["sha256"]:
+        raise ValueError(f"model {m['file']} hash {got} is not the pinned {m['sha256']}")
+    return ort.InferenceSession(path, opts, providers=["CPUExecutionProvider"])
+
+
+def load_models(model_set: str = DEFAULT_SET) -> dict:
+    """Open the set's two models, refusing any file whose hash is not the pinned one."""
     s = MODEL_SETS[model_set]
-    out = {"set": model_set}
-    for job in ("faces", "objects"):
-        m = MODELS[s[job]]
-        path = os.path.join(HERE, "models", m["file"])
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"model {m['file']} missing - see analytics/README.md")
-        got = sha256_file(path)
-        if got != m["sha256"]:
-            raise ValueError(f"model {m['file']} hash {got} is not the pinned {m['sha256']}")
-        out[job] = ort.InferenceSession(path, opts, providers=["CPUExecutionProvider"])
-    return out
+    return {"set": model_set, **{job: open_model(s[job]) for job in ("faces", "objects")}}
 
 
 def scale_for(model_set: str, n: int) -> int:
@@ -87,25 +91,21 @@ def scale_for(model_set: str, n: int) -> int:
     return OBJECT_SCALE if model_set != "classic" or n > 1 else 1
 
 
-def decode(path: str, fps: float, codec: str = "hevc", scale: int = 1):
+def decode(path: str, fps: float, codec: str = "hevc", scale: int = 1,
+           size: Optional[tuple] = None):
     """Yield (seconds from the first decoded frame, RGB frame) at `fps`, the
-    frame `scale` times DECODE_W x DECODE_H."""
+    frame `scale` times DECODE_W x DECODE_H, or `size` (w, h) if given."""
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg not found - install it to use the analytics layer")
     fmt = ["-f", codec] if codec else []          # PS: let ffmpeg detect the container
-    w, h = DECODE_W * scale, DECODE_H * scale
+    w, h = size or (DECODE_W * scale, DECODE_H * scale)
     cmd = ["ffmpeg", "-v", "quiet", *fmt, "-i", path,
            "-vf", f"fps={fps},scale={w}:{h}",
            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     n = w * h * 3
     with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
-        i = 0
-        while True:
-            buf = p.stdout.read(n)
-            if len(buf) < n:
-                break
+        for i, buf in enumerate(proc.read_chunks(p, n)):    # a decoder silent too long is stopped
             yield i / fps, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-            i += 1
 
 
 def shrink(rgb: np.ndarray, k: int) -> np.ndarray:
@@ -204,17 +204,19 @@ def yolox(sess, rgb: np.ndarray, low: float) -> list[dict]:
     return found
 
 
-def yunet(sess, rgb: np.ndarray, low: float) -> list[dict]:
+def yunet(sess, rgb: np.ndarray, low: float, points: bool = False) -> list[dict]:
     """YuNet as OpenCV runs it: BGR, values 0-255, the picture padded to a
     multiple of 32; per stride 8/16/32 a score sqrt(class x objectness) and a
-    box relative to its grid cell."""
+    box relative to its grid cell.  With `points`, each face also carries its
+    five points (eyes, nose tip, mouth corners) in pixels of `rgb`, which face
+    search aligns the face by (analytics/face_rules.py)."""
     h, w = rgb.shape[:2]
     H, W = (h + 31) // 32 * 32, (w + 31) // 32 * 32
     img = np.zeros((H, W, 3), np.float32)
     img[:h, :w] = rgb[:, :, ::-1]
     outs = dict(zip([o.name for o in sess.get_outputs()],
                     sess.run(None, {"input": img.transpose(2, 0, 1)[None]})))
-    boxes, scores = [], []
+    boxes, scores, kps = [], [], []
     for s in (8, 16, 32):
         cols = W // s
         sc = np.sqrt(np.clip(outs[f"cls_{s}"][0, :, 0], 0, 1) * np.clip(outs[f"obj_{s}"][0, :, 0], 0, 1))
@@ -226,11 +228,19 @@ def yunet(sess, rgb: np.ndarray, low: float) -> list[dict]:
         bw, bh = np.exp(bb[:, 2]) * s, np.exp(bb[:, 3]) * s
         boxes.append(np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1))
         scores.append(sc[idx])
+        if points:     # each point relative to its grid cell, like the box centre
+            k = outs[f"kps_{s}"][0][idx].reshape(-1, 5, 2)
+            kps.append((k + np.stack([idx % cols, idx // cols], 1)[:, None, :]) * s)
     if not boxes:
         return []
     b, s = np.concatenate(boxes).astype(np.float32), np.concatenate(scores).astype(np.float32)
-    return [{"label": "face", "score": round(float(s[i]), 3), "box": _box(*b[i], w, h)}
-            for i in _nms(b, s, 0.3)]
+    keep = _nms(b, s, 0.3)
+    found = [{"label": "face", "score": round(float(s[i]), 3), "box": _box(*b[i], w, h)} for i in keep]
+    if points:
+        k = np.concatenate(kps)
+        for d, i in zip(found, keep):
+            d["points"] = [[round(float(x), 2), round(float(y), 2)] for x, y in k[i]]
+    return found
 
 
 def _tiled(detector, sess, rgb: np.ndarray, n: int, low: float) -> list[dict]:
@@ -283,7 +293,8 @@ def detect_frame(models: dict, small: np.ndarray, big: Optional[np.ndarray] = No
     exactly."""
     s = MODEL_SETS[models["set"]]
     n = s["tiles"] if n is None else n
-    low_f, low_o = low or (s["faces_min"], min([s["objects_min"], *s["class_min"].values()]))
+    low_f, low_o = low or (s["faces_min"],
+                           min([s["objects_min"], s["parked_min"], *s["class_min"].values()]))
     big = small if big is None else big
     if models["set"] == "classic":
         found = (_tiled(ultraface, models["faces"], small, n, low_f)
@@ -300,7 +311,8 @@ def detect_frame(models: dict, small: np.ndarray, big: Optional[np.ndarray] = No
                 found.append(d)
     found = found if n == 1 and not turned else merge(found)
     if low is None:          # per class; merging is per label, so the order does not matter
-        found = [d for d in found if d["score"] >= threshold(models["set"], d["label"])]
+        found = mark_weak(models["set"], [d for d in found
+                                          if d["score"] >= keep_threshold(models["set"], d["label"])])
     return found
 
 
@@ -319,8 +331,8 @@ def _thumbnail(rgb: np.ndarray, dets: list[dict], path: str) -> None:
             img[Y1:Y2, min(w - 1, X1 + t)] = c
             img[Y1:Y2, max(0, X2 - t)] = c
     ppm = b"P6 %d %d 255\n" % (w, h) + img.tobytes()
-    subprocess.run(["ffmpeg", "-v", "quiet", "-y", "-f", "image2pipe", "-c:v", "ppm",
-                    "-i", "-", "-q:v", "4", path], input=ppm, check=True)
+    proc.run(["ffmpeg", "-v", "quiet", "-y", "-f", "image2pipe", "-c:v", "ppm",
+              "-i", "-", "-q:v", "4", path], timeout=proc.IMAGE_S, input=ppm, check=True)
 
 
 def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
@@ -340,6 +352,7 @@ def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
             hits.append({"t_s": round(t, 2), "detections": dets, "_rgb": small})
     flag_static(hits, frames)
     flag_implausible(hits)
+    parked = parked_spots(hits)
     counts: dict[str, int] = {}
     static: dict[str, int] = {}
     for h in hits:
@@ -364,7 +377,7 @@ def analyse_clip(models: dict, path: str, fps: float, thumbs_dir: Optional[str],
     hits.sort(key=lambda h: h["t_s"])
     return {"clip": os.path.basename(path), "clip_sha256": sha256_file(path),
             "frames_analysed": frames, "frames_turned": turned, "sample_fps": fps,
-            "frames_with": counts, "static_frames": static,
+            "frames_with": counts, "static_frames": static, "parked_vehicles": parked,
             "detections": hits, "thumbnails": thumbs}
 
 
@@ -404,12 +417,14 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
                              "and 270 degrees; 'auto' = a round fisheye picture",
                      "frames_turned": sum(r["frames_turned"] for r in results)},
         "sample_fps": fps, "clips": results, "frames_with_totals": totals,
+        "parked_vehicle_spots": sum(len(r["parked_vehicles"]) for r in results),
         "static_totals": static_totals,
         "static_rule": f"same label, box IoU >= {STATIC_IOU}, in >= {STATIC_MIN_FRAMES} frames "
                        f"and >= {STATIC_SHARE:.0%} of a clip's analysed frames",
         "notes": [
             "Face DETECTION only: it marks that a face appears and where. Nobody is "
-            "identified; there is no face recognition in this tool.",
+            "identified. Comparing faces with a photo is a separate step (face-search), "
+            "run only when an examiner supplies one.",
             "Scores are the models' own confidence, not the probability that a "
             "detection is correct. Small, distant, dark or blurred subjects are missed; "
             "shapes are sometimes mistaken for people or vehicles.",
@@ -420,6 +435,10 @@ def run(clips: list[str], out_dir: str, fps: float = 1.0, log=print,
             "real recorder footage labelled by eye, the tool reported a person in 44 of the "
             "57 frames that had one and a face in 22 of 27; on CAVIAR footage it found 810 "
             "of 1,089 labelled people (docs/VALIDATION_REPORT.md section 8a).",
+            "A car, bus or truck that stays in one place through much of a clip is reported "
+            "once per place, as a parked vehicle (parked_vehicles, with its first and last "
+            "time and the frames it was seen in); its boxes count from a lower score, since "
+            "they recur, and are not counted as vehicles in frames_with.",
             "Detections that stay in the same place through most of a clip are flagged "
             "'static' and not counted: on real footage a steel pot was repeatedly detected "
             "as a face. Static means the box did not move - usually an object mistaken for "
