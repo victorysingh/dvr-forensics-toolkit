@@ -109,7 +109,7 @@ survey                               draft the layout of an unknown vendor's dis
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 666 tests, no hardware, ~1 minute (668 with ffmpeg on PATH). Parsers against corrupted disks: `python -m validate.fuzz_parsers` (VALIDATION_REPORT §8o).
+`python tests/test_pipeline.py` — 703 tests, no hardware, ~1 minute (705 with ffmpeg on PATH). Parsers against corrupted disks: `python -m validate.fuzz_parsers` (VALIDATION_REPORT §8o).
 
 ## 4. Things learned the hard way
 

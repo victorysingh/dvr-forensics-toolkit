@@ -2413,6 +2413,75 @@ def test_parser_fuzz(tmp: str) -> None:
         check(f"{vendor}: 12 corrupted disks - no crash, hang or safety-net stop", not bad, str(bad[:2]))
 
 
+def test_extract_hardening(tmp: str) -> None:
+    """What the fuzzer found once it also took footage out (1 Oct): a Uniview
+    block header cut short, a HeimVision database whose text is not UTF-8,
+    and a Matrix file whose ext3 inode is damaged.  Each fixed; the cases
+    that found them now pass, and each fix is checked on its own."""
+    print("\n[extraction paths against damage (fuzzer, 1 Oct)]")
+    import random
+    import sqlite3
+    import struct
+    from parsers.base import ExtractRefused
+    from parsers.ext3 import ExtError
+    from plugins import heimvision as HV
+    from plugins import uniview as UV
+    from validate import fuzz_parsers as F
+
+    found = []
+    for vendor, seed, case in (("Uniview", 1, 32), ("Uniview", 2, 2), ("Matrix", 1, 9),
+                               ("Matrix", 1, 29), ("Matrix", 2, 136), ("HeimVision", 1, 287)):
+        data, reads, _ = F.seed(vendor, tmp)
+        rnd = random.Random(f"{vendor}:{seed}")
+        plan = [F.mutate(data, reads, rnd) for _ in range(case + 1)]
+        patches, size, _ = plan[case]
+        found.append((vendor, seed, case, F.run_case(vendor, data, patches, size)["outcome"]))
+    check("the six damaged disks that crashed or stopped extraction now come out 'ok'",
+          all(o == "ok" for *_, o in found), str(found))
+
+    class Short:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def read_at(self, off, n):
+            return self.raw[off:off + n]
+    raw = bytearray(UV.SEGMENTS_AT + 2 * UV.SEGMENT + 5)       # the image ends inside the list
+    struct.pack_into("<II", raw, 0, UV.REC_MAGIC, UV.REC_V4)
+    struct.pack_into("<H", raw, 0x38, 50)                       # 50 segments stated
+    h = UV.block_header(Short(bytes(raw)), 0)
+    check("Uniview: a block header cut short lists the segments it holds, not the 50 it states",
+          h["kind"] == "record" and len(h["segment_list"]) == 2, str(h.get("segment_list")))
+
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE t(v TEXT)")
+    con.execute("INSERT INTO t VALUES (CAST(X'ff41' AS TEXT))")
+    blob = con.serialize()
+    con.close()
+    check("HeimVision: text in its database that is not UTF-8 is read with a replacement "
+          "character, not a stop", HV._sqlite(blob, "SELECT v FROM t") == [("\ufffdA",)])
+
+    img = os.path.join(tmp, "matrix_refuse.img")
+    F._seed_builders()["Matrix"](img)
+    with BlockDevice(img) as dev:
+        mp = F.configure("Matrix", get_parser("Matrix"))
+        rid = mp.parse(dev).recordings[0].id
+
+        def refuse(ino):
+            raise ExtError("implausible extent tree - not read")
+            yield
+        mp.files[rid]["fs"].byte_runs = refuse
+        base = os.path.join(tmp, "matrix_refused")
+        try:
+            mp.extract_recording(dev, rid, base)
+            refused = ""
+        except ExtractRefused as exc:
+            refused = str(exc)
+    left = [f for f in os.listdir(tmp) if f.startswith("matrix_refused")]
+    check("Matrix: a file whose inode the ext3 reader refuses is refused by name, and nothing "
+          "half-read is left behind", "implausible extent tree" in refused and not left,
+          f"{refused!r} {left}")
+
+
 def test_carver_fuzz(tmp: str) -> None:
     """The three carvers and the E01 reader against damaged input
     (validate/fuzz_parsers.py, a fixed seed): none crashes or hangs; and a
@@ -5451,6 +5520,7 @@ def main() -> int:
         test_analytics_apply(tmp)
         test_parser_safety_net()
         test_parser_fuzz(tmp)
+        test_extract_hardening(tmp)
         test_carver_fuzz(tmp)
         test_combined(tmp)
         test_osd_rules()

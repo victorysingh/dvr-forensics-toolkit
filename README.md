@@ -71,10 +71,10 @@ Measured on two real 1 TB surveillance drives the team acquired, and on NIST's p
 | NIST CFReDS HeimVision (150 GB E01) | our E01 reader reproduces **FTK Imager's MD5 and SHA-1**; 24 h on 4 cameras recovered from a recorder we had never seen |
 | Event correlation | **16 of 17** all-camera silences explained by power cuts in the recorder's own log |
 | Analysis time, 1 TB over USB 2 | **~11.3 h** one pass vs ~56.6 h one read per task vs ~21.9 h image-first (+ ~931 GiB free) |
-| Hostile input | **12,800** damaged disks, streams and E01 sets: no crash, no hang (after fixing the 144 crashes and 1 hang they found) |
+| Hostile input | **24,800** damaged disks, streams and E01 sets, through parsing and extraction: no crash, no hang (after fixing the 144 crashes, 1 hang and 4 other bugs they found) |
 | People in real recorder frames | **44 of 57** labelled frames (first version: 0); **810 of 1,089** people on held-out CAVIAR footage |
 | Face search by photo | on LFW faces made recorder-sized: same person passes in **97.8%** of pairs (eyes ≥ 12 px), **no** pair of different people passes; on real footage, **1** false candidate (an upside-down head at a fisheye's edge) |
-| Regression suite | **666 tests** (668 with ffmpeg), no hardware, on Linux and Windows CI |
+| Regression suite | **703 tests** (705 with ffmpeg), no hardware, on Linux and Windows CI |
 
 Nothing is `validated` yet: that needs a byte-match between recovered footage and the recorder's own export (`validate-export`), not yet run on a real export. Every number's source is in [`docs/VALIDATION_REPORT.md`](docs/VALIDATION_REPORT.md) and [`docs/STATUS.md`](docs/STATUS.md).
 
@@ -239,7 +239,7 @@ The forensic core has **zero dependencies**: a bare Python 3.11+ install on an a
 git clone https://github.com/victorysingh/dvr-forensics-toolkit.git
 cd dvr-forensics-toolkit
 
-python tests/test_pipeline.py       # 666 tests (668 with ffmpeg), no hardware
+python tests/test_pipeline.py       # 703 tests (705 with ffmpeg), no hardware
 python demo/stage_demo.py           # every capability in eight steps, ~5 s, synthetic disks
 python cli.py serve                 # case console on http://127.0.0.1:8150
 python cli.py serve --require-access   # ...behind a supervisor's approval, 8 h (docs/ACCESS_CONTROL.md)
@@ -295,7 +295,7 @@ report/      HTML + JSON report, BSA s.63 certificate, CASE/UCO, NIST CCTV expor
 validate/    real-media checks, export byte-match, fuzzing, ffmpeg cross-checks
 formats/     Kaitai Struct definitions of the vendor formats
 viewer/ ui/  case console (stdlib server + React build)
-tests/       666 regression tests and synthetic DVR disk generators
+tests/       703 regression tests and synthetic DVR disk generators
 demo/        stage, tamper and single-pass benchmark demos
 packaging/   single-file executable build
 docs/        architecture, SOPs, validation, OEM comparison, final report

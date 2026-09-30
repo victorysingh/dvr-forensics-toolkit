@@ -96,6 +96,12 @@ def weakest_source(sources: list[str]) -> str:
     return _SOURCE_TO_STATUS.get(worst, VALIDATION_SYNTHETIC)
 
 
+class ExtractRefused(Exception):
+    """A plugin's extract_recording() will not take this recording out: what
+    it would read is damaged in a way it will not guess past.  Nothing is
+    written; the message says what was refused and why."""
+
+
 @dataclass
 class ParseResult:
     """What every vendor plugin returns.  Shapes come from the frozen

@@ -302,10 +302,11 @@ def block_header(dev, base: int) -> dict:
          "items": u16(0x2C), "pos_pages": u16(0x2E),
          "rectype": struct.unpack_from("<Q", raw, 0x30)[0], "segments": u16(0x38),
          "events": u16(0x3C), "motion": u16(0x3E), "camera_code": _cstr(raw[0x40:0x7F])}
+    # a header cut short (the image ends inside it) lists only the segments it holds
     h["segment_list"] = [
         dict(zip(("start", "end", "rectype", "size"), struct.unpack_from("<IIQH", raw, o)))
         for o in range(SEGMENTS_AT, SEGMENTS_AT + SEGMENT * min(h["segments"], SEGMENTS_MAX),
-                       SEGMENT)]
+                       SEGMENT) if o + struct.calcsize("<IIQH") <= len(raw)]
     return h
 
 

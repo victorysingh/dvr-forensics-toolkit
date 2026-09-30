@@ -304,6 +304,10 @@ def _sqlite(blob: bytes, sql: str) -> list[tuple]:
     memory where Python allows it (3.11+); otherwise from a temporary copy,
     read-only, deleted afterwards.  Either way the evidence is untouched."""
     con = sqlite3.connect(":memory:")
+    # a damaged database can hold text that is not UTF-8: read it with
+    # replacement characters rather than stop on it
+    text = lambda b: b.decode("utf-8", "replace")
+    con.text_factory = text
     if hasattr(con, "deserialize"):
         try:
             con.deserialize(blob)
@@ -311,6 +315,9 @@ def _sqlite(blob: bytes, sql: str) -> list[tuple]:
         except MemoryError as exc:
             raise sqlite3.DatabaseError("the database's header asks for more memory than "
                                         "there is - damaged") from exc
+        except UnicodeDecodeError as exc:
+            # SQLite's own message about a damaged schema, quoting its bytes
+            raise sqlite3.DatabaseError(f"damaged schema text ({exc.reason})") from exc
         finally:
             con.close()
     con.close()
@@ -319,8 +326,11 @@ def _sqlite(blob: bytes, sql: str) -> list[tuple]:
         with os.fdopen(fd, "wb") as fh:
             fh.write(blob)
         con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+        con.text_factory = text
         try:
             return con.execute(sql).fetchall()
+        except UnicodeDecodeError as exc:
+            raise sqlite3.DatabaseError(f"damaged schema text ({exc.reason})") from exc
         finally:
             con.close()
     finally:

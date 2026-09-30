@@ -18,7 +18,7 @@ Two different things are validated here, and they must not be confused:
 
 | Area | Result |
 |---|---|
-| Automated tests | 691 pass, 0 fail: 668 on generated data with known ground truth and on the access-control layer (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
+| Automated tests | 728 pass, 0 fail: 705 on generated data with known ground truth and on the access-control layer (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the HeimVision E01 and its FTK listing), 8 on vendor-made files: 6 from other recorders (§8g, §8l) and 2 on NIST's reference export (§8i) |
 | BSA s.63 certificate | the draft's wording matches the Schedule **word for word** as printed in the Gazette of India Extraordinary (No. 55, 25 Dec 2023, pp. 46-47; the Government of India Press's digitally signed PDF): Part A 233 words, Part B likewise; a test compares every word and fails on any change |
 | CASE/UCO export | a sample case (scan, carve, extraction, device record, report) exported and checked with the official validator `case_validate` (case-utils 0.18.0): **Conforms: True**; tests check every file's SHA-256 and byte ranges against the extraction manifest |
 | E01 reader | **reproduces a real FTK Imager E01's own hashes**: the NIST CFReDS HeimVision image, 150 GB in 3 segments and 4,578,856 chunks - computed MD5 and SHA-1 equal the stored ones (§8e). On generated sets: byte-identical reads; scan and carve equal the raw image's; a damaged chunk is reported unreadable |
@@ -33,7 +33,7 @@ Two different things are validated here, and they must not be confused:
 | Analysis time | one pass over a 1 TB drive at the measured 23.4 MiB/s: ~11.3 h, against ~56.6 h one read per task; the pass itself runs at 26.7 MiB/s (CPU-bound on fast media) - `PERFORMANCE.md` |
 | Export comparison (`validate-export`) | 17 tests on generated footage (§9); **not yet run on a real export** |
 | Real-hardware failures found | 2 bugs that could have put wrong data into the evidence hash; both fixed with regression tests that fail on the old code |
-| Parsers against damaged or tampered disks | **9,600 corrupted disks** fed to all 8 vendor parsers (§8o). Before the fixes: 144 crashes and 1 hang in 3,200. After, in all 9,600: **no crash and no hang**. The few cases the safety net caught were fixed at the parser too. A parser can no longer end in a traceback. The 3 carvers and the E01 reader were fuzzed too: one bug (a damaged E01 set left its evidence file open), fixed |
+| Parsers against damaged or tampered disks | **9,600 corrupted disks** fed to all 8 vendor parsers (§8o). Before the fixes: 144 crashes and 1 hang in 3,200. After, in all 9,600: **no crash and no hang**. The few cases the safety net caught were fixed at the parser too. A parser can no longer end in a traceback. The 3 carvers and the E01 reader were fuzzed too: one bug (a damaged E01 set left its evidence file open), fixed. Then 12,000 more through extraction and footage recovery: 3 bugs in extraction paths, fixed; the last 7,200 clean |
 | Recovery vs ground truth (generated data) | every surviving frame carved; no stream ever mixes two sources |
 | Recovery on real media | inline carve identical to standalone carve; 49 unindexed streams extracted with matching frame counts; the no-parser carver scored on the HeimVision image by its parser: every slice accounted for, 0.07% false, identically set cameras not separable (§8e) |
 | Full-drive acquisition | complete single pass of 931.5 GiB, 0 unreadable sectors, one USB drop survived by verified reconnect; SHA-256 `78eb8a4a…d909` |
@@ -1914,14 +1914,33 @@ in a damaged set would have escaped as a raw exception. Fixed
 (`acquire/device.py`): the file is closed, and any failure to open a set is a
 device error that names it.
 
-**TP-Link's footage path (30 Sep).** A fuzz case now also does what the
-tool does after a parse, wherever the plugin can: it extracts the first
-recording and walks the video area for footage no index lists. The clean run
-that aims the damage does the same, so the damage lands on GOPs and frame
-headers as well as on the index (62 read ranges on the TP-Link disk, 20
-before). TP-Link, whose footage path is new: **800 damaged disks (two seeds),
-no crash and no hang**. The other plugins were fuzzed before this change,
-through their parse only.
+### Taking the footage out, fuzzed too (30 Sep - 1 Oct)
+
+Until 30 Sep a fuzz case stopped after the parse. It now also does what the
+tool does next, wherever the plugin can: it extracts the first recording and
+walks the video area for footage no index lists. The clean run that aims the
+damage does the same, so the damage lands on GOPs and frame headers as well
+as on the indexes (62 read ranges on the TP-Link disk, 20 before).
+
+- **TP-Link** (footage path new on 30 Sep): 800 damaged disks, no crash or hang.
+- **The other five plugins with an extraction path** (HeimVision, Honeywell,
+  Matrix, Godrej, Uniview), 4,000 damaged disks: **3 bugs, none reachable
+  from a parse alone**:
+  - Uniview: a block header cut short by the end of the image was read to
+    the segment count it states (16 cases). It now lists only the segments
+    it holds.
+  - Matrix: when the ext3 reader refused a damaged inode, extraction let the
+    refusal escape as a traceback (10 cases). It now refuses by name
+    (`ExtractRefused`, reported by `cli.py extract`) and leaves nothing
+    half-written.
+  - HeimVision: a damaged database's schema text, quoted in SQLite's own
+    error message, was not UTF-8 (1 case, caught by the safety net). It is
+    now an ordinary damaged-database error, and its text values are read with
+    replacement characters.
+- **After the fixes: 7,200 damaged disks** - the six plugins, three seeds
+  (the two that found the bugs and a fresh one), 400 each: **no crash, no
+  hang, nothing stopped by the safety net**. `test_extract_hardening` re-runs
+  the six cases that failed and checks each fix on its own.
 
 **Result:** 3,200 damaged inputs (400 per target, two seeds), after the fix: no crash and no hang. The carvers handled all 2,400 cleanly. The damage did change what they recovered (for example 2-6 DHAV streams where the clean input gives 5), so it reached them; they split or dropped what was damaged, as designed. Of 800 damaged E01 sets, 605 were refused cleanly and 195 read. The test suite runs 8 damaged inputs per target on a fixed seed, and checks that a refused E01 set leaves no file open (that test fails on the old code).
 

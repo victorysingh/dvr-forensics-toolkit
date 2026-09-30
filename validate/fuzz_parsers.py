@@ -339,7 +339,7 @@ def run_case(vendor: str, data: bytes, patches: dict, size: int) -> dict:
     error is a crash."""
     import parsers  # noqa: F401
     from acquire.device import DeviceError
-    from parsers.base import ParseResult, get_parser
+    from parsers.base import ExtractRefused, ParseResult, get_parser
     p = configure(vendor, get_parser(vendor))
     dev = MemDevice(data, patches, size)
     try:
@@ -358,8 +358,11 @@ def run_case(vendor: str, data: bytes, patches: dict, size: int) -> dict:
         extracted = remnants = None
         if res.recordings and hasattr(p, "extract_recording"):
             with tempfile.TemporaryDirectory() as d:
-                extracted = p.extract_recording(dev, res.recordings[0].id,
-                                                os.path.join(d, "rec"))["bytes"]
+                try:
+                    extracted = p.extract_recording(dev, res.recordings[0].id,
+                                                    os.path.join(d, "rec"))["bytes"]
+                except ExtractRefused as exc:     # a stated refusal is a right answer
+                    extracted = f"refused: {str(exc)[:120]}"
         if hasattr(p, "recover_video_area"):
             remnants = len(p.recover_video_area(dev))
         return {"outcome": "ok", "recordings": len(res.recordings), "errors": len(res.errors),
