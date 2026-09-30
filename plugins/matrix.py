@@ -53,7 +53,8 @@ from core.contract import STATE_ACTIVE, Provenance, Recording, TimestampClaim
 from core.hashing import sha256_file
 from detect.engine import parse_partitions
 from detect.signatures import CANDIDATE, Signature
-from parsers.base import SOURCE_PUBLISHED, FieldSpec, ParseResult, VendorParser, register
+from parsers.base import (SOURCE_PUBLISHED, ExtractRefused, FieldSpec, ParseResult, VendorParser,
+                          register)
 from parsers.ext3 import Ext, ExtError
 
 DOC = "Matrix Wiki, Backup recording files from HDD in SATATYA Devices (V1R1, 2018)"
@@ -372,18 +373,25 @@ class MatrixParser(VendorParser):
         fs, ino = f["fs"], f["inode"]
         ext = "." + f["path"].rsplit(".", 1)[1]
         path = base_path + ext
-        with open(path, "wb") as fh:
-            for fo, d, n in fs.byte_runs(ino):
-                fh.seek(fo)
-                fh.write(dev.read_at(d, n))
-            fh.truncate(ino["size"])
+        try:
+            with open(path, "wb") as fh:
+                for fo, d, n in fs.byte_runs(ino):
+                    fh.seek(fo)
+                    fh.write(dev.read_at(d, n))
+                fh.truncate(ino["size"])
+            side_data = {name: fs.read(e) for name, e in sorted(f["sidecars"].items())}
+        except ExtError as exc:
+            # the ext3 reader refuses a damaged inode: take nothing out half-read
+            if os.path.exists(path):
+                os.remove(path)
+            raise ExtractRefused(f"{f['path']}: {exc}") from exc
         data = open(path, "rb").read()
         codec = _codec(data[:1 << 16])
         side = {}
-        for name, e in sorted(f["sidecars"].items()):
+        for name, blob in side_data.items():
             sp = base_path + "." + name.rsplit(".", 1)[1]
             with open(sp, "wb") as fh:
-                fh.write(fs.read(e))
+                fh.write(blob)
             side[os.path.basename(sp)] = sha256_file(sp)
         return {"file": os.path.basename(path), "sha256": sha256_file(path),
                 "bytes": os.path.getsize(path), "source_path": f["path"],

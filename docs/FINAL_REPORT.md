@@ -29,9 +29,9 @@ format. We built a vendor-agnostic tool that:
 - builds a timeline that refuses to invent a time zone;
 - keeps a hash-chained custody record of every action, sealed with a key kept
   outside the case folder, so an entry edited, removed or rewritten is caught;
-- survives damaged evidence: its parsers, carvers and E01 reader were fed
-  12,800 corrupted disks and files, and the 144 crashes and 1 hang that found
-  were fixed;
+- survives damaged evidence: its parsers, carvers, E01 reader and
+  extraction paths were fed 24,800 corrupted disks and files, and everything
+  that found (144 crashes, 1 hang, and 4 more bugs) was fixed;
 - reports in HTML and JSON, with a draft BSA 2023 s.63 certificate.
 
 It was run on two real 1 TB surveillance drives:
@@ -155,7 +155,7 @@ Source: `VALIDATION_REPORT.md` §8e. The NIST CFReDS *Heimvision DVR .E01 Forens
 
 Full account: `VALIDATION_REPORT.md`.
 
-- **Automated tests:** 691 in all: 668 on generated data with known ground
+- **Automated tests:** 728 in all: 705 on generated data with known ground
   truth and on the access-control layer (2 need ffmpeg), 15 on real media (9 on the CP Plus drive's image, 6 on the
   HeimVision E01 and its FTK listing), and 8 on vendor-made files: 6 from
   other recorders and 2 on NIST's reference export (`VALIDATION_REPORT.md` §1).
@@ -163,7 +163,7 @@ Full account: `VALIDATION_REPORT.md`.
   every parser and carver, the timeline, the model check, the export
   comparison, the Honeywell and HeimVision plugins, the E01 reader, the
   CASE/UCO export and the certificate.
-- **Damaged or tampered disks:** 9,600 corrupted disks fed to all 8 vendor parsers (`VALIDATION_REPORT.md` §8o). The first 3,200 found 144 crashes and 1 hang in 22 places, all fixed. None crashes or hangs now, and a parser can no longer end in a traceback. The three carvers and the E01 reader were fuzzed too: one bug, a damaged E01 set left its evidence file open, fixed.
+- **Damaged or tampered disks:** 9,600 corrupted disks fed to all 8 vendor parsers (`VALIDATION_REPORT.md` §8o). The first 3,200 found 144 crashes and 1 hang in 22 places, all fixed. None crashes or hangs now, and a parser can no longer end in a traceback. The three carvers and the E01 reader were fuzzed too: one bug, a damaged E01 set left its evidence file open, fixed. Fuzzing then went on through extraction and footage recovery (12,000 more): 3 bugs in extraction paths (Uniview, Matrix, HeimVision), fixed, and the last 7,200 clean.
 - **Write blocking:** root writes refused on a sacrificial loop device, and
   the block re-applied automatically after 2 of 2 real reconnects.
 - **Reproducibility:** five independent reads over three days agree bit for

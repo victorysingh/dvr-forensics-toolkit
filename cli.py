@@ -347,6 +347,7 @@ def _extract_with_plugin(args, plugin) -> int:
     """A plugin's own reassembly (e.g. Honeywell): playable video plus a
     manifest with its hash, the parse's status, and what the plugin measured."""
     from core.contract import SCHEMA_VERSION, dump_json, utc_now
+    from parsers.base import ExtractRefused
 
     os.makedirs(args.out, exist_ok=True)
     if getattr(args, "tz_offset", None) is not None and hasattr(plugin, "tz_offset_min"):
@@ -361,6 +362,9 @@ def _extract_with_plugin(args, plugin) -> int:
     except KeyError:
         print(f"[!] no recording {args.recording!r}. Run `parse --vendor {args.vendor}` "
               f"to list recording ids.")
+        return 1
+    except ExtractRefused as exc:
+        print(f"[!] {args.recording} not extracted: {exc}")
         return 1
     except (PermissionNeeded, DeviceError) as exc:
         print(f"[!] {exc}")

@@ -271,8 +271,9 @@ goes beyond.
   layout (D12) is documented in its plugin, not yet as a `.ksy`.
 - Robust against damaged or tampered disks: 9,600 corrupted disks fed to
   all 8 vendor parsers found 144 crashes and a hang, now fixed. A parser can
-  no longer end in a traceback. The three carvers and the E01 reader were
-  fuzzed the same way (`VALIDATION_REPORT.md` §8o).
+  no longer end in a traceback. The three carvers, the E01 reader and the
+  plugins' extraction paths were fuzzed the same way (`VALIDATION_REPORT.md`
+  §8o).
 - Magnet Witness (formerly DVR Examiner, from DME Forensics), the leading
   commercial tool, is closed. We do not claim to match its vendor coverage.
   We claim a method that shows its evidence.
