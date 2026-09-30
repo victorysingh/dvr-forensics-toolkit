@@ -103,11 +103,12 @@ validate-export                      recovered footage byte-matched against the 
 combine                              several recorders in one view - on one axis only where
                                      every case states its recorder's timezone
 report / verify / prove / serve      report, re-verification, Merkle proofs, viewer
+access-admin / -user / -request      temporary approved access to the console (docs/ACCESS_CONTROL.md)
 survey                               draft the layout of an unknown vendor's disk
 writeblock-rule                      udev rule keeping a drive read-only across resets
 ```
 
-`python tests/test_pipeline.py` — 526 tests, no hardware, ~1 minute (528 with ffmpeg on PATH).
+`python tests/test_pipeline.py` — 604 tests, no hardware, ~1 minute (606 with ffmpeg on PATH).
 
 ## 4. Things learned the hard way
 

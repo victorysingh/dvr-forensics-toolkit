@@ -59,7 +59,12 @@ python cli.py verify --out out/CASE-001      # re-verify custody, Merkle root, p
 python cli.py prove  --out out/CASE-001 --offset 8388608
 python cli.py validate-export --export clip.dav --against out/REF-001/clips --out out/REF-001
 
-python tests/test_pipeline.py               # 526 regression tests (528 with ffmpeg), no hardware
+python cli.py access-admin --username supervisor      # who may approve access requests
+python cli.py serve --out out --require-access        # console behind approval, 8-hour grants
+python cli.py access-request --pending-only          # what is waiting for a decision
+python cli.py access-audit                           # every access decision, hash-chained
+
+python tests/test_pipeline.py               # 604 regression tests (606 with ffmpeg), no hardware
 python cli.py ewf-info --image case.E01 --verify   # any command also takes an .E01
 python -m validate.realmedia --case1 out/CASE-001 --image1 head.dd   # every real-media check
 python demo/tamper_demo.py                  # tamper detection, end to end

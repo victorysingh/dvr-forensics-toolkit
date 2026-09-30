@@ -833,8 +833,154 @@ def cmd_report(args) -> int:
 def cmd_serve(args) -> int:
     """Start the local web UI (loopback only, read-only viewer)."""
     from viewer.server import serve
-    serve(args.out, args.port)
+    serve(args.out, args.port, require_access=args.require_access,
+          access_dir=args.access_dir, allow_signup=not args.no_signup)
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Temporary access control (access/).  These commands are the only way to make
+# an administrator: an account that can approve requests is never created over
+# HTTP, so an attacker who can reach the sign-up form cannot mint one.
+# ---------------------------------------------------------------------------
+def _access(args):
+    from access.service import AccessControl
+
+    directory = args.access_dir or os.path.join(args.out, ".access")
+    return AccessControl(directory)
+
+
+def _ask_password(confirm: bool = True, from_stdin: bool = False) -> str:
+    """Read a password without echoing it. Never taken from the argv.
+
+    `--password-stdin` exists because getpass cannot be scripted on Windows:
+    win_getpass reads the console device directly, so a piped password is
+    ignored and the prompt blocks forever waiting for a keystroke that will
+    never come.  Reading the first line of stdin instead makes setup
+    automatable without ever putting the password in a command line, where it
+    would land in the shell history and in every process listing.
+    """
+    import getpass
+
+    if from_stdin:
+        line = sys.stdin.readline()
+        if not line:
+            raise SystemExit("  [!] --password-stdin given but stdin was empty")
+        return line.rstrip("\r\n")
+
+    while True:
+        first = getpass.getpass("  password: ")
+        if not confirm:
+            return first
+        if first == getpass.getpass("  repeat  : "):
+            return first
+        print("  they do not match - again")
+
+
+def cmd_access_admin(args) -> int:
+    """Create an administrator, or promote an existing account to one."""
+    ac = _access(args)
+    name = args.username.strip().lower()
+    existing = ac.store.user_by_name(name)
+    if existing:
+        r = ac.set_role(name, "admin", actor="cli")
+        print(f"  {'[+]' if r.ok else '[!]'} {r.message}")
+        if r.ok and args.password_too:
+            p = ac.set_password(name, _ask_password(
+                from_stdin=args.password_stdin), actor="cli")
+            print(f"  {'[+]' if p.ok else '[!]'} {p.message}")
+        return 0 if r.ok else 1
+    r = ac.create_user(name, _ask_password(from_stdin=args.password_stdin),
+                       role="admin", actor="cli")
+    print(f"  {'[+]' if r.ok else '[!]'} {r.message}")
+    if r.ok:
+        print(f"      {name} may now approve requests at /admin")
+    return 0 if r.ok else 1
+
+
+def cmd_access_user(args) -> int:
+    """List accounts, or add / disable / enable one, or set a password."""
+    ac = _access(args)
+    if args.action == "list":
+        users = ac.store.list_users()
+        if not users:
+            print("  no accounts yet")
+            return 0
+        print(f"  {'USER':<20} {'ROLE':<6} {'STATE':<9} LAST SIGN-IN")
+        for u in users:
+            state = "disabled" if u["disabled"] else "enabled"
+            print(f"  {u['username']:<20} {u['role']:<6} {state:<9} "
+                  f"{u['last_login_utc'] or 'never'}")
+        return 0
+
+    if not args.username:
+        print("  [!] --username is required for that action")
+        return 2
+    name = args.username.strip().lower()
+
+    if args.action == "add":
+        r = ac.create_user(name, _ask_password(from_stdin=args.password_stdin),
+                           role="user", actor="cli")
+    elif args.action == "passwd":
+        r = ac.set_password(name, _ask_password(from_stdin=args.password_stdin),
+                            actor="cli")
+    elif args.action == "disable":
+        r = ac.set_disabled(name, True, actor="cli")
+    elif args.action == "enable":
+        r = ac.set_disabled(name, False, actor="cli")
+    else:
+        print("  [!] unknown action")
+        return 2
+    print(f"  {'[+]' if r.ok else '[!]'} {r.message}")
+    return 0 if r.ok else 1
+
+
+def cmd_access_request(args) -> int:
+    """List access requests, or decide one without opening a browser."""
+    ac = _access(args)
+    if args.action == "list":
+        rows = ac.pending() if args.pending_only else ac.recent(args.limit)
+        if not rows:
+            print("  nothing to show")
+            return 0
+        print(f"  {'REQUEST':<11} {'USER':<16} {'STATE':<9} "
+              f"{'DECIDED BY':<14} ACCESS UNTIL")
+        for r in rows:
+            print(f"  {r['public_id']:<11} {r['username']:<16} "
+                  f"{r['status']:<9} {(r['decided_by'] or '-'):<14} "
+                  f"{r['access_expires_utc'] or '-'}")
+        return 0
+
+    if not args.id:
+        print("  [!] --id <9 digits> is required for that action")
+        return 2
+    who = args.admin or "cli"
+    if args.action == "approve":
+        r = ac.approve(args.id, who, args.note)
+    elif args.action == "reject":
+        r = ac.reject(args.id, who, args.note)
+    elif args.action == "revoke":
+        r = ac.revoke(args.id, who, args.note)
+    else:
+        print("  [!] unknown action")
+        return 2
+    print(f"  {'[+]' if r.ok else '[!]'} {r.message}")
+    return 0 if r.ok else 1
+
+
+def cmd_access_audit(args) -> int:
+    """Print the access audit log and verify its hash chain."""
+    ac = _access(args)
+    entries = ac.audit.recent(args.limit)
+    for e in reversed(entries):
+        detail = json.dumps(e.get("detail") or {}, sort_keys=True)
+        print(f"  {e['ts_utc']}  {e['actor']:<14} {e['action']:<26} {detail}")
+    v = ac.audit.verify()
+    print(f"\n  entries : {len(ac.audit.entries)}")
+    print(f"  chain   : {v['message']}")
+    if not v["valid"]:
+        print(f"  BROKEN at seq {v.get('broken_at_seq')}: {v.get('reason')}")
+    return 0 if v["valid"] else 1
 
 
 def cmd_writeblock_rule(args) -> int:
@@ -2253,7 +2399,67 @@ def main() -> int:
     p = sub.add_parser("serve", help="local web UI over the case directories")
     p.add_argument("--out", default="out", help="directory holding case folders")
     p.add_argument("--port", type=int, default=8150)
+    p.add_argument("--require-access", action="store_true",
+                   help="put the console behind sign-in and administrator "
+                        "approval; a grant lasts 8 hours (see access/)")
+    p.add_argument("--access-dir", default="",
+                   help="where the access database and audit log live "
+                        "(default: <out>/.access)")
+    p.add_argument("--no-signup", action="store_true",
+                   help="with --require-access, close the sign-up form so "
+                        "only 'access-user --action add' can make an account")
     p.set_defaults(func=cmd_serve)
+
+    # -- temporary access control ------------------------------------------
+    def _access_args(parser):
+        parser.add_argument("--out", default="out",
+                            help="case folder root; the access store defaults "
+                                 "to <out>/.access")
+        parser.add_argument("--access-dir", default="",
+                            help="explicit access store directory")
+
+    p = sub.add_parser("access-admin",
+                       help="create or promote an administrator who can "
+                            "approve access requests")
+    _access_args(p)
+    p.add_argument("--username", required=True)
+    p.add_argument("--password-too", action="store_true",
+                   help="also set a new password when promoting")
+    p.add_argument("--password-stdin", action="store_true",
+                   help="read the password from the first line of stdin "
+                        "instead of prompting (getpass cannot be piped on "
+                        "Windows); keeps it out of the command line either way")
+    p.set_defaults(func=cmd_access_admin)
+
+    p = sub.add_parser("access-user", help="list or manage access accounts")
+    _access_args(p)
+    p.add_argument("--action", default="list",
+                   choices=["list", "add", "passwd", "disable", "enable"])
+    p.add_argument("--username", default="")
+    p.add_argument("--password-stdin", action="store_true",
+                   help="read the password from the first line of stdin "
+                        "instead of prompting")
+    p.set_defaults(func=cmd_access_user)
+
+    p = sub.add_parser("access-request",
+                       help="list access requests, or approve/reject/revoke one")
+    _access_args(p)
+    p.add_argument("--action", default="list",
+                   choices=["list", "approve", "reject", "revoke"])
+    p.add_argument("--id", default="", help="the 9-digit request identifier")
+    p.add_argument("--admin", default="",
+                   help="name recorded as the deciding administrator")
+    p.add_argument("--note", default="", help="reason, kept in the audit log")
+    p.add_argument("--pending-only", action="store_true",
+                   help="with --action list, show only undecided requests")
+    p.add_argument("--limit", type=int, default=40)
+    p.set_defaults(func=cmd_access_request)
+
+    p = sub.add_parser("access-audit",
+                       help="print the access audit log and verify its chain")
+    _access_args(p)
+    p.add_argument("--limit", type=int, default=60)
+    p.set_defaults(func=cmd_access_audit)
 
     p = sub.add_parser("writeblock-rule",
                        help="print a udev rule that write-blocks a drive across reconnects")

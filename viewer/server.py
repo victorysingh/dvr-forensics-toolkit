@@ -9,6 +9,12 @@ evidence device: there is no route that opens a block device, and nothing
 here writes anywhere except the report it is asked to render.  It listens
 on the loopback interface only - on an air-gapped workstation there is no
 one else to serve, and on a connected one there must not be.
+
+Optionally, and only when asked, an approval gate stands in front of all of
+this: `serve(require_access=True)` puts every route behind a signed-in,
+administrator-approved, time-limited grant (see access/__init__.py).  With the
+flag absent nothing in access/ is imported and this server behaves exactly as
+it did before the gate existed.
 """
 
 from __future__ import annotations
@@ -81,6 +87,11 @@ def _case_dir(out_root: str, case_id: str) -> str | None:
 class Handler(BaseHTTPRequestHandler):
     out_root = "out"
     server_version = "anokhidrishti-ui"
+    gate = None                 # access.routes.Gate, or None for an open viewer
+
+    #: Set by the gate when it rotates a session token on a request it is
+    #: passing through, so the new cookie rides out on the real response.
+    access_set_cookie = ""
 
     def log_message(self, fmt, *args):             # quiet by default
         pass
@@ -91,6 +102,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        if self.access_set_cookie:
+            self.send_header("Set-Cookie", self.access_set_cookie)
         self.end_headers()
         self.wfile.write(body)
 
@@ -98,6 +111,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj, default=str).encode(), "application/json")
 
     def do_GET(self):                              # noqa: N802
+        if self.gate is not None and self.gate.dispatch(self, "GET"):
+            return                                 # the gate answered it
         path = urlparse(self.path).path
         try:
             if path == "/api/cases":
@@ -138,11 +153,41 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:                   # noqa: BLE001
             return self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
+    def do_POST(self):                             # noqa: N802
+        """Only the gate posts. The viewer itself remains read-only."""
+        if self.gate is not None and self.gate.dispatch(self, "POST"):
+            return
+        return self._send(405, b"method not allowed", "text/plain")
 
-def serve(out_root: str = "out", port: int = 8150) -> None:
+
+def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
+          access_dir: str = "", allow_signup: bool = True) -> None:
+    """Serve the console on loopback, optionally behind the approval gate.
+
+    `access_dir` defaults to a dot-directory inside the case folder.  It holds
+    the sqlite database and the audit log, and it is deliberately not a case
+    directory: report.case.list_cases treats any folder holding a
+    custody_ledger.jsonl as a case, and the access log is named differently so
+    it can never show up in the console's own case list.
+    """
     Handler.out_root = out_root
+    Handler.gate = None
+    if require_access:
+        from access.routes import build_gate
+
+        directory = access_dir or os.path.join(out_root, ".access")
+        Handler.gate = build_gate(directory, allow_signup=allow_signup)
+        if not Handler.gate.ac.has_admin:
+            print("  WARNING: no administrator account exists, so no request "
+                  "can ever be approved.")
+            print("           create one first:  "
+                  "cli.py access-admin --username <name>")
+
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"AnokhiDrishti on http://127.0.0.1:{port}/  (cases from {os.path.abspath(out_root)})")
+    if require_access:
+        print(f"  approval gate ON - sign in at http://127.0.0.1:{port}/access/login")
+        print(f"  administrators approve at http://127.0.0.1:{port}/admin")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
