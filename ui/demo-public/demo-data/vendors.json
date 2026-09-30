@@ -1,0 +1,197 @@
+{
+ "vendors": [
+  {
+   "vendor": "Hikvision",
+   "signatures": 4,
+   "parser": "Hikvision",
+   "parser_status": "synthetic_only",
+   "family": "Hikvision (HIKBTREE)",
+   "media": "second drive held - not yet read",
+   "basis": "HIKBTREE layout from published analyses; field offsets corroborated only by the synthetic fixture until the team's own drive is read",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "Dahua",
+   "signatures": 3,
+   "parser": "Dahua",
+   "parser_status": "spec_only",
+   "family": "Dahua DHFS 4.1",
+   "media": "CP Plus drive held (Dahua-family, DHFS 4.1)",
+   "basis": "DHFS structures and DHAV frames read off real media and cross-checked against ffmpeg's DHAV demuxer; not yet byte-matched to a recorder export",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "CP Plus",
+   "signatures": 2,
+   "parser": "Dahua",
+   "parser_status": "spec_only",
+   "family": "Dahua-family (rebadged DHFS 4.1)",
+   "media": "CP Plus drive held",
+   "basis": "the CP Plus unit's platter carries Dahua DHFS 4.1; on disk the two are indistinguishable, so attribution to CP Plus rests on the seized unit's label",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "Honeywell",
+   "signatures": 1,
+   "parser": "Honeywell",
+   "parser_status": "spec_only",
+   "family": "Honeywell NVR (GPT + proprietary video partition)",
+   "media": "none",
+   "basis": "plugins/honeywell.py, written from Yoon & Hwang, DFRWS USA 2026 (arXiv:2605.07430); no Honeywell disk read by the team",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "TP-Link",
+   "signatures": 3,
+   "parser": "TP-Link",
+   "parser_status": "detected_not_parsed",
+   "family": "TP-Link in-house TPFS (raw or ext4; SQLite index in a TpFile header)",
+   "media": "none",
+   "basis": "plugins/tplink.py, from the VIGI NVR1008H V2 240119 firmware (static disassembly): detects the format sector and the index, and reads the index and system log when they are plain SQLite; footage is not placed on the disk (zone geometry not recovered) - carve-annexb",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "Godrej",
+   "signatures": 2,
+   "parser": "Godrej",
+   "parser_status": "spec_only",
+   "family": "Qualvision QVFS (Godrej SeeThru runs Qualvision's software)",
+   "media": "none",
+   "basis": "plugins/godrej.py, from Qualvision firmware NVR401L-4P4 20240531 (static disassembly of Sofia): disk head and frame chain with times; cameras and the index not decoded; no Godrej/Qualvision disk read",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "Uniview",
+   "signatures": 2,
+   "parser": "Uniview",
+   "parser_status": "spec_only",
+   "family": "Uniview UBS (its own block store, in the kernel module comm.ko)",
+   "media": "none",
+   "basis": "plugins/uniview.py, from the storage driver of Uniview firmware NVR301-04LS3-W B3612.1.21.220408 (static disassembly); no Uniview disk read by the team",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  },
+  {
+   "vendor": "Matrix",
+   "signatures": 3,
+   "parser": "Matrix",
+   "parser_status": "spec_only",
+   "family": "Matrix SATATYA (a Linux file tree of .stm files; filesystem not documented)",
+   "media": "none",
+   "basis": "plugins/matrix.py, from Matrix's own documents (the CameraNN/date/hour tree and file naming); reads ext2/3/4, incl. one RAID 1 mirror; the .stm container is not published and is extracted as stored; no Matrix disk read by the team",
+   "detected_confidence": 0.0,
+   "detected_note": ""
+  }
+ ],
+ "plugins": {
+  "registered": [
+   "Dahua",
+   "Godrej",
+   "HeimVision",
+   "Hikvision",
+   "Honeywell",
+   "Matrix",
+   "TP-Link",
+   "Uniview"
+  ],
+  "dropped_in": {
+   "godrej.py": {
+    "vendors": [
+     "Godrej"
+    ],
+    "signatures": [
+     "godrej.qvfs_head"
+    ],
+    "doc": "Godrej SeeThru NVR/UVR = Qualvision QVFS, read from Qualvision's own firmware."
+   },
+   "heimvision.py": {
+    "vendors": [
+     "HeimVision"
+    ],
+    "signatures": [
+     "heimvision.ext3_mount",
+     "heimvision.dvr_log_schema",
+     "heimvision.search_schema",
+     "heimvision.ident"
+    ],
+    "doc": "HeimVision DVR (K9604-W): read off a real disk image, as a drop-in plugin."
+   },
+   "honeywell.py": {
+    "vendors": [
+     "Honeywell"
+    ],
+    "signatures": [],
+    "doc": "Honeywell NVR: the proprietary video partition described by Yoon & Hwang (DFRWS USA 2026)."
+   },
+   "matrix.py": {
+    "vendors": [
+     "Matrix"
+    ],
+    "signatures": [
+     "matrix.tmid",
+     "matrix.stm1"
+    ],
+    "doc": "Matrix SATATYA NVR/HVR: recordings from the recorder's own folder tree."
+   },
+   "tplink.py": {
+    "vendors": [
+     "TP-Link"
+    ],
+    "signatures": [
+     "tplink.format_tag",
+     "tplink.tpfile"
+    ],
+    "doc": "TP-Link VIGI NVR: detection, and the recorder's own index when it can be read."
+   },
+   "uniview.py": {
+    "vendors": [
+     "Uniview"
+    ],
+    "signatures": [
+     "uniview.ubs_super"
+    ],
+    "doc": "Uniview (UNV) NVR: the UBS block store, read from the recorder's own storage driver."
+   }
+  },
+  "errors": {},
+  "plugin_dir": "/opt/anokhidrishti/plugins"
+ },
+ "onboarding": [
+  {
+   "step": "Detect",
+   "what": "Signature scan during acquisition scores every known vendor; an unknown disk still gets entropy, codec and filesystem maps.",
+   "tool": "scan",
+   "state": "built"
+  },
+  {
+   "step": "Carve",
+   "what": "Vendor-agnostic recovery: DHAV today, raw H.264/H.265 next - footage out before any parser exists.",
+   "tool": "scan --carve",
+   "state": "built (DHAV)"
+  },
+  {
+   "step": "Survey",
+   "what": "Recurring headers, self-describing length fields, date fields, codec and strings from samples; a before/after block-map diff.",
+   "tool": "survey",
+   "state": "built"
+  },
+  {
+   "step": "Plugin",
+   "what": "One file in plugins/: signatures + a parser on the SDK. Loaded automatically; cannot open a device for writing.",
+   "tool": "plugins/*.py",
+   "state": "built"
+  },
+  {
+   "step": "Validate",
+   "what": "Byte-match recovered footage against the recorder's own export. Only this moves a vendor to 'validated'.",
+   "tool": "human sign-off",
+   "state": "per vendor"
+  }
+ ]
+}

@@ -1,15 +1,21 @@
 {
-  "name": "ps26150-ui",
+  "name": "anokhidrishti-ui",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "PS26150 DVR forensics case console. Builds to viewer/static/, which is committed and shipped inside ps26150-dvr.exe - an air-gapped machine never needs Node.",
+  "description": "AnokhiDrishti DVR forensics case console. `build` writes viewer/static/, which is committed and shipped inside the packaged executable - an air-gapped machine never needs Node. `build:demo` writes dist-demo/ for the hosted demonstration and never touches viewer/static/.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:demo": "vite build --mode demo --outDir dist-demo --emptyOutDir"
   },
   "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/newsreader": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

@@ -16,10 +16,10 @@ export default function Vendors({ c, vendorInfo }) {
     <>
       <Section title="Detected on this disk">
         {top ? (
-          <Card className="border-teal-500/45">
+          <Card className="border-accent/45">
             <div className="flex items-baseline gap-3 flex-wrap">
               <div className="text-2xl font-semibold">{top.vendor}</div>
-              <div className="text-[19px] text-teal-500 font-mono">{pct(top.confidence)}</div>
+              <div className="text-[19px] text-accent font-mono">{pct(top.confidence)}</div>
               <Pill status={top.validation_status} />
               <span className={`hairline border rounded-full px-2.5 py-1 text-[11.5px]
                 ${top.parser_available ? "text-validated border-validated/45" : "dim"}`}>
@@ -46,7 +46,7 @@ export default function Vendors({ c, vendorInfo }) {
           {rows.map((v) => {
             const hit = v.detected_confidence > 0;
             return (
-              <Card key={v.vendor} className={hit ? "border-teal-500/40" : ""}>
+              <Card key={v.vendor} className={hit ? "border-accent/40" : ""}>
                 <div className="flex justify-between items-start gap-2">
                   <div className="font-semibold text-[15px]">{v.vendor}</div>
                   <Pill status={v.parser_status} />

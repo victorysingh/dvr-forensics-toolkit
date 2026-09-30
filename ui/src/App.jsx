@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "./lib/api.js";
 import { useHashRoute, linkTo, go } from "./lib/useHashRoute.js";
 import { bytes, num, pct } from "./lib/format.js";
+import { isDemo } from "./lib/host.js";
 import { Skeleton, Empty, ToastHost, useToast, DL } from "./components/index.jsx";
 
 import Dashboard from "./screens/Dashboard.jsx";
@@ -113,8 +114,8 @@ function TopBar({ cases, caseId, screen, c }) {
     <header className="panel rounded-none border-0 border-b flex items-center gap-3.5 px-4 h-13
       min-h-[52px]">
       <div className="flex items-center gap-2 font-semibold whitespace-nowrap">
-        <span className="text-teal-500 text-lg">&#9703;</span>
-        <span>PS26150<span className="dim font-normal text-[11px] hidden sm:inline">
+        <span className="text-accent text-lg">&#9703;</span>
+        <span>AnokhiDrishti<span className="dim font-normal text-[11px] hidden sm:inline">
           &nbsp;&middot; DVR/NVR forensics</span></span>
       </div>
 
@@ -132,12 +133,17 @@ function TopBar({ cases, caseId, screen, c }) {
       {live && <Badge tone="live">LIVE {pct(live.fraction)}</Badge>}
       {ver && <Badge tone={ver.valid ? "ok" : "bad"}>
         {ver.valid ? "chain intact" : "chain broken"}</Badge>}
-      <Badge title="Binds 127.0.0.1, never opens an evidence device, never writes">
-        offline &middot; read-only</Badge>
+      {isDemo()
+        ? <Badge tone="warn" title="A public demonstration of the interface, served from static
+            snapshots of synthetic cases. Not an evidence workstation, and not real evidence.">
+            demo &middot; synthetic data</Badge>
+        : <Badge title="Binds 127.0.0.1, never opens an evidence device, never writes">
+            offline &middot; read-only</Badge>}
       {c?.scan && (
         <a href={api.reportUrl(c.id)} target="_blank" rel="noopener"
           className="hidden md:inline-flex"><Badge>Report &#8599;</Badge></a>
       )}
+      <LookSwitcher />
       <ThemeToggle />
     </header>
   );
@@ -147,7 +153,8 @@ function Badge({ children, tone, title }) {
   const tones = {
     ok: "text-validated border-validated/45",
     bad: "text-danger border-danger/45",
-    live: "text-accent-dark border-accent-dark/45",
+    live: "text-accent border-accent/45",
+    warn: "text-synthetic border-synthetic/45",
   };
   // `dim` only when there is no tone: its dark-mode rule is a descendant
   // selector, so it outranks a plain text-* utility and would grey out the
@@ -156,25 +163,84 @@ function Badge({ children, tone, title }) {
     <span title={title}
       className={`border rounded-full px-2.5 py-1 text-[11.5px] whitespace-nowrap
         inline-flex items-center gap-1.5 ${tones[tone] || "hairline dim"}`}>
-      {tone && <span className={`w-1.5 h-1.5 rounded-full bg-current
+      {tone && tone !== "warn" && <span className={`w-1.5 h-1.5 rounded-full bg-current
         ${tone === "live" ? "animate-pulse" : ""}`} />}
       {children}
     </span>
   );
 }
 
+/* Three looks, switchable live. This is evaluation scaffolding: once a
+   direction is chosen the other two go, and this becomes one line in
+   index.html. Keeping it here means the comparison is made on real screens
+   with real case data rather than on mockups. */
+export const LOOKS = [
+  { id: "instrument", label: "Instrument" },
+  { id: "dossier", label: "Dossier" },
+  { id: "platter", label: "Platter" },
+];
+
+export function setLook(id) {
+  document.documentElement.dataset.look = id;
+  try { localStorage.setItem("anokhidrishti-look", id); } catch { /* ignore */ }
+}
+
+/* Light and dark are per-look palettes, not one inversion (index.css). With
+   nothing stored the theme follows the operating system, and choosing here
+   pins it — after which the system no longer overrides the choice. */
+export function setTheme(t) {
+  if (t === "light") document.documentElement.dataset.theme = "light";
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("anokhidrishti-theme", t); } catch { /* ignore */ }
+}
+
+export const currentTheme = () =>
+  document.documentElement.dataset.theme === "light" ? "light" : "dark";
+
+/* The keyboard shortcuts set the attribute directly, so a control holding
+   its own copy would fall out of step the first time one is pressed. Both
+   controls read the attribute instead and re-read it whenever it changes. */
+function useHtmlAttr(read) {
+  const [v, setV] = useState(read);
+  useEffect(() => {
+    const el = document.documentElement;
+    const o = new MutationObserver(() => setV(read()));
+    o.observe(el, { attributes: true, attributeFilter: ["data-theme", "data-look"] });
+    setV(read());
+    return () => o.disconnect();
+  }, [read]);
+  return v;
+}
+
 function ThemeToggle() {
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
-  const flip = () => {
-    const now = !dark;
-    setDark(now);
-    document.documentElement.classList.toggle("dark", now);
-    try { localStorage.setItem("ps26150-theme", now ? "dark" : "light"); } catch { /* ignore */ }
-  };
+  const theme = useHtmlAttr(currentTheme);
+  const flip = () => setTheme(theme === "light" ? "dark" : "light");
   return (
-    <button onClick={flip} title="Toggle theme (t)"
-      className="hairline border rounded-lg w-8 h-8 dim hover:text-teal-500
-        hover:border-teal-500 cursor-pointer">&#9681;</button>
+    <button onClick={flip}
+      title={`${theme === "light" ? "Dark" : "Light"} mode (press t)`}
+      aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+      className="hairline border rounded-[var(--radius-panel)] w-8 h-8 shrink-0
+        dim hover:text-accent hover:border-accent cursor-pointer leading-none">
+      {theme === "light" ? "◑" : "◐"}
+    </button>
+  );
+}
+
+const readLook = () => document.documentElement.dataset.look || LOOKS[0].id;
+
+function LookSwitcher() {
+  const look = useHtmlAttr(readLook);
+  return (
+    <div className="hairline border rounded-[var(--radius-panel)] flex overflow-hidden"
+      title="Visual direction (press l to cycle)">
+      {LOOKS.map((l) => (
+        <button key={l.id} onClick={() => setLook(l.id)}
+          className={`px-2.5 py-1 text-[11px] cursor-pointer micro
+            ${l.id === look ? "bg-accent/15 text-accent" : "dim"}`}>
+          {l.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -189,7 +255,7 @@ function Sidebar({ caseId, screen }) {
           <a key={s.id} href={linkTo(caseId, s.id)}
             className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13.5px]
               justify-center xl:justify-start
-              ${on ? "bg-teal-500/15 text-teal-500" : "dim hover:panel-2 hover:text-current"}`}>
+              ${on ? "bg-accent/15 text-accent" : "dim hover:panel-2 hover:text-current"}`}>
             <span className="w-[18px] text-center shrink-0">{s.ico}</span>
             <span className="hidden xl:inline">{s.label}</span>
             <span className="hidden xl:inline ml-auto font-mono text-[10.5px] opacity-50">
@@ -225,15 +291,15 @@ function Stepper({ c, caseId }) {
       c.analytics ? "done" : ""],
     ["Report", "exports", s ? "ready" : "needs acquisition", s ? "done" : ""],
   ];
-  const edge = { done: "border-l-validated", part: "border-l-synthetic", run: "border-l-accent-dark" };
+  const edge = { done: "border-l-validated", part: "border-l-synthetic", run: "border-l-accent" };
   return (
     <nav className="hairline border-b px-5 py-2.5 flex gap-1.5 flex-wrap"
       aria-label="Pipeline stages">
       {stages.map(([t, to, d, cls]) => (
         <button key={t} onClick={() => go(caseId, to)}
-          className={`panel border-l-[3px] rounded-lg px-2.5 py-1.5 text-left flex-1
-            min-w-[120px] basis-[130px] cursor-pointer hover:border-teal-500
-            ${edge[cls] || "border-l-slate-500/40"}`}>
+          className={`panel border-l-[3px] px-2.5 py-1.5 text-left flex-1
+            min-w-[120px] basis-[130px] cursor-pointer hover:border-accent
+            ${edge[cls] || "border-l-line"}`}>
           <div className="text-[12.5px] font-semibold">{t}</div>
           <div className="dim text-[11px]">{d}</div>
         </button>
@@ -250,13 +316,27 @@ function CasesHome({ cases }) {
   }
   return (
     <>
+      {isDemo() && (
+        <div className="rounded-xl border border-synthetic/45 bg-synthetic/10 px-3.5 py-3 mb-4
+          text-[12.5px]">
+          <b className="text-synthetic">Demonstration build.</b> These cases are
+          <b> synthetic disks generated for the demo</b> &mdash; not evidence, and not
+          vendor samples. The screens are the real interface reading real pipeline
+          output; the acquisition, carving and custody chain all ran, on made-up disks.
+          The actual tool runs offline on an examiner's own machine and binds the
+          loopback interface only.
+        </div>
+      )}
       <h1 className="text-[19px] font-semibold mb-3.5">Cases</h1>
       <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(290px,1fr))]">
         {/* finished acquisitions first; an aborted attempt stays listed, since
             it is part of the case's history, but after the ones that count */}
         {[...cases].sort((a, b) => (b.complete - a.complete)).map((c) => (
           <a key={c.id} href={linkTo(c.id, "dashboard")}
-            className="panel p-4 hover:border-teal-500 block">
+            className="panel p-4 hover:border-accent block">
+            {/* `accent`, not a hardcoded teal: the looks redefine that token,
+                and a fixed colour here would ignore the chosen direction.
+                `break-all` is setup's fix for a long case id overflowing. */}
             <div className="text-[17px] font-semibold break-all">{c.id}</div>
             <div className="dim font-mono text-[12px] mt-0.5 mb-2.5 break-all">
               {c.device || "—"}</div>
@@ -264,7 +344,7 @@ function CasesHome({ cases }) {
             {!c.complete && (
               <div className="mt-2.5">
                 <div className="panel-2 h-1.5 rounded-full overflow-hidden">
-                  <i className="block h-full bg-teal-500 rounded-full"
+                  <i className="block h-full bg-accent rounded-full"
                     style={{ width: pct(c.progress) }} />
                 </div>
                 <div className="dim text-[11px] mt-1">acquiring &mdash; {pct(c.progress)}</div>
@@ -291,10 +371,14 @@ function useKeyboard(screens, caseId) {
     const on = (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
       if (["input", "select", "textarea"].includes(tag) || e.metaKey || e.ctrlKey) return;
+      if (e.key === "l") {
+        const cur = document.documentElement.dataset.look || LOOKS[0].id;
+        const i = LOOKS.findIndex((x) => x.id === cur);
+        setLook(LOOKS[(i + 1) % LOOKS.length].id);
+        return;
+      }
       if (e.key === "t") {
-        const now = !document.documentElement.classList.contains("dark");
-        document.documentElement.classList.toggle("dark", now);
-        try { localStorage.setItem("ps26150-theme", now ? "dark" : "light"); } catch { /* ignore */ }
+        setTheme(currentTheme() === "light" ? "dark" : "light");
         return;
       }
       if (e.key === "/") {

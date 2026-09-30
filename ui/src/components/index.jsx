@@ -20,7 +20,7 @@ export function ToastHost({ children }) {
       <div className="fixed right-4 bottom-4 z-50 flex flex-col gap-2">
         {items.map((t) => (
           <div key={t.id}
-            className="panel border-teal-500 px-3.5 py-2 text-xs shadow-lg shadow-black/30">
+            className="panel border-accent px-3.5 py-2 text-xs shadow-lg shadow-black/30">
             {t.msg}
           </div>
         ))}
@@ -69,7 +69,7 @@ export function Hash({ value, len = 6 }) {
   return (
     <button onClick={copy} title={s}
       className="panel-2 hairline border rounded-md px-1.5 py-px font-mono text-[11.5px]
-        hover:border-teal-500 hover:text-teal-500 cursor-pointer align-middle">
+        hover:border-accent hover:text-accent cursor-pointer align-middle">
       {short}
     </button>
   );
@@ -154,7 +154,7 @@ export function ConfBar({ value, color }) {
     <span className="flex items-center gap-2">
       <span className="panel-2 h-1.5 flex-1 min-w-16 rounded-full overflow-hidden">
         <i className="block h-full rounded-full"
-          style={{ width: pct0(value), background: color || "var(--color-accent-dark)" }} />
+          style={{ width: pct0(value), background: color || "var(--color-accent)" }} />
       </span>
       <span className="font-mono text-[11.5px] w-11 text-right">{pct0(value)}</span>
     </span>
@@ -260,7 +260,7 @@ export function DataTable({ rows, cols, page = 100, search = true, initialSort, 
           <input type="search" placeholder="Search&hellip;" data-table-search
             value={q} onChange={(e) => { setQ(e.target.value); setAt(0); }}
             className="panel-2 hairline border rounded-md px-2.5 py-1 text-[12.5px]
-              outline-none focus:border-teal-500" />
+              outline-none focus:border-accent" />
           <span className="dim text-[11.5px] ml-auto">
             {num(view.length)} row{view.length === 1 ? "" : "s"}
             {view.length !== rows.length && ` of ${num(rows.length)}`}
@@ -287,7 +287,7 @@ export function DataTable({ rows, cols, page = 100, search = true, initialSort, 
           </thead>
           <tbody>
             {slice.map((r, i) => (
-              <tr key={r.__k ?? r.id ?? i} className="hover:bg-slate-500/10">
+              <tr key={r.__k ?? r.id ?? i} className="hover:bg-[color-mix(in_srgb,var(--color-ink)_7%,transparent)]">
                 {cols.map((c) => (
                   <td key={c.key}
                     className={`px-2.5 py-1.5 hairline border-b align-top ${c.cls || ""}`}>
