@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { Section, Card, DL, Pill, Empty, DataTable, Kpi, Hash, LeadBanner }
   from "../components/index.jsx";
-import { num, pct0 } from "../lib/format.js";
+import { num, pct0, plural } from "../lib/format.js";
 import { api } from "../lib/api.js";
 
 export default function AILeads({ c }) {
@@ -50,7 +50,7 @@ export default function AILeads({ c }) {
             src="analytics/analytics.json" />
         ))}
         <Kpi label="Frames analysed" value={an.frames_analysed}
-          sub={`${num(an.clips)} clip(s)${
+          sub={`${plural(an.clips, "clip")}${
             an.sample_fps ? ` at ${an.sample_fps} fps` : ""}`}
           src="analytics/analytics.json" />
       </div>
@@ -106,7 +106,9 @@ export default function AILeads({ c }) {
                 <div className="dim text-[11.5px]">{an.rotation.rule}</div>)}
             </>],
             ["Thresholds",
-              <span className="font-mono break-all">{JSON.stringify(an.thresholds || {})}</span>],
+              <span className="font-mono break-words">
+                {Object.entries(an.thresholds || {})
+                  .map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`).join(" · ") || "—"}</span>],
             ["Report", <Hash value={an.sha256} len={10} />],
           ]} />
         </Card>

@@ -39,10 +39,12 @@ from access.passwords import (PasswordError, check_strength, hash_password,
 from access.policy import (ACCESS_WINDOW_HOURS, ACTIVE, APPROVED, EXPIRED,
                            GRANTING_STATES, LOCKOUT_MINUTES,
                            LOGIN_FAIL_WINDOW_MINUTES, LOGIN_MAX_FAILS,
-                           LOGIN_SESSION_MINUTES, PENDING,
+                           LOGIN_SESSION_MINUTES, MAIL_PER_HOUR,
+                           MAIL_PER_RECIPIENT_PER_HOUR, PENDING,
                            RATE_AUTH_BURST_PER_MIN, RATE_AUTH_PER_MIN,
                            REJECTED, REQUEST_TTL_MINUTES,
-                           REVOKED, ROLE_ADMIN, ROLE_USER, STATE_TEXT,
+                           REVOKED, ROLE_ADMIN, ROLE_USER,
+                           SIGNUPS_PER_HOUR_PER_ADDRESS, STATE_TEXT,
                            USERNAME_RE, is_past, now, parse, plus,
                            seconds_left, stamp)
 from access.store import PublicIdTaken, Store, UsernameTaken, open_store
@@ -101,8 +103,9 @@ class RateLimiter:
         self._hits: dict[str, list[float]] = {}
         self._lock = threading.Lock()
 
-    def allow(self, key: str, per_minute: int) -> bool:
-        cut = time.monotonic() - 60.0
+    def allow(self, key: str, per_minute: int, window: float = 60.0) -> bool:
+        """At most `per_minute` hits per `window` seconds (a minute unless said)."""
+        cut = time.monotonic() - window
         with self._lock:
             hits = [t for t in self._hits.get(key, ()) if t > cut]
             if len(hits) >= per_minute:
@@ -112,7 +115,8 @@ class RateLimiter:
             self._hits[key] = hits
             # Keep the table from growing without bound on a long-lived server.
             if len(self._hits) > 4096:
-                for k in [k for k, v in self._hits.items() if not v or max(v) < cut]:
+                for k in [k for k, v in self._hits.items()
+                          if not v or max(v) < time.monotonic() - 3600]:
                     self._hits.pop(k, None)
             return True
 
@@ -153,12 +157,14 @@ class AccessControl:
     """Users, requests, sessions and the decisions about them."""
 
     def __init__(self, directory: str, store: Optional[Store] = None,
-                 audit: Optional[A.AccessAudit] = None):
+                 audit: Optional[A.AccessAudit] = None, mailer=None):
         # store/audit default to SQLite and a JSONL file in `directory`;
         # open_control() passes Supabase's instead (same methods, same rows).
+        # mailer (access/mail.py) is optional: without one, no notice is sent.
         self.dir = directory
         self.store = store or open_store(directory)
         self.audit = audit or open_audit(directory)
+        self.mailer = mailer
         self.rate = RateLimiter()
         self._sweep_lock = threading.Lock()
         self._last_sweep = 0.0
@@ -174,6 +180,70 @@ class AccessControl:
 
     def _audit(self, action: str, actor: str = "system", **detail) -> None:
         self.audit.record(action, actor, detail)
+
+    # -- mail notices (access/mail.py) ---------------------------------------
+    def _mail(self, kind: str, to_user: str, address: str,
+              message: tuple[str, str, str]) -> None:
+        """Hand one notice to the mailer; log the outcome, never the address.
+
+        The audit log cannot be edited or pruned, so it names the recipient by
+        username: an email address written there could never be taken back.
+        """
+        def done(ok: bool, error: str) -> None:
+            if ok:
+                self._audit(A.MAIL_SENT, "mail", kind=kind, to_user=to_user)
+            else:
+                self._audit(A.MAIL_FAILED, "mail", kind=kind, to_user=to_user,
+                            error=error)
+        # A budget per recipient and one for the whole server: however many
+        # sign-ins or sign-ups arrive, nobody's inbox - and not the sending
+        # account's daily quota - can be flooded through these notices.
+        for key, limit, why in (
+                ("mail:to:" + to_user, MAIL_PER_RECIPIENT_PER_HOUR,
+                 "this recipient's hourly mail budget is used up"),
+                ("mail:all", MAIL_PER_HOUR, "the server's hourly mail budget is used up")):
+            if not self.rate.allow(key, limit, window=3600):
+                self._audit(A.MAIL_SKIPPED, "mail", kind=kind, to_user=to_user,
+                            reason=why)
+                return
+        subject, text, html_body = message
+        try:
+            self.mailer.send(address, subject, text, html_body, on_done=done)
+        except Exception as exc:                           # noqa: BLE001
+            done(False, f"{type(exc).__name__}: {str(exc)[:120]}")
+
+    def _notify_account(self, user: dict) -> None:
+        if self.mailer is None or not user.get("email"):
+            return
+        from access import mail as M
+        self._mail("account_created", user["username"], user["email"],
+                   M.account_created(user["username"], user["email"],
+                                     user.get("created_utc", ""),
+                                     self.mailer.config.public_url))
+
+    def _notify_lockout(self, user: dict, until: str, remote_ip: str, after: int) -> None:
+        """Tell an account's owner it was locked: someone may be guessing."""
+        if self.mailer is None or not user.get("email"):
+            return
+        from access import mail as M
+        self._mail("account_locked", user["username"], user["email"],
+                   M.account_locked(user["username"], until, remote_ip, after,
+                                    self.mailer.config.public_url))
+
+    def _notify_admins(self, request: dict, user: dict) -> None:
+        """Tell every administrator with an address that a request is waiting."""
+        if self.mailer is None:
+            return
+        from access import mail as M
+        contacts = self.store.admin_contacts()
+        if not contacts:
+            self._audit(A.MAIL_SKIPPED, "mail", kind="access_requested",
+                        public_id=request.get("public_id", ""),
+                        reason="no administrator has an email address")
+            return
+        message = M.access_requested(request, user, self.mailer.config.public_url)
+        for admin in contacts:
+            self._mail("access_requested", admin["username"], admin["email"], message)
 
     def auth_allowed(self, remote_ip: str, username: str) -> bool:
         """Two buckets an authentication attempt has to fit through.
@@ -191,9 +261,20 @@ class AccessControl:
 
     # -- accounts ----------------------------------------------------------
     def create_user(self, username: str, password: str, role: str = ROLE_USER,
-                    actor: str = "cli") -> Result:
+                    actor: str = "cli", email: str = "",
+                    require_email: bool = False) -> Result:
         """Make an account. Used by signup and by the command line."""
+        from access.mail import valid_email
         username = (username or "").strip().lower()
+        email = (email or "").strip().lower()
+        if email and not valid_email(email):
+            return Result.fail("That email address does not look right.")
+        # One account per address, or the "account created" notice could be
+        # aimed at someone else's inbox again and again.
+        if email and self.store.user_by_email(email):
+            return Result.fail("That email address already has an account.")
+        if require_email and not email:
+            return Result.fail("An email address is needed: the account notices go there.")
         if not USERNAME_RE.match(username):
             return Result.fail(
                 "A username is 3 to 32 characters: lower-case letters, digits, "
@@ -205,26 +286,53 @@ class AccessControl:
         if role not in (ROLE_USER, ROLE_ADMIN):
             return Result.fail("Unknown role.")
         try:
-            user = self.store.create_user(username, hash_password(password), role)
+            user = self.store.create_user(username, hash_password(password), role,
+                                          email=email)
         except UsernameTaken:
             # Signup does leak that a username is taken - it has to, or the
             # form cannot explain itself. Login does not, which is where it
             # would actually matter.
             return Result.fail("That username is already taken.")
         self._audit(A.USER_CREATED if actor != username else A.SIGNUP,
-                    actor, username=username, role=role)
+                    actor, username=username, role=role, email_on_file=bool(email))
+        self._notify_account(user)
         return Result.win("Account created.", user=user)
 
     def signup(self, username: str, password: str, remote_ip: str = "",
-               user_agent: str = "") -> Result:
+               user_agent: str = "", email: str = "") -> Result:
         if not self.auth_allowed(remote_ip, username):
             self._audit(A.RATE_LIMITED, username or "?", where="signup",
                         remote_ip=remote_ip)
             return Result.fail("Too many attempts. Wait a minute and try again.")
+        if not self.rate.allow(f"signup:{remote_ip or '?'}",
+                               SIGNUPS_PER_HOUR_PER_ADDRESS, window=3600):
+            self._audit(A.RATE_LIMITED, username or "?", where="signup_hourly",
+                        remote_ip=remote_ip)
+            return Result.fail("Too many new accounts from this address. "
+                               "Try again in an hour.")
         # Signing yourself up never grants a role: every self-made account is a
         # plain user, and only the command line can mint an administrator.
+        # With mail switched on, a self-made account must give an address -
+        # it is where the "account created" notice goes.
         return self.create_user(username, password, ROLE_USER,
-                                actor=(username or "").strip().lower())
+                                actor=(username or "").strip().lower(),
+                                email=email, require_email=self.mailer is not None)
+
+    def set_email(self, username: str, email: str, actor: str = "cli") -> Result:
+        from access.mail import valid_email
+        user = self.store.user_by_name((username or "").strip().lower())
+        if not user:
+            return Result.fail("No such user.")
+        email = (email or "").strip().lower()
+        if email and not valid_email(email):
+            return Result.fail("That email address does not look right.")
+        other = self.store.user_by_email(email) if email else None
+        if other and other["id"] != user["id"]:
+            return Result.fail("That email address already has an account.")
+        self.store.set_email(user["id"], email)
+        self._audit(A.USER_CREATED, actor, username=user["username"],
+                    changed="email", email_on_file=bool(email))
+        return Result.win("Email address saved." if email else "Email address removed.")
 
     def set_password(self, username: str, password: str,
                      actor: str = "cli") -> Result:
@@ -328,6 +436,7 @@ class AccessControl:
                 self.store.lock_user(user["id"], until)
                 self._audit(A.LOCKOUT, username, remote_ip=remote_ip,
                             until=until, after=count)
+                self._notify_lockout(user, until, remote_ip, count)
                 return Result.fail(
                     f"Too many failed attempts. Try again in "
                     f"{LOCKOUT_MINUTES} minutes.")
@@ -388,6 +497,9 @@ class AccessControl:
         self._audit(A.REQUEST_CREATED, user["username"],
                     public_id=request["public_id"], remote_ip=remote_ip,
                     expires_utc=expires)
+        # Only a new request is announced: signing in again onto a live one
+        # must not mail every administrator a second time.
+        self._notify_admins(request, user)
         return request
 
     def logout(self, token: str) -> Result:
@@ -686,7 +798,8 @@ BACKENDS = ("sqlite", "supabase")
 
 
 def open_control(directory: str, backend: str = "sqlite",
-                 supabase_env: str = "") -> AccessControl:
+                 supabase_env: str = "", mail: bool = False,
+                 mail_env: str = "") -> AccessControl:
     """The access layer over the store named by `backend`.
 
     sqlite, the default, keeps everything in `directory` on this machine - the
@@ -694,10 +807,15 @@ def open_control(directory: str, backend: str = "sqlite",
     project (access/supabase.py) and is used only when asked for by name, so
     no test and no stray environment variable ever writes to a cloud database.
     """
+    mailer = None
+    if mail:
+        from access.mail import Mailer, load_mail_config
+        mailer = Mailer(load_mail_config(mail_env))
     if backend == "sqlite":
-        return AccessControl(directory)
+        return AccessControl(directory, mailer=mailer)
     if backend == "supabase":
         from access.supabase import open_supabase
         store, audit = open_supabase(supabase_env)
-        return AccessControl(directory, store=store, audit=audit)   # type: ignore[arg-type]
+        return AccessControl(directory, store=store, audit=audit,   # type: ignore[arg-type]
+                             mailer=mailer)
     raise ValueError(f"unknown access store {backend!r}; one of {', '.join(BACKENDS)}")

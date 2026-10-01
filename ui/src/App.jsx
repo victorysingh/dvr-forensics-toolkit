@@ -273,7 +273,7 @@ function Sidebar({ caseId, screen }) {
               ${on ? "bg-accent/15 text-accent" : "dim hover:panel-2 hover:text-current"}`}>
             <span className="w-[18px] text-center shrink-0">{s.ico}</span>
             <span className="hidden xl:inline">{s.label}</span>
-            <span className="hidden xl:inline ml-auto font-mono text-[10.5px] opacity-50">
+            <span className="hidden xl:inline ml-auto font-mono text-[10.5px] dim">
               {i + 1}</span>
           </a>
         );
@@ -306,15 +306,18 @@ function Stepper({ c, caseId }) {
       c.analytics ? "done" : ""],
     ["Report", "exports", s ? "ready" : "needs acquisition", s ? "done" : ""],
   ];
-  const edge = { done: "border-l-validated", part: "border-l-synthetic", run: "border-l-accent" };
+  const edge = { done: "var(--color-validated)", part: "var(--color-synthetic)",
+                 run: "var(--color-accent)" };
   return (
     <nav className="hairline border-b px-5 py-2.5 flex gap-1.5 flex-wrap"
       aria-label="Pipeline stages">
       {stages.map(([t, to, d, cls]) => (
         <button key={t} onClick={() => go(caseId, to)}
-          className={`panel border-l-[3px] px-2.5 py-1.5 text-left flex-1
-            min-w-[120px] basis-[130px] cursor-pointer hover:border-accent
-            ${edge[cls] || "border-l-line"}`}>
+          title={`${t}: ${cls === "done" ? "done" : cls === "part" ? "partial"
+            : cls === "run" ? "running" : "not run"}`}
+          style={{ borderLeft: `3px solid ${edge[cls] || "var(--color-line)"}` }}
+          className="panel px-2.5 py-1.5 text-left flex-1
+            min-w-[120px] basis-[130px] cursor-pointer hover:border-accent">
           <div className="text-[12.5px] font-semibold">{t}</div>
           <div className="dim text-[11px]">{d}</div>
         </button>

@@ -5,7 +5,7 @@
 // here now is the device record, the hashes with their scope, the scan
 // statistics and the entropy-vs-video verdict.
 import { Section, Card, DL, Hash, Empty, DataTable } from "../components/index.jsx";
-import { bytes, num, pct, dur, hex } from "../lib/format.js";
+import { bytes, num, pct, dur, hex, utcTime, plural } from "../lib/format.js";
 import PlatterMap from "../components/PlatterMap.jsx";
 
 export default function Evidence({ c }) {
@@ -14,14 +14,14 @@ export default function Evidence({ c }) {
   if (!s) {
     return c.in_progress ? (
       <Card>
-        <h3 className="dim text-[13px] uppercase font-semibold mb-2.5">Acquisition in progress</h3>
+        <h3 className="micro mb-2.5">Acquisition in progress</h3>
         <div className="panel-2 h-1.5 rounded-full overflow-hidden">
           <i className="block h-full bg-accent rounded-full"
             style={{ width: pct(c.in_progress.fraction) }} />
         </div>
         <p className="dim text-[12.5px] mt-2">
           {bytes(c.in_progress.bytes_done)} of {bytes(c.in_progress.size_bytes)} read
-          &mdash; updated {c.in_progress.updated_utc} UTC
+          &mdash; updated {utcTime(c.in_progress.updated_utc)} UTC
         </p>
       </Card>
     ) : (
@@ -85,26 +85,26 @@ export default function Evidence({ c }) {
       <Section title="Scan">
         <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
           <Card>
-            <div className="dim text-[11.5px] uppercase tracking-wide">Bytes read</div>
+            <div className="micro">Bytes read</div>
             <div className="text-[26px] font-semibold leading-tight">{bytes(st.bytes_read)}</div>
             <div className="dim text-[11.5px]">
               {num(st.blocks_hashed)} blocks of {bytes(st.block_size)}</div>
           </Card>
           <Card>
-            <div className="dim text-[11.5px] uppercase tracking-wide">Throughput</div>
+            <div className="micro">Throughput</div>
             <div className="text-[26px] font-semibold leading-tight">
               {Number(st.throughput_mbps || 0).toFixed(2)}</div>
             <div className="dim text-[11.5px]">MB/s over {dur(st.duration_s)}</div>
           </Card>
           <Card>
-            <div className="dim text-[11.5px] uppercase tracking-wide">Bad sectors</div>
+            <div className="micro">Bad sectors</div>
             <div className={`text-[26px] font-semibold leading-tight
               ${st.bad_sectors ? "text-danger" : ""}`}>{num(st.bad_sectors)}</div>
             <div className="dim text-[11.5px]">
               {st.bad_sectors ? "see bad regions below" : "none encountered"}</div>
           </Card>
           <Card>
-            <div className="dim text-[11.5px] uppercase tracking-wide">Pass</div>
+            <div className="micro">Pass</div>
             <div className="text-[19px] font-semibold leading-tight mt-1">
               {st.complete_pass ? "complete" : "partial (triage)"}</div>
             <div className="dim text-[11.5px]">
@@ -120,7 +120,7 @@ export default function Evidence({ c }) {
             <p className="font-semibold mb-2.5">{r.verdict}</p>
             <DL rows={[
               ...Object.entries(r.counts || {}).map(([k, v]) =>
-                [k.replace(/_/g, " "), `${num(v)} block(s)`]),
+                [k.replace(/_/g, " "), plural(v, "block")]),
               ["Written blocks", num(r.written_blocks)],
               ["Flagged", `${num(r.flagged_blocks)} (${pct(r.flagged_share)})`],
             ]} />

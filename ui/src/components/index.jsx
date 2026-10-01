@@ -81,14 +81,18 @@ export function Kpi({ label, value, sub, src, lead }) {
   // call order stable when a KPI switches between a number and a string.
   const n = useCountUp(typeof value === "number" ? value : null);
   return (
-    <div className="panel p-3.5">
-      <div className="dim text-[11.5px] uppercase tracking-wide">{label}</div>
-      <div className={`text-[26px] font-semibold leading-tight mt-0.5
+    <div className="panel p-3.5 min-w-0">
+      <div className="micro">{label}</div>
+      {/* A word or an identifier can be far wider than a count, so a long
+          text value steps down a size and may wrap rather than spill out. */}
+      <div className={`font-semibold leading-tight mt-1
+        ${typeof value === "string" && value.length > 10
+          ? "text-[18px] break-all" : "text-[26px]"}
         ${lead ? "text-lead" : ""}`}>
         {typeof value === "number" ? num(n) : value}
       </div>
       {sub && <div className="dim text-[11.5px] mt-0.5">{sub}</div>}
-      {src && <div className="dim font-mono text-[10.5px] opacity-75 mt-1.5">from {src}</div>}
+      {src && <div className="dim font-mono text-[10.5px] mt-1.5">from {src}</div>}
     </div>
   );
 }
@@ -279,7 +283,7 @@ export function DataTable({ rows, cols, page = 100, search = true, initialSort, 
                     ${c.sort === false ? "" : "cursor-pointer"}`}>
                   {c.label}
                   {sort === c.key && (
-                    <span className="opacity-45 text-[9px] ml-1">{dir > 0 ? "▲" : "▼"}</span>
+                    <span className="text-[9px] ml-1">{dir > 0 ? "▲" : "▼"}</span>
                   )}
                 </th>
               ))}
@@ -315,7 +319,7 @@ export function DataTable({ rows, cols, page = 100, search = true, initialSort, 
 const PagerBtn = ({ disabled, onClick, children }) => (
   <button disabled={disabled} onClick={onClick}
     className="panel-2 hairline border rounded px-2 py-0.5 text-[12px]
-      disabled:opacity-40 disabled:cursor-default cursor-pointer">
+      disabled:opacity-60 disabled:cursor-default cursor-pointer">
     {children}
   </button>
 );

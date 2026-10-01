@@ -30,17 +30,21 @@ TAGLINE = "DVR/NVR forensics"
 
 CSS = """
 *,*::before,*::after{box-sizing:border-box}
+/* The console's default look (ui/src/index.css, "instrument"), so signing in
+   and the console it opens are visibly one product: signal green on
+   near-black, square corners. --on-accent is the text on an accent button. */
 :root{
-  --bg:#0b0f14; --surface:#121821; --surface2:#172030; --line:#1f2a37;
-  --ink:#e6edf3; --dim:#8b98a5; --accent:#2dd4bf; --ok:#22c55e;
-  --warn:#f59e0b; --bad:#ef4444; --radius:10px;
-  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --bg:#06080a; --surface:#0b0e12; --surface2:#11161c; --line:#1c242e;
+  --ink:#d6e2e6; --dim:#6b7d86; --accent:#c6f24e; --on-accent:#0b0e12;
+  --ok:#8ed04a; --warn:#e0a33a; --bad:#ff5a4d; --radius:0px;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
   --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
 }
 @media (prefers-color-scheme:light){
   :root{
-    --bg:#f6f8fa; --surface:#ffffff; --surface2:#f0f3f6; --line:#d8dee6;
-    --ink:#11181f; --dim:#5b6873; --accent:#0d9488;
+    --bg:#f3f5f2; --surface:#ffffff; --surface2:#e8ece6; --line:#c9d2c8;
+    --ink:#0f151a; --dim:#58676f; --accent:#4a760a; --on-accent:#ffffff;
+    --ok:#3d7a17; --warn:#8d5c08; --bad:#bd2414;
   }
 }
 html,body{margin:0;padding:0}
@@ -62,17 +66,17 @@ label{display:block;font-size:12px;color:var(--dim);margin:14px 0 5px;
   letter-spacing:.03em;text-transform:uppercase}
 input[type=text],input[type=password]{width:100%;padding:9px 11px;
   background:var(--surface2);color:var(--ink);border:1px solid var(--line);
-  border-radius:8px;font:inherit}
+  border-radius:var(--radius);font:inherit}
 input:focus{outline:2px solid var(--accent);outline-offset:-1px}
-button{font:inherit;cursor:pointer;border-radius:8px;padding:9px 15px;
+button{font:inherit;cursor:pointer;border-radius:var(--radius);padding:9px 15px;
   border:1px solid var(--line);background:var(--surface2);color:var(--ink)}
-button.primary{background:var(--accent);border-color:var(--accent);color:#04211d;
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);
   font-weight:600;width:100%;margin-top:20px;padding:10px}
 button.primary:hover{filter:brightness(1.08)}
 button.sm{padding:5px 11px;font-size:12.5px}
 button.ok{border-color:color-mix(in srgb,var(--ok) 50%,transparent);color:var(--ok)}
 button.bad{border-color:color-mix(in srgb,var(--bad) 50%,transparent);color:var(--bad)}
-.err,.note{border-radius:8px;padding:9px 12px;font-size:13px;margin:0 0 4px}
+.err,.note{border-radius:var(--radius);padding:9px 12px;font-size:13px;margin:0 0 4px}
 .err{border:1px solid color-mix(in srgb,var(--bad) 45%,transparent);
   background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--bad)}
 .note{border:1px solid color-mix(in srgb,var(--ok) 45%,transparent);
@@ -121,6 +125,13 @@ def _e(text) -> str:
     return html.escape(str(text if text is not None else ""), quote=True)
 
 
+#: The console's own tab icon (ui/index.html), inline like it: without one
+#: the browser asks for /favicon.ico, which the gate answers with sign-in.
+#: The SVG namespace is percent-encoded so the page holds no "http://" at all
+#: (it is a name, never fetched, but the no-off-machine check reads text).
+FAVICON = "data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2306080a'/%3E%3Crect x='7' y='8' width='18' height='16' rx='2' fill='none' stroke='%23c6f24e' stroke-width='2.5'/%3E%3Crect x='7' y='8' width='9' height='16' fill='%23c6f24e'/%3E%3C/svg%3E"
+
+
 def _page(title: str, body: str, head: str = "", wide: bool = False,
           nonce: str = "") -> bytes:
     return (
@@ -130,6 +141,7 @@ def _page(title: str, body: str, head: str = "", wide: bool = False,
         "<meta name=\"referrer\" content=\"no-referrer\">"
         "<meta name=\"robots\" content=\"noindex,nofollow\">"
         f"<title>{_e(title)} &middot; {PRODUCT}</title>"
+        f"<link rel=\"icon\" href=\"{FAVICON}\">"
         f"<style>{CSS}</style>{head}</head><body>"
         f"<div class=\"wrap{' wide' if wide else ''}\">"
         f"<div class=\"brand\"><span class=\"mark\">&#9703;</span>"
@@ -173,7 +185,8 @@ an administrator on this machine has to approve.</p>
 
 
 def signup_page(error: str = "", username: str = "", csrf: str = "",
-                min_len: int = 10) -> bytes:
+                min_len: int = 10, email: str = "",
+                require_email: bool = False) -> bytes:
     body = f"""<div class="panel">
 <h1>Create an account</h1>
 <p class="lead">A new account is an ordinary user. It cannot approve anything,
@@ -184,6 +197,9 @@ including its own requests.</p>
 <label for="u">Username</label>
 <input id="u" name="username" type="text" value="{_e(username)}"
   autocapitalize="none" spellcheck="false" autofocus required>
+<label for="m">Email{'' if require_email else ' &mdash; optional'}</label>
+<input id="m" name="email" type="email" value="{_e(email)}" autocomplete="email"
+  autocapitalize="none" spellcheck="false"{' required' if require_email else ''}>
 <label for="p">Password &mdash; at least {min_len} characters</label>
 <input id="p" name="password" type="password" required>
 <label for="p2">Repeat password</label>
@@ -201,9 +217,13 @@ _DOT = {PENDING: "pend", APPROVED: "ok", ACTIVE: "ok",
 # Polls its own status and nothing else.  On a grant it replaces the document
 # rather than following a link, so the 9-digit URL is not left in history as
 # the last thing the browser saw.
+#
+# It waits for DOMContentLoaded: the script sits in <head>, and run straight
+# away it found none of #dot, #msg, #sub or #bar, so the first paint threw -
+# swallowed by the fetch's catch - and the room never moved, granted or not.
 _WAIT_JS = """
 <script nonce="%s">
-(function(){
+document.addEventListener('DOMContentLoaded', function(){
   var id=%s, poll=%d;
   var dot=document.getElementById('dot'), msg=document.getElementById('msg'),
       sub=document.getElementById('sub'), bar=document.getElementById('bar');
@@ -231,7 +251,7 @@ _WAIT_JS = """
       .then(function(r){return r.ok?r.json():null}).then(paint).catch(function(){});
   }
   tick(); setInterval(tick, poll);
-})();
+});
 </script>
 """
 
@@ -284,6 +304,12 @@ def denied_page(title: str, message: str, detail: str = "") -> bytes:
 
 
 # ------------------------------------------------------------ admin panel
+def _t(stamp) -> str:
+    """2026-10-01T03:41:15.008Z as 2026-10-01 03:41:15 - the column says UTC."""
+    s = str(stamp or "")
+    return s.replace("T", " ").split(".")[0].rstrip("Z") if "T" in s else (s or "-")
+
+
 def _pill(status: str) -> str:
     return f"<span class=\"pill {_e(status)}\">{_e(status)}</span>"
 
@@ -319,15 +345,16 @@ def admin_page(admin: str, overview: dict, pending: list, recent: list,
         rows = "".join(
             f"<tr><td class=\"mono\">{_e(r['public_id'])}</td>"
             f"<td>{_e(r['username'])}</td>"
-            f"<td class=\"mono tiny\">{_e(r['created_utc'])}</td>"
+            f"<td class=\"mono tiny\">{_e(r.get('email') or '-')}</td>"
+            f"<td class=\"mono tiny\">{_e(_t(r['created_utc']))}</td>"
             f"<td class=\"mono tiny\">{_e(r.get('remote_ip') or '-')}</td>"
             f"<td class=\"row\">"
             f"{_decide_form(r['public_id'], 'approve', 'Approve', 'ok', csrf)}"
             f"{_decide_form(r['public_id'], 'reject', 'Reject', 'bad', csrf)}"
             f"</td></tr>" for r in pending)
         pending_tbl = (
-            "<table><thead><tr><th>Request</th><th>User</th><th>Asked</th>"
-            "<th>From</th><th>Decision</th></tr></thead>"
+            "<table><thead><tr><th>Request</th><th>User</th><th>Email</th>"
+            "<th>Asked (UTC)</th><th>From</th><th>Decision</th></tr></thead>"
             f"<tbody>{rows}</tbody></table>")
     else:
         pending_tbl = "<p class=\"empty\">Nothing is waiting for a decision.</p>"
@@ -337,11 +364,11 @@ def admin_page(admin: str, overview: dict, pending: list, recent: list,
             f"<tr><td class=\"mono\">{_e(r['public_id'])}</td>"
             f"<td>{_e(r['username'])}</td><td>{_pill(r['status'])}</td>"
             f"<td class=\"mono tiny\">{_e(r.get('decided_by') or '-')}</td>"
-            f"<td class=\"mono tiny\">{_e(r.get('access_expires_utc') or '-')}</td>"
+            f"<td class=\"mono tiny\">{_e(_t(r.get('access_expires_utc')))}</td>"
             f"<td>{_decide_form(r['public_id'], 'revoke', 'Revoke', 'bad', csrf) if r['status'] in (APPROVED, ACTIVE) else ''}</td>"
             f"</tr>" for r in recent)
         recent_tbl = ("<table><thead><tr><th>Request</th><th>User</th>"
-                      "<th>State</th><th>Decided by</th><th>Access until</th>"
+                      "<th>State</th><th>Decided by</th><th>Access until (UTC)</th>"
                       f"<th></th></tr></thead><tbody>{rrows}</tbody></table>")
     else:
         recent_tbl = "<p class=\"empty\">No requests yet.</p>"
@@ -354,16 +381,18 @@ def admin_page(admin: str, overview: dict, pending: list, recent: list,
 
     urows = "".join(
         f"<tr><td>{_e(u['username'])}</td><td>{_e(u['role'])}</td>"
-        f"<td class=\"mono tiny\">{_e(u.get('last_login_utc') or 'never')}</td>"
+        f"<td class=\"mono tiny\">{_e(u.get('email') or '-')}</td>"
+        f"<td class=\"mono tiny\">{_e(_t(u.get('last_login_utc')) if u.get('last_login_utc') else 'never')}</td>"
         f"<td>{_enabled(u)}</td>"
-        f"<td class=\"mono tiny\">{_e(u.get('locked_until_utc') or '-')}</td>"
+        f"<td class=\"mono tiny\">{_e(_t(u.get('locked_until_utc')))}</td>"
         f"</tr>" for u in users)
-    users_tbl = ("<table><thead><tr><th>User</th><th>Role</th><th>Last sign-in</th>"
+    users_tbl = ("<table><thead><tr><th>User</th><th>Role</th><th>Email</th>"
+                 "<th>Last sign-in (UTC)</th>"
                  f"<th>State</th><th>Locked until</th></tr></thead>"
                  f"<tbody>{urows}</tbody></table>")
 
     arows = "".join(
-        f"<tr><td class=\"mono tiny\">{_e(e.get('ts_utc'))}</td>"
+        f"<tr><td class=\"mono tiny\">{_e(_t(e.get('ts_utc')))}</td>"
         f"<td class=\"mono tiny\">{_e(e.get('actor'))}</td>"
         f"<td class=\"mono tiny\">{_e(e.get('action'))}</td>"
         f"<td class=\"mono tiny\">{_e(json.dumps(e.get('detail') or {}, sort_keys=True))[:160]}</td>"
