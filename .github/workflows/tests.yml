@@ -29,6 +29,25 @@ jobs:
       - name: regression suite
         run: python tests/test_pipeline.py
 
+  signing:
+    # The suite above runs with the standard library only, which proves the
+    # tool works without the optional package; this run has it installed, so
+    # the examiner-signature checks themselves run on every push too.
+    name: suite with the optional signing package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "cryptography>=41"
+      - name: regression suite, signatures included
+        run: python tests/test_pipeline.py
+
   kaitai:
     name: format definitions (.ksy) against the parsers
     runs-on: ubuntu-latest

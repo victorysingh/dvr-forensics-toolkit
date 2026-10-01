@@ -538,6 +538,29 @@ def render(case: dict, examiner_notes: str = "") -> str:
                 mono(x["data_hash"][:16] + "…") if x.get("data_hash") else ""]
                for x in cust.get("entries", [])]))
 
+    # -- examiner signatures ---------------------------------------------
+    sg = case.get("signatures") or {}
+    add("<h2>7a. Examiner signatures</h2>")
+    if not sg.get("signed"):
+        add("<p class='muted'>Not signed: no examiner key was used on this case. The custody "
+            "chain above still protects the record; a signature adds a check that anyone can "
+            "run with the examiner's public key, without trusting this machine.</p>")
+    else:
+        add(f"<p>RSA-PSS (SHA-256) signatures over a statement of the device, the acquisition "
+            f"hashes and Merkle root, the custody ledger's head, and the SHA-256 of every "
+            f"output. At the time of this report: <span class='{'ok' if sg.get('valid') else 'bad'}'>"
+            f"{e(sg.get('message'))}</span>.</p>")
+        add(table(["Statement", "Signer", "Key", "Signed (UTC)", "Result"],
+                  [[x.get("file", ""), x.get("signer") or "-", mono(x.get("key_id", "")),
+                    x.get("signed_utc", ""),
+                    "valid" if x.get("valid") else "FAILED: " + "; ".join(x.get("problems", []))]
+                   for x in sg.get("signatures", [])]))
+    add("<p class='muted'>This report is itself signed as soon as it is written when the "
+        "examiner's key is available, so its own signature is not listed above. Check the "
+        "whole case, this report included, with <code>cli.py verify --out &lt;case&gt; "
+        "--trust &lt;examiner&gt;.pub.pem</code>. A key proves who signed only if its "
+        "fingerprint matches the one the examiner published.</p>")
+
     # -- limitations -----------------------------------------------------
     add("<h2>8. Limitations and validation status</h2>")
     add("<div class='box warn'><ul>"

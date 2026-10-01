@@ -120,6 +120,103 @@ def cmd_scan(args) -> int:
         return 3
 
     _print_summary(report, session, out_dir)
+    _auto_sign(out_dir, "acquisition completed")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Examiner signatures (core/signing.py, acquire/signatures.py).  Optional: they
+# need the `cryptography` package and an examiner key; without either, every
+# command runs exactly as before.
+# ---------------------------------------------------------------------------
+def _auto_sign(out_dir: str, reason: str) -> None:
+    """Sign the case if the examiner has a key that opens without asking."""
+    from core import signing
+    if not signing.available() or not os.path.exists(signing.key_path()):
+        return
+    from acquire.signatures import sign_case
+    try:
+        r = sign_case(out_dir, signing.load_signer(), reason=reason)
+    except signing.SigningError as exc:
+        print(f"  [i] not signed: {exc}")
+        print(f"      sign by hand: cli.py sign --out {out_dir}")
+        return
+    st = r["statement"]
+    print(f"  signed        by {st['signer']['name'] or 'this key'} (key {st['signer']['key_id']}), "
+          f"{len(st['files'])} files -> {r['file']}")
+
+
+def _ask_passphrase(confirm: bool) -> str:
+    import getpass
+    while True:
+        first = getpass.getpass("  passphrase: ")
+        if not confirm or first == getpass.getpass("  repeat    : "):
+            return first
+        print("  they do not match - again")
+
+
+def cmd_keygen(args) -> int:
+    """Make (or show) this examiner's RSA signing key."""
+    from core import signing
+    path = args.key or signing.key_path()
+    if args.show:
+        try:
+            with open(signing.public_path(path), "r", encoding="utf-8") as fh:
+                pem = fh.read()
+        except OSError:
+            print(f"  [!] no public key at {signing.public_path(path)}")
+            return 1
+        fp = signing.fingerprint(pem)
+        print(f"  key id       {signing.key_id(fp)}\n  fingerprint  {fp}\n\n{pem}")
+        return 0
+    if not args.name:
+        print("  [!] --name is required: the examiner the key belongs to")
+        return 2
+    passphrase = ""
+    if args.passphrase_stdin:
+        passphrase = sys.stdin.readline().rstrip("\r\n")
+    elif not args.no_passphrase:
+        print("  A passphrase protects the key file if it is copied. Leave it empty to")
+        print("  let scans and reports sign by themselves without asking.")
+        passphrase = _ask_passphrase(confirm=True)
+    try:
+        k = signing.generate(args.name, path, passphrase)
+    except signing.SigningError as exc:
+        print(f"  [!] {exc}")
+        return 1
+    print(f"{BANNER} - examiner signing key\n")
+    print(f"  examiner     {k['name']}")
+    print(f"  algorithm    {k['algorithm']}, {k['bits']}-bit")
+    print(f"  key id       {k['key_id']}")
+    print(f"  fingerprint  {k['fingerprint']}")
+    print(f"  private key  {k['path']}   (keep it; back it up; never share it)")
+    print(f"  public key   {k['public_path']}   (give this to whoever verifies)")
+    print("\n  Publish the fingerprint where a verifier can find it independently -")
+    print("  a key carried inside a signed file proves integrity, not identity.")
+    return 0
+
+
+def cmd_sign(args) -> int:
+    """Sign the case as it stands, and record that in the custody ledger."""
+    from acquire.signatures import sign_case
+    from core import signing
+    try:
+        try:
+            signer = signing.load_signer(args.key)
+        except signing.SigningError as exc:
+            if "passphrase" not in str(exc) or not sys.stdin.isatty():
+                raise
+            signer = signing.load_signer(args.key, _ask_passphrase(confirm=False))
+        r = sign_case(args.out, signer, reason=args.reason)
+    except signing.SigningError as exc:
+        print(f"  [!] {exc}")
+        return 1
+    st = r["statement"]
+    print(f"{BANNER} - case signed\n")
+    print(f"  signer       {st['signer']['name'] or '-'}  (key {st['signer']['key_id']})")
+    print(f"  covers       {len(st['files'])} files, custody ledger to entry "
+          f"{st['ledger']['entries']}, acquisition hashes and Merkle root")
+    print(f"  [+] {r['path']}\n  recorded in the custody ledger")
     return 0
 
 
@@ -638,7 +735,7 @@ def cmd_verify(args) -> int:
         print(f"                found    {v['found']}")
     seal = ledger.verify_seal()
     print(f"custody seal  : {seal['message']}")
-    chain_ok = v["valid"] and seal["valid"]
+    chain_ok = v["valid"] and seal["valid"] and _verify_signatures(out_dir, args.trust)
 
     leaves, blockmap = [], os.path.join(out_dir, "blockmap.jsonl")
     if os.path.exists(blockmap):
@@ -657,6 +754,24 @@ def cmd_verify(args) -> int:
             print(f"                recomputed {recomputed}")
         return 0 if (chain_ok and ok and _verify_preserved(out_dir, ledger)) else 1
     return 0 if chain_ok else 1
+
+
+def _verify_signatures(out_dir: str, trust: Optional[list] = None) -> bool:
+    """Check the examiner signatures, if the case has any."""
+    from acquire.signatures import verify_case
+    r = verify_case(out_dir, trust or [])
+    print(f"signatures    : {r['message']}")
+    for s in r.get("signatures", []):
+        state = "valid" if s.get("valid") else "FAILED"
+        trust_txt = ("trusted: " + os.path.basename(s["trusted_as"]) if s.get("trusted")
+                     else "key NOT in your trusted keys - compare its fingerprint "
+                          "with the examiner's" if s.get("trusted") is False
+                     else "no trusted keys given (--trust)")
+        print(f"                {s['file']}: {state}, {s.get('signer') or 'unnamed'} "
+              f"(key {s.get('key_id', '?')}), {trust_txt}")
+        if s.get("unsigned_newer"):
+            print(f"                newer, not yet signed: {', '.join(s['unsigned_newer'])}")
+    return r["valid"]
 
 
 def _verify_preserved(out_dir: str, ledger: CustodyLedger) -> bool:
@@ -825,6 +940,103 @@ def cmd_timeline(args) -> int:
     return 0
 
 
+def cmd_seal(args) -> int:
+    """Seal case files for one recipient: AES-256-GCM, RSA-OAEP, signed."""
+    from acquire import sealed
+    from core import signing
+    from core.contract import utc_now as _now
+    from core.hashing import sha256_file
+    try:
+        with open(args.to, "r", encoding="utf-8") as fh:
+            recipient_pem = fh.read()
+        signer = None
+        if not args.unsigned:
+            try:
+                signer = signing.load_signer(args.key)
+            except signing.SigningError as exc:
+                if "passphrase" not in str(exc) or not sys.stdin.isatty():
+                    raise
+                signer = signing.load_signer(args.key, _ask_passphrase(confirm=False))
+        files = [] if args.only else sealed.default_selection(args.out)
+        files += [f for f in (args.include or []) if f not in files]
+        rkid = signing.key_id(signing.fingerprint(recipient_pem))
+        dest = args.dest or os.path.join(
+            args.out, "sealed",
+            f"{os.path.basename(os.path.abspath(args.out))}_for_{rkid}_"
+            f"{_now().replace(':', '').replace('-', '')[:15]}.adseal")
+        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+        ledger = _case_ledger(args.out)
+        r = sealed.seal(args.out, files, recipient_pem, dest, signer=signer,
+                        case_id=(ledger.case_id if ledger else ""), note=args.note)
+    except (OSError, signing.SigningError, sealed.SealError) as exc:
+        print(f"  [!] {exc}")
+        return 1
+    if ledger:
+        ledger.append("evidence_sealed", {
+            "package": os.path.relpath(r["path"], args.out).replace(os.sep, "/"),
+            "recipient_key_id": rkid,
+            "recipient_fingerprint": r["header"]["recipient"]["fingerprint"],
+            "signed_by": signer.key_id if signer else "", "note": args.note,
+            "files": [{"path": m["path"], "sha256": m["sha256"]} for m in r["header"]["manifest"]],
+        }, data_hash=r["sha256"])
+    print(f"{BANNER} - evidence sealed\n")
+    print(f"  for          key {rkid} only (RSA-OAEP), contents AES-256-GCM")
+    print(f"  sealed by    {(signer.name or signer.key_id) if signer else 'nobody - unsigned'}")
+    print(f"  files        {len(r['header']['manifest'])}")
+    print(f"  [+] {r['path']}\n      sha256 {r['sha256']}")
+    if ledger:
+        print("  recorded in the custody ledger")
+    return 0
+
+
+def cmd_unseal(args) -> int:
+    """Open a sealed package - all of it, verified, or nothing - or just inspect it."""
+    from acquire import sealed
+    from core import signing
+    try:
+        if args.info:
+            i = sealed.inspect(args.package, args.trust)
+            h = i["header"]
+            s = h.get("sender") or {}
+            print(f"{BANNER} - sealed package\n")
+            print(f"  for          key {h['recipient']['key_id']}")
+            print(f"  sealed by    {s.get('name') or '-'} (key {s.get('key_id', '-')}), "
+                  f"signature {'valid' if i['signature_valid'] else 'NOT valid' if i['signed'] else 'absent'}"
+                  + ("" if i["sender_trusted"] is None else
+                     ", trusted" if i["sender_trusted"] else ", key NOT in your trusted keys"))
+            print(f"  sealed       {h.get('created_utc', '')}  case {h.get('case_id') or '-'}")
+            print(f"  contents     {'intact' if i['ciphertext_intact'] else 'CHANGED'}, "
+                  f"{len(i['files'])} files")
+            for f in i["files"]:
+                print(f"               {f['path']}  {f['bytes']:,} B  {f['sha256'][:16]}...")
+            return 0 if i["ciphertext_intact"] and i["signature_valid"] is not False else 1
+        if not args.dest:
+            print("  [!] --dest is required: a new or empty folder to open the package into")
+            return 2
+        passphrase = None
+        if sys.stdin.isatty() and not os.environ.get(signing.PASSPHRASE_ENV):
+            try:
+                signing.load_signer(args.key)
+            except signing.SigningError as exc:
+                if "passphrase" in str(exc):
+                    passphrase = _ask_passphrase(confirm=False)
+        r = sealed.unseal(args.package, args.key, args.dest, passphrase=passphrase,
+                          trusted_paths=args.trust, allow_unsigned=args.allow_unsigned)
+    except (OSError, signing.SigningError, sealed.SealError) as exc:
+        print(f"  [!] {exc}")
+        return 1
+    s = r["info"]["header"].get("sender") or {}
+    print(f"{BANNER} - package opened\n")
+    print(f"  sealed by    {s.get('name') or '-'} (key {s.get('key_id', '-')})"
+          + ("" if r["info"]["sender_trusted"] is None else
+             ", trusted" if r["info"]["sender_trusted"] else
+             " - key NOT in your trusted keys: compare its fingerprint with the sender's"))
+    print(f"  checked      signature, AES-GCM authentication, and the SHA-256 of all "
+          f"{len(r['files'])} files")
+    print(f"  [+] {r['dest']}")
+    return 0
+
+
 def cmd_report(args) -> int:
     """Write the forensic report (HTML) and the case summary (JSON)."""
     from core.hashing import sha256_file
@@ -853,6 +1065,7 @@ def cmd_report(args) -> int:
     print(f"  [+] {html_path}\n      sha256 {hh}")
     print(f"  [+] {json_path}\n      sha256 {jh}")
     print("  both hashes recorded in the custody ledger")
+    _auto_sign(args.out, "report generated")
     return 0
 
 
@@ -2412,7 +2625,9 @@ def cmd_prove(args) -> int:
 
     This is what makes a single carved clip defensible without re-reading a
     multi-TB drive: the block hash, a short sibling path, and the root that
-    was signed at acquisition time.
+    was recorded at acquisition time - in scan_report.json and the custody
+    ledger, and, when the examiner has a key, in an RSA-signed statement
+    (`cli.py sign`; `verify` checks it).
     """
     out_dir = args.out
     with open(os.path.join(out_dir, "blockmap.jsonl"), "r", encoding="utf-8") as fh:
@@ -2855,9 +3070,59 @@ def main() -> int:
         p.add_argument(f"--{k}", default="", help=f"the declarant's {k} (left blank if omitted)")
     p.set_defaults(func=cmd_certificate)
 
-    p = sub.add_parser("verify", help="re-verify custody chain and Merkle root")
+    p = sub.add_parser("verify", help="re-verify custody chain, Merkle root and signatures")
     p.add_argument("--out", required=True)
+    p.add_argument("--trust", action="append", default=[],
+                   help="a public key (.pub.pem) to trust as an examiner's; repeatable. "
+                        "Your own key and ~/.ps26150/trusted/*.pem are trusted already")
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("keygen", help="make this examiner's RSA signing key (needs the "
+                                      "optional cryptography package)")
+    p.add_argument("--name", default="", help="the examiner the key belongs to")
+    p.add_argument("--key", default="", help="private key path (default "
+                                             "~/.ps26150/signing_key.pem)")
+    p.add_argument("--no-passphrase", action="store_true",
+                   help="store the key unencrypted, so scans and reports sign unattended")
+    p.add_argument("--passphrase-stdin", action="store_true",
+                   help="read the passphrase from the first line of stdin")
+    p.add_argument("--show", action="store_true",
+                   help="print the public key and its fingerprint")
+    p.set_defaults(func=cmd_keygen)
+
+    p = sub.add_parser("seal", help="seal case files for one recipient: AES-256-GCM, "
+                                    "key wrapped with their RSA key, signed by you")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--to", required=True, help="the recipient's public key (.pub.pem)")
+    p.add_argument("--include", action="append", default=[],
+                   help="another file in the case to add (e.g. an extracted clip); repeatable")
+    p.add_argument("--only", action="store_true",
+                   help="seal only the --include files, not the default record")
+    p.add_argument("--dest", default="", help="package path (default <case>/sealed/...)")
+    p.add_argument("--key", default="", help="your private key (default ~/.ps26150)")
+    p.add_argument("--note", default="", help="why and for whom, kept in the package and ledger")
+    p.add_argument("--unsigned", action="store_true",
+                   help="seal without signing (the recipient cannot then check who sealed it)")
+    p.set_defaults(func=cmd_seal)
+
+    p = sub.add_parser("unseal", help="open a sealed package with your private key, or "
+                                      "--info to inspect it without opening")
+    p.add_argument("package")
+    p.add_argument("--key", default="", help="your private key (the recipient's)")
+    p.add_argument("--dest", default="", help="a new or empty folder to open it into")
+    p.add_argument("--trust", action="append", default=[],
+                   help="the sender's public key, to check who sealed it; repeatable")
+    p.add_argument("--allow-unsigned", action="store_true",
+                   help="open a package that carries no sender signature")
+    p.add_argument("--info", action="store_true",
+                   help="show who sealed it, for whom, and its files - decrypts nothing")
+    p.set_defaults(func=cmd_unseal)
+
+    p = sub.add_parser("sign", help="sign the case as it stands with the examiner's key")
+    p.add_argument("--out", required=True, help="case directory")
+    p.add_argument("--key", default="", help="private key path")
+    p.add_argument("--reason", default="", help="why it is being signed, kept in the ledger")
+    p.set_defaults(func=cmd_sign)
 
     p = sub.add_parser("prove", help="Merkle inclusion proof for a disk offset")
     p.add_argument("--out", required=True)

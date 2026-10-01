@@ -88,6 +88,11 @@ export default function Custody({ c, reload, toast }) {
         </Card>
       </Section>
 
+      <Section title="Examiner signatures"
+        hint="RSA-PSS over the device, the hashes, the ledger head and every output">
+        <Signatures sg={c.signatures} />
+      </Section>
+
       <Section title="Ledger" hint="oldest first · times are UTC, as recorded">
         <ol className="list-none m-0 pl-6 relative">
           {/* the spine of the chain */}
@@ -132,5 +137,45 @@ export default function Custody({ c, reload, toast }) {
         </ol>
       </Section>
     </>
+  );
+}
+
+// What `cli.py verify` says about the examiner signatures, as of this load.
+// A signature is checked here against the key it carries: that proves the
+// files are what was signed, and whose key it was only once the key is one
+// the examiner published - so the fingerprint is shown in full on hover.
+function Signatures({ sg }) {
+  if (!sg || !sg.signed) {
+    return (
+      <Card>
+        <p className="dim text-[12.5px] m-0">
+          Not signed: no examiner key was used on this case. <span className="font-mono">
+          cli.py keygen</span> then <span className="font-mono">cli.py sign</span> adds a check
+          anyone can run with the examiner's public key, without trusting this machine.
+        </p>
+      </Card>
+    );
+  }
+  return (
+    <Card className={sg.valid ? "border-validated/50" : "border-danger/50"}>
+      <div className={`font-semibold ${sg.valid ? "text-validated" : "text-danger"}`}>
+        {sg.valid ? "✓ " : "✗ "}{sg.message}</div>
+      <ul className="list-none m-0 mt-2.5 p-0 grid gap-1.5">
+        {(sg.signatures || []).map((s) => (
+          <li key={s.file} className="text-[12.5px] flex flex-wrap gap-x-3 gap-y-0.5">
+            <span className={s.valid ? "text-validated" : "text-danger"}>
+              {s.valid ? "valid" : "FAILED"}</span>
+            <span className="font-mono dim">{s.file}</span>
+            <span>{s.signer || "unnamed key"}</span>
+            <span className="font-mono dim" title={s.fingerprint}>key {s.key_id}</span>
+            <span className="dim">{utcTime(s.signed_utc)} UTC</span>
+            {!s.valid && <span className="text-danger basis-full">
+              {(s.problems || []).join("; ")}</span>}
+            {s.unsigned_newer && s.unsigned_newer.length > 0 && (
+              <span className="dim basis-full">newer, not yet signed: {s.unsigned_newer.join(", ")}</span>)}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

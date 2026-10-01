@@ -5483,6 +5483,344 @@ def test_access_supabase(tmp: str) -> None:
                 os.environ[k] = v
 
 
+def test_signing(tmp: str) -> None:
+    """Examiner signatures over a case (core/signing.py, acquire/signatures.py).
+
+    What a signature must catch - a changed output, a rewritten ledger, a
+    statement edited behind the signature, a key swapped in - and what it must
+    not cry wolf over: an output made after signing, or a report regenerated
+    and signed again.  With the optional `cryptography` package absent, the
+    tool has to say so and carry on.
+    """
+    print("\n[examiner signatures]")
+    from acquire import signatures as SG
+    from acquire.ledger import CustodyLedger
+    from core import signing
+
+    def make_case(name: str) -> str:
+        d = os.path.join(tmp, "sig-" + name)
+        os.makedirs(d, exist_ok=True)
+        led = CustodyLedger(os.path.join(d, "custody_ledger.jsonl"), actor="examiner",
+                            case_id="SIG-" + name)
+        led.append("device_opened", {"serial": "TEST0001"})
+        led.append("scan_completed", {"blocks": 8}, data_hash="ab" * 32)
+        with open(os.path.join(d, "scan_report.json"), "w", encoding="utf-8") as fh:
+            json.dump({"tool_version": "test", "case": {"case_id": "SIG-" + name},
+                       "device": {"model": "SYNTH", "serial": "TEST0001", "size_bytes": 4096},
+                       "hashes": [{"algorithm": "sha256", "value": "cd" * 32,
+                                   "scope": "full_device", "length": 4096}],
+                       "merkle_root": "ab" * 32, "generated_utc": "2026-10-01T00:00:00.000Z"}, fh)
+        with open(os.path.join(d, "report.json"), "w", encoding="utf-8") as fh:
+            json.dump({"summary": "synthetic"}, fh)
+        return d
+
+    if not signing.available():
+        d = make_case("nocrypto")
+        os.makedirs(os.path.join(d, "signatures"))
+        with open(os.path.join(d, "signatures", "000_x.json"), "w") as fh:
+            fh.write("{}")
+        r = SG.verify_case(d)
+        check("without the cryptography package, signatures are reported, not judged",
+              r["signed"] and r.get("checked") is False and "cryptography" in r["message"])
+        print("  (skipped the rest - the optional 'cryptography' package is not installed)")
+        return
+
+    kdir = os.path.join(tmp, "sig-keys")
+    k = signing.generate("Examiner One", os.path.join(kdir, "one.pem"))
+    check("a key is RSA-3072, named, with a 64-hex fingerprint and a 16-hex id",
+          k["bits"] == 3072 and k["name"] == "Examiner One"
+          and len(k["fingerprint"]) == 64 and k["key_id"] == k["fingerprint"][:16])
+    if os.name == "posix":
+        check("the private key file is readable by its owner only",
+              (os.stat(k["path"]).st_mode & 0o077) == 0)
+    try:
+        signing.generate("Someone Else", k["path"])
+        check("an existing key is never overwritten", False)
+    except signing.SigningError:
+        check("an existing key is never overwritten", True)
+
+    locked = signing.generate("Examiner Two", os.path.join(kdir, "two.pem"),
+                              passphrase="a long passphrase")
+    saved_pp = os.environ.pop(signing.PASSPHRASE_ENV, None)
+    try:
+        for pp, want, label in ((None, "passphrase", "asks for its passphrase"),
+                                ("wrong one", "did not open", "refuses a wrong passphrase")):
+            try:
+                signing.load_signer(locked["path"], pp)
+                check(f"a protected key {label}", False)
+            except signing.SigningError as exc:
+                check(f"a protected key {label}", want in str(exc))
+        check("...and opens with the right one",
+              signing.load_signer(locked["path"], "a long passphrase").name == "Examiner Two")
+    finally:
+        if saved_pp is not None:
+            os.environ[signing.PASSPHRASE_ENV] = saved_pp
+
+    one = signing.load_signer(k["path"])
+    d = make_case("main")
+    first = SG.sign_case(d, one, reason="acquisition completed")
+    led = CustodyLedger(os.path.join(d, "custody_ledger.jsonl"))
+    last = led.entries[-1]
+    check("signing writes a statement and records it in the custody ledger",
+          os.path.exists(first["path"]) and last["action"] == "case_signed"
+          and last["data_hash"] == SG._sha256(first["path"])[0] and led.verify()["valid"])
+    check("the statement covers the device, the hashes, the root, the ledger head and the outputs",
+          first["statement"]["device"]["serial"] == "TEST0001"
+          and first["statement"]["acquisition"]["merkle_root"] == "ab" * 32
+          and first["statement"]["ledger"]["entries"] == 2
+          and {f["path"] for f in first["statement"]["files"]} == {"scan_report.json", "report.json"})
+
+    ok = SG.verify_case(d, [k["public_path"]])
+    check("a fresh signature verifies, and is trusted when its key is",
+          ok["valid"] and ok["signatures"][0]["trusted"] is True)
+    other = signing.generate("Stranger", os.path.join(kdir, "stranger.pem"))
+    strange = SG.verify_case(d, [other["public_path"]])
+    check("a valid signature by a key the verifier does not trust says so",
+          strange["valid"] and strange["signatures"][0]["trusted"] is False)
+
+    rp = os.path.join(d, "report.json")
+    original = open(rp, encoding="utf-8").read()
+    with open(rp, "w", encoding="utf-8") as fh:
+        fh.write(original.replace("synthetic", "edited"))
+    bad = SG.verify_case(d)
+    check("an output changed after signing fails, and is named",
+          not bad["valid"] and "report.json" in bad["signatures"][-1]["changed"])
+    with open(rp, "w", encoding="utf-8") as fh:
+        fh.write(original)
+    check("...and passes again once restored", SG.verify_case(d)["valid"])
+
+    with open(os.path.join(d, "parse_synth.json"), "w") as fh:
+        fh.write("{}")
+    later = SG.verify_case(d)
+    check("an output made after signing is not a failure - it is named as not yet signed",
+          later["valid"] and later["signatures"][-1]["unsigned_newer"] == ["parse_synth.json"])
+
+    with open(rp, "w", encoding="utf-8") as fh:
+        fh.write(original.replace("synthetic", "regenerated"))
+    second = SG.sign_case(d, one, reason="report generated")
+    both = SG.verify_case(d)
+    check("a regenerated report signed again: both statements verify, newest covers the change",
+          both["valid"] and len(both["signatures"]) == 2
+          and both["signatures"][-1]["files_checked"] == 3)
+
+    sig_file = second["path"]
+    rec = json.load(open(sig_file, encoding="utf-8"))
+    forged = json.loads(json.dumps(rec))
+    forged["statement"]["acquisition"]["merkle_root"] = "ee" * 32
+    json.dump(forged, open(sig_file, "w", encoding="utf-8"))
+    check("a statement edited behind its signature fails",
+          not SG.verify_case(d)["signatures"][-1]["signature_valid"])
+    swapped = json.loads(json.dumps(rec))
+    swapped["public_key_pem"] = open(other["public_path"], encoding="utf-8").read()
+    json.dump(swapped, open(sig_file, "w", encoding="utf-8"))
+    check("a different key swapped into a statement fails",
+          not SG.verify_case(d)["signatures"][-1]["signature_valid"])
+    json.dump(rec, open(sig_file, "w", encoding="utf-8"), indent=1, sort_keys=True)
+
+    lp = os.path.join(d, "custody_ledger.jsonl")
+    lines = open(lp, encoding="utf-8").read().splitlines(True)
+    with open(lp, "w", encoding="utf-8") as fh:
+        fh.writelines(lines[:1])
+    cut = SG.verify_case(d)
+    check("a ledger cut back behind a signed head fails",
+          not cut["valid"] and not cut["signatures"][0]["ledger_ok"])
+    with open(lp, "w", encoding="utf-8") as fh:
+        fh.writelines(lines)
+    try:
+        with open(lp, "a", encoding="utf-8") as fh:
+            fh.write(lines[-1].replace('"case_signed"', '"case_unsigned"'))
+        SG.sign_case(d, one)
+        check("a case whose ledger does not verify is never signed", False)
+    except signing.SigningError as exc:
+        check("a case whose ledger does not verify is never signed", "does not verify" in str(exc))
+    with open(lp, "w", encoding="utf-8") as fh:
+        fh.writelines(lines)
+
+    sp = os.path.join(d, "scan_report.json")
+    scan = json.load(open(sp, encoding="utf-8"))
+    scan["hashes"][0]["value"] = "00" * 32
+    json.dump(scan, open(sp, "w", encoding="utf-8"))
+    acq = SG.verify_case(d)
+    check("a changed acquisition hash fails every statement, not only the newest",
+          not acq["valid"] and all(not s["acquisition_ok"] for s in acq["signatures"]))
+
+    import contextlib
+    import io as _io
+    import cli as _cli
+    saved_key = os.environ.get(signing.KEY_ENV)
+    os.environ[signing.KEY_ENV] = locked["path"]
+    saved_pp = os.environ.pop(signing.PASSPHRASE_ENV, None)
+    try:
+        d2 = make_case("auto")
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _cli._auto_sign(d2, "report generated")
+        check("unattended signing with a protected key steps aside and says how to sign",
+              "not signed" in buf.getvalue() and "cli.py sign" in buf.getvalue()
+              and not os.path.isdir(os.path.join(d2, "signatures")))
+    finally:
+        if saved_key is None:
+            os.environ.pop(signing.KEY_ENV, None)
+        else:
+            os.environ[signing.KEY_ENV] = saved_key
+        if saved_pp is not None:
+            os.environ[signing.PASSPHRASE_ENV] = saved_pp
+
+
+def test_sealed(tmp: str) -> None:
+    """Sealed evidence packages (acquire/sealed.py): AES-256-GCM + RSA-OAEP + signature.
+
+    One recipient opens it; every file comes out byte-identical; and any
+    change - to a byte of the contents, to its recorded hash, to the header -
+    or the wrong key or a dirty destination, refuses and leaves nothing behind.
+    """
+    print("\n[sealed evidence packages]")
+    import base64
+    from acquire import sealed as SE
+    from core import signing
+    if not signing.available():
+        print("  (skipped - the optional 'cryptography' package is not installed)")
+        return
+
+    kdir = os.path.join(tmp, "seal-keys")
+    exam = signing.generate("Examiner", os.path.join(kdir, "exam.pem"))
+    court = signing.generate("Court", os.path.join(kdir, "court.pem"), passphrase="court passphrase")
+    other = signing.generate("Someone", os.path.join(kdir, "other.pem"))
+    court_pub = open(court["public_path"], encoding="utf-8").read()
+
+    case = os.path.join(tmp, "seal-case")
+    os.makedirs(os.path.join(case, "carve"), exist_ok=True)
+    payload = {"report.json": b'{"x": 1}', "scan_report.json": b'{"hashes": []}',
+               "carve/clip.h265": os.urandom(3 * (1 << 20) + 17)}       # spans chunks
+    for rel, data in payload.items():
+        with open(os.path.join(case, rel), "wb") as fh:
+            fh.write(data)
+    signer = signing.load_signer(exam["path"])
+    pkg = os.path.join(tmp, "seal-out", "case.adseal")
+    os.makedirs(os.path.dirname(pkg), exist_ok=True)
+    r = SE.seal(case, list(payload), court_pub, pkg, signer=signer, case_id="SEAL-1")
+    raw = open(pkg, "rb").read()
+    check("the package carries no plaintext of what it seals",
+          b'{"hashes": []}' not in raw and payload["carve/clip.h265"][:4096] not in raw)
+
+    info = SE.inspect(pkg, [exam["public_path"]])
+    check("without any private key, a package tells who sealed it, for whom, and holds",
+          info["signature_valid"] and info["sender_trusted"] and info["ciphertext_intact"]
+          and info["header"]["recipient"]["fingerprint"] == court["fingerprint"])
+
+    dest = os.path.join(tmp, "seal-open")
+    SE.unseal(pkg, court["path"], dest, passphrase="court passphrase",
+              trusted_paths=[exam["public_path"]])
+    check("the recipient opens it, and every file comes out byte-identical",
+          all(open(os.path.join(dest, *rel.split("/")), "rb").read() == data
+              for rel, data in payload.items()))
+    import tarfile as _tf
+
+    def refused(pkg_path, key_path, label, want, **kw):
+        d = os.path.join(tmp, "seal-refused-" + str(abs(hash(label)) % 10**8))
+        try:
+            SE.unseal(pkg_path, key_path, d, **kw)
+            check(label, False, "opened")
+        except SE.SealError as exc:
+            left = os.listdir(d) if os.path.isdir(d) else []
+            check(label, want in str(exc) and not left, f"{exc} / left {left}")
+
+    refused(pkg, other["path"], "another key cannot open it, and is told whose it is",
+            "sealed for key " + court["key_id"])
+
+    def variant(name, mutate):
+        p = os.path.join(tmp, "seal-out", name)
+        b = bytearray(raw)
+        mutate(b)
+        open(p, "wb").write(bytes(b))
+        return p
+
+    import struct as _st
+    hlen = _st.unpack(">I", raw[8:12])[0]
+    tlen = _st.unpack(">I", raw[-4:])[0]
+    mid = 12 + hlen + 100
+    flipped = variant("flip.adseal", lambda b: b.__setitem__(mid, b[mid] ^ 1))
+    refused(flipped, court["path"], "one changed byte of the contents is refused, nothing left behind",
+            "do not match their recorded hash", passphrase="court passphrase")
+
+    def flip_and_rehash(b, sign_ok=True):
+        b[mid] ^= 1
+        ct = bytes(b[12 + hlen:len(b) - 4 - tlen])
+        trailer = json.loads(bytes(b[len(b) - 4 - tlen:len(b) - 4]))
+        trailer["ciphertext_sha256"] = hashlib.sha256(ct).hexdigest()
+        tb = json.dumps(trailer, sort_keys=True, separators=(",", ":")).encode()
+        b[len(b) - 4 - tlen:] = tb + _st.pack(">I", len(tb))
+    rehashed = variant("rehash.adseal", flip_and_rehash)
+    refused(rehashed, court["path"], "...and so is a change with its recorded hash rewritten to match",
+            "signature does not hold", passphrase="court passphrase")
+
+    head = variant("header.adseal", lambda b: b.__setitem__(slice(12, 12 + hlen),
+                   bytes(b[12:12 + hlen]).replace(b'"case_id":"SEAL-1"', b'"case_id":"SEAL-9"')))
+    refused(head, court["path"], "an edited header (case, recipient, file list) is refused",
+            "signature does not hold", passphrase="court passphrase")
+
+    upkg = os.path.join(tmp, "seal-out", "unsigned.adseal")
+    SE.seal(case, ["report.json"], court_pub, upkg, signer=None)
+    refused(upkg, court["path"], "an unsigned package is refused unless asked for",
+            "not signed", passphrase="court passphrase")
+    uraw = open(upkg, "rb").read()
+    uh = _st.unpack(">I", uraw[8:12])[0]
+    ut = _st.unpack(">I", uraw[-4:])[0]
+
+    def unsigned_tamper(b):
+        m = 12 + uh + 5
+        b[m] ^= 1
+        ct = bytes(b[12 + uh:len(b) - 4 - ut])
+        tr = json.loads(bytes(b[len(b) - 4 - ut:len(b) - 4]))
+        tr["ciphertext_sha256"] = hashlib.sha256(ct).hexdigest()
+        tb = json.dumps(tr, sort_keys=True, separators=(",", ":")).encode()
+        b[len(b) - 4 - ut:] = tb + _st.pack(">I", len(tb))
+    raw_backup = raw
+    raw = uraw
+    ut_pkg = variant("unsigned-tamper.adseal", unsigned_tamper)
+    raw = raw_backup
+    refused(ut_pkg, court["path"], "unsigned and altered with its hash fixed up: AES-GCM still refuses",
+            "failed authentication", passphrase="court passphrase", allow_unsigned=True)
+
+    busy = os.path.join(tmp, "seal-busy")
+    os.makedirs(busy, exist_ok=True)
+    open(os.path.join(busy, "already.txt"), "w").write("x")
+    try:
+        SE.unseal(pkg, court["path"], busy, passphrase="court passphrase")
+        check("a folder that already holds files is never opened into", False)
+    except SE.SealError as exc:
+        check("a folder that already holds files is never opened into",
+              "not empty" in str(exc) and os.listdir(busy) == ["already.txt"])
+
+    try:
+        SE.seal(case, ["../outside.txt"], court_pub, os.path.join(tmp, "seal-out", "x.adseal"))
+        check("a path outside the case is refused when sealing", False)
+    except SE.SealError:
+        check("a path outside the case is refused when sealing", True)
+    check("...and a manifest path that climbs out is refused when opening",
+          not SE._safe_rel("../etc/passwd") and not SE._safe_rel("/abs")
+          and not SE._safe_rel("C:/x") and SE._safe_rel("carve/clip.h265"))
+
+    # The tar inside: no user or group names (checked on the decrypted stream).
+    from cryptography.hazmat.primitives import hashes as _h
+    from cryptography.hazmat.primitives.asymmetric import padding as _p
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    header = json.loads(raw[12:12 + hlen])
+    trailer = json.loads(raw[len(raw) - 4 - tlen:len(raw) - 4])
+    key = signing.load_signer(court["path"], "court passphrase")._key.decrypt(
+        base64.b64decode(header["wrapped_key"]),
+        _p.OAEP(mgf=_p.MGF1(_h.SHA256()), algorithm=_h.SHA256(), label=None))
+    dec = Cipher(algorithms.AES(key), modes.GCM(base64.b64decode(header["nonce"]),
+                                                base64.b64decode(trailer["tag"]))).decryptor()
+    dec.authenticate_additional_data(raw[12:12 + hlen])
+    plain = dec.update(raw[12 + hlen:len(raw) - 4 - tlen]) + dec.finalize()
+    import io as _io
+    with _tf.open(fileobj=_io.BytesIO(plain)) as t:
+        check("the tar inside names no user or group, and every entry is a plain file",
+              all(m.uname == "" and m.gname == "" and m.uid == 0 and m.isfile()
+                  for m in t.getmembers()))
+
+
 def test_access_mail(tmp: str) -> None:
     """The gate's email notices (access/mail.py), with a fake mailer.
 
@@ -5660,6 +5998,8 @@ def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     # seal keys go under the test folder, never into the examiner's own ~/.ps26150
     os.environ["PS26150_SEAL_KEY"] = os.path.join(tmp, "seal_keys", "suite.key")
+    # ...and no test scan is ever signed with the examiner's own key
+    os.environ["PS26150_SIGNING_KEY"] = os.path.join(tmp, "no_signing_key", "none.pem")
     try:
         test_merkle()
         test_ledger(tmp)
@@ -5729,6 +6069,8 @@ def main() -> int:
         test_godrej(tmp)
         test_daylight(tmp)
         test_access(tmp)
+        test_signing(tmp)
+        test_sealed(tmp)
         test_access_supabase(tmp)
         test_access_mail(tmp)
         test_dahua_real_media()
