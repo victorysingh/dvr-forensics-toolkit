@@ -5657,6 +5657,160 @@ def test_signing(tmp: str) -> None:
             os.environ[signing.PASSPHRASE_ENV] = saved_pp
 
 
+def test_sealed(tmp: str) -> None:
+    """Sealed evidence packages (acquire/sealed.py): AES-256-GCM + RSA-OAEP + signature.
+
+    One recipient opens it; every file comes out byte-identical; and any
+    change - to a byte of the contents, to its recorded hash, to the header -
+    or the wrong key or a dirty destination, refuses and leaves nothing behind.
+    """
+    print("\n[sealed evidence packages]")
+    import base64
+    from acquire import sealed as SE
+    from core import signing
+    if not signing.available():
+        print("  (skipped - the optional 'cryptography' package is not installed)")
+        return
+
+    kdir = os.path.join(tmp, "seal-keys")
+    exam = signing.generate("Examiner", os.path.join(kdir, "exam.pem"))
+    court = signing.generate("Court", os.path.join(kdir, "court.pem"), passphrase="court passphrase")
+    other = signing.generate("Someone", os.path.join(kdir, "other.pem"))
+    court_pub = open(court["public_path"], encoding="utf-8").read()
+
+    case = os.path.join(tmp, "seal-case")
+    os.makedirs(os.path.join(case, "carve"), exist_ok=True)
+    payload = {"report.json": b'{"x": 1}', "scan_report.json": b'{"hashes": []}',
+               "carve/clip.h265": os.urandom(3 * (1 << 20) + 17)}       # spans chunks
+    for rel, data in payload.items():
+        with open(os.path.join(case, rel), "wb") as fh:
+            fh.write(data)
+    signer = signing.load_signer(exam["path"])
+    pkg = os.path.join(tmp, "seal-out", "case.adseal")
+    os.makedirs(os.path.dirname(pkg), exist_ok=True)
+    r = SE.seal(case, list(payload), court_pub, pkg, signer=signer, case_id="SEAL-1")
+    raw = open(pkg, "rb").read()
+    check("the package carries no plaintext of what it seals",
+          b'{"hashes": []}' not in raw and payload["carve/clip.h265"][:4096] not in raw)
+
+    info = SE.inspect(pkg, [exam["public_path"]])
+    check("without any private key, a package tells who sealed it, for whom, and holds",
+          info["signature_valid"] and info["sender_trusted"] and info["ciphertext_intact"]
+          and info["header"]["recipient"]["fingerprint"] == court["fingerprint"])
+
+    dest = os.path.join(tmp, "seal-open")
+    SE.unseal(pkg, court["path"], dest, passphrase="court passphrase",
+              trusted_paths=[exam["public_path"]])
+    check("the recipient opens it, and every file comes out byte-identical",
+          all(open(os.path.join(dest, *rel.split("/")), "rb").read() == data
+              for rel, data in payload.items()))
+    import tarfile as _tf
+
+    def refused(pkg_path, key_path, label, want, **kw):
+        d = os.path.join(tmp, "seal-refused-" + str(abs(hash(label)) % 10**8))
+        try:
+            SE.unseal(pkg_path, key_path, d, **kw)
+            check(label, False, "opened")
+        except SE.SealError as exc:
+            left = os.listdir(d) if os.path.isdir(d) else []
+            check(label, want in str(exc) and not left, f"{exc} / left {left}")
+
+    refused(pkg, other["path"], "another key cannot open it, and is told whose it is",
+            "sealed for key " + court["key_id"])
+
+    def variant(name, mutate):
+        p = os.path.join(tmp, "seal-out", name)
+        b = bytearray(raw)
+        mutate(b)
+        open(p, "wb").write(bytes(b))
+        return p
+
+    import struct as _st
+    hlen = _st.unpack(">I", raw[8:12])[0]
+    tlen = _st.unpack(">I", raw[-4:])[0]
+    mid = 12 + hlen + 100
+    flipped = variant("flip.adseal", lambda b: b.__setitem__(mid, b[mid] ^ 1))
+    refused(flipped, court["path"], "one changed byte of the contents is refused, nothing left behind",
+            "do not match their recorded hash", passphrase="court passphrase")
+
+    def flip_and_rehash(b, sign_ok=True):
+        b[mid] ^= 1
+        ct = bytes(b[12 + hlen:len(b) - 4 - tlen])
+        trailer = json.loads(bytes(b[len(b) - 4 - tlen:len(b) - 4]))
+        trailer["ciphertext_sha256"] = hashlib.sha256(ct).hexdigest()
+        tb = json.dumps(trailer, sort_keys=True, separators=(",", ":")).encode()
+        b[len(b) - 4 - tlen:] = tb + _st.pack(">I", len(tb))
+    rehashed = variant("rehash.adseal", flip_and_rehash)
+    refused(rehashed, court["path"], "...and so is a change with its recorded hash rewritten to match",
+            "signature does not hold", passphrase="court passphrase")
+
+    head = variant("header.adseal", lambda b: b.__setitem__(slice(12, 12 + hlen),
+                   bytes(b[12:12 + hlen]).replace(b'"case_id":"SEAL-1"', b'"case_id":"SEAL-9"')))
+    refused(head, court["path"], "an edited header (case, recipient, file list) is refused",
+            "signature does not hold", passphrase="court passphrase")
+
+    upkg = os.path.join(tmp, "seal-out", "unsigned.adseal")
+    SE.seal(case, ["report.json"], court_pub, upkg, signer=None)
+    refused(upkg, court["path"], "an unsigned package is refused unless asked for",
+            "not signed", passphrase="court passphrase")
+    uraw = open(upkg, "rb").read()
+    uh = _st.unpack(">I", uraw[8:12])[0]
+    ut = _st.unpack(">I", uraw[-4:])[0]
+
+    def unsigned_tamper(b):
+        m = 12 + uh + 5
+        b[m] ^= 1
+        ct = bytes(b[12 + uh:len(b) - 4 - ut])
+        tr = json.loads(bytes(b[len(b) - 4 - ut:len(b) - 4]))
+        tr["ciphertext_sha256"] = hashlib.sha256(ct).hexdigest()
+        tb = json.dumps(tr, sort_keys=True, separators=(",", ":")).encode()
+        b[len(b) - 4 - ut:] = tb + _st.pack(">I", len(tb))
+    raw_backup = raw
+    raw = uraw
+    ut_pkg = variant("unsigned-tamper.adseal", unsigned_tamper)
+    raw = raw_backup
+    refused(ut_pkg, court["path"], "unsigned and altered with its hash fixed up: AES-GCM still refuses",
+            "failed authentication", passphrase="court passphrase", allow_unsigned=True)
+
+    busy = os.path.join(tmp, "seal-busy")
+    os.makedirs(busy, exist_ok=True)
+    open(os.path.join(busy, "already.txt"), "w").write("x")
+    try:
+        SE.unseal(pkg, court["path"], busy, passphrase="court passphrase")
+        check("a folder that already holds files is never opened into", False)
+    except SE.SealError as exc:
+        check("a folder that already holds files is never opened into",
+              "not empty" in str(exc) and os.listdir(busy) == ["already.txt"])
+
+    try:
+        SE.seal(case, ["../outside.txt"], court_pub, os.path.join(tmp, "seal-out", "x.adseal"))
+        check("a path outside the case is refused when sealing", False)
+    except SE.SealError:
+        check("a path outside the case is refused when sealing", True)
+    check("...and a manifest path that climbs out is refused when opening",
+          not SE._safe_rel("../etc/passwd") and not SE._safe_rel("/abs")
+          and not SE._safe_rel("C:/x") and SE._safe_rel("carve/clip.h265"))
+
+    # The tar inside: no user or group names (checked on the decrypted stream).
+    from cryptography.hazmat.primitives import hashes as _h
+    from cryptography.hazmat.primitives.asymmetric import padding as _p
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    header = json.loads(raw[12:12 + hlen])
+    trailer = json.loads(raw[len(raw) - 4 - tlen:len(raw) - 4])
+    key = signing.load_signer(court["path"], "court passphrase")._key.decrypt(
+        base64.b64decode(header["wrapped_key"]),
+        _p.OAEP(mgf=_p.MGF1(_h.SHA256()), algorithm=_h.SHA256(), label=None))
+    dec = Cipher(algorithms.AES(key), modes.GCM(base64.b64decode(header["nonce"]),
+                                                base64.b64decode(trailer["tag"]))).decryptor()
+    dec.authenticate_additional_data(raw[12:12 + hlen])
+    plain = dec.update(raw[12 + hlen:len(raw) - 4 - tlen]) + dec.finalize()
+    import io as _io
+    with _tf.open(fileobj=_io.BytesIO(plain)) as t:
+        check("the tar inside names no user or group, and every entry is a plain file",
+              all(m.uname == "" and m.gname == "" and m.uid == 0 and m.isfile()
+                  for m in t.getmembers()))
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     # seal keys go under the test folder, never into the examiner's own ~/.ps26150
@@ -5733,6 +5887,7 @@ def main() -> int:
         test_daylight(tmp)
         test_access(tmp)
         test_signing(tmp)
+        test_sealed(tmp)
         test_access_supabase(tmp)
         test_dahua_real_media()
     finally:

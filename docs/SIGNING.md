@@ -65,3 +65,42 @@ can find it independently.
 Without `cryptography`, every command runs as before. `verify` reports that signatures
 are present but cannot be checked here, and `keygen`/`sign` say what to install. CI runs
 the suite both ways.
+
+## Sealed packages: handing evidence over
+
+`cli.py seal` packs case files for **one recipient**, and `cli.py unseal` opens them
+(`acquire/sealed.py`). It is hybrid encryption, the standard construction:
+
+- **Contents:** the files go into a tar that is encrypted while it is written, with a
+  fresh random **AES-256** key in **GCM** mode. No plaintext copy ever touches the disk,
+  and GCM's tag makes any changed byte fail.
+- **Recipient:** that key is encrypted to the recipient's **RSA** public key (OAEP,
+  SHA-256). Only the matching private key opens it.
+- **Header:** the recipient, the sender, and the file list with each file's SHA-256.
+  The header is GCM's associated data, so editing it fails decryption too.
+- **Sender:** the examiner signs the header, the ciphertext hash and the tag
+  (RSA-PSS, as above). Anyone can check who sealed it with `unseal --info`, before
+  opening anything and without any private key.
+- **Custody:** the sealing is an `evidence_sealed` entry in the case's custody ledger,
+  with the recipient's key fingerprint and the package's SHA-256.
+
+```bash
+cli.py keygen --name "District Court" --key court.pem      # the recipient, once
+cli.py seal --out out/CASE --to court.pub.pem --note "for the trial court"
+cli.py unseal out/CASE/sealed/<package>.adseal --info --trust examiner.pub.pem
+cli.py unseal <package>.adseal --key court.pem --dest opened/ --trust examiner.pub.pem
+```
+
+By default a package carries the record a recipient needs to check the case: the
+report, the scan report, the ledger, the signatures, the certificate, the parses, the
+timeline and the carve manifests. Footage is added with `--include carve/<clip>`.
+
+Opening is all-or-nothing, and leaves nothing behind if any of these fails, in order:
+
+1. the sender's signature;
+2. the recipient key;
+3. AES-GCM authentication of the whole package;
+4. the SHA-256 of every file.
+
+It never opens into a folder that already holds files. Tar entries carry no user or
+group names, and no path can climb out of the destination.
