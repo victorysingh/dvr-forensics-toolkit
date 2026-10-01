@@ -4,7 +4,7 @@
 // `parser_status` is the weakest evidence behind a parser, never better - so
 // it sits on every card, not only the winner's.
 import { Section, Card, DL, Pill, ConfBar, Empty, Code } from "../components/index.jsx";
-import { num, pct } from "../lib/format.js";
+import { num, pct, plural } from "../lib/format.js";
 
 export default function Vendors({ c, vendorInfo }) {
   const rows = c.vendors || [];
@@ -27,10 +27,10 @@ export default function Vendors({ c, vendorInfo }) {
               </span>
             </div>
             <p className="dim text-[12.5px] mt-2 mb-3">
-              {num(top.hit_count)} signature hit(s) across the scanned region.
+              {plural(top.hit_count, "signature hit")} across the scanned region.
               Confidence is the detector's own score, not a probability of guilt.
             </p>
-            <h3 className="dim text-[13px] uppercase font-semibold mb-1.5">Evidence strings</h3>
+            <h3 className="micro mb-1.5">Evidence strings</h3>
             <ul className="font-mono text-[12px] leading-relaxed list-disc pl-5 space-y-0.5">
               {(top.evidence || []).map((e, i) => <li key={i}>{e}</li>)}
             </ul>

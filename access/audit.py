@@ -51,12 +51,15 @@ ACCESS_ACTIVATED = "access.activated"
 ACCESS_DENIED = "access.denied"
 SESSION_ROTATED = "access.session_rotated"
 RATE_LIMITED = "access.rate_limited"
+MAIL_SENT = "access.mail_sent"
+MAIL_FAILED = "access.mail_failed"
+MAIL_SKIPPED = "access.mail_skipped"
 
 ACTIONS = (
     LOGIN_OK, LOGIN_FAIL, LOGOUT, LOCKOUT, SIGNUP, USER_CREATED,
     USER_DISABLED, REQUEST_CREATED, REQUEST_APPROVED, REQUEST_REJECTED,
     REQUEST_REVOKED, REQUEST_EXPIRED, ACCESS_ACTIVATED, ACCESS_DENIED,
-    SESSION_ROTATED, RATE_LIMITED,
+    SESSION_ROTATED, RATE_LIMITED, MAIL_SENT, MAIL_FAILED, MAIL_SKIPPED,
 )
 
 #: The ledger's `case_id` column is not a case here; it says which log this is

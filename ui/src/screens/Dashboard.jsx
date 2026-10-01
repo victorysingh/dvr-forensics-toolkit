@@ -3,7 +3,7 @@
 // Every KPI names the file it was read from.  Nothing here is computed from
 // anything but load_case's own numbers.
 import { Kpi, Section, Card, DL, Pill, Hash, Empty } from "../components/index.jsx";
-import { bytes, num, pct, camColor } from "../lib/format.js";
+import { bytes, num, pct, camColor, plural, utcTime } from "../lib/format.js";
 
 export default function Dashboard({ c }) {
   if (!c.scan && !c.in_progress) {
@@ -81,15 +81,15 @@ export default function Dashboard({ c }) {
         {c.timeline && (
           <Kpi label="Timeline"
             value={(tl.indexed || 0) + (tl.unindexed || 0) + (tl.remnant || 0)}
-            sub={`${tl.indexed || 0} indexed · ${tl.unindexed || 0} unindexed · ${
-              (c.timeline.gaps || []).length} gap(s)`}
+            sub={`${num(tl.indexed)} indexed · ${num(tl.unindexed)} unindexed · ${
+              plural((c.timeline.gaps || []).length, "gap")}`}
             src="timeline.json" />
         )}
 
         {an && (
           <Kpi label="AI leads" lead
             value={Object.values(an.totals || {}).reduce((a, b) => a + b, 0)}
-            sub={`${an.clips} clip(s) · ${num(an.frames_analysed)} frames analysed`}
+            sub={`${plural(an.clips, "clip")} · ${num(an.frames_analysed)} frames analysed`}
             src="analytics/analytics.json" />
         )}
 
@@ -108,7 +108,7 @@ export default function Dashboard({ c }) {
             ["Organisation", ci.organization || "—"],
             ["Device", <span className="font-mono break-all">{s?.device?.path || "—"}</span>],
             ["Model", s?.device?.model || "—"],
-            ["Acquired", <>{s?.generated_utc || "—"} <span className="dim">UTC</span></>],
+            ["Acquired", <>{utcTime(s?.generated_utc)} <span className="dim">UTC</span></>],
             ["Tool", `${s?.tool || ""} ${s?.tool_version || ""}`],
           ]} />
         </Card>

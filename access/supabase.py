@@ -284,10 +284,10 @@ class SupabaseStore:
 
     # -- users -------------------------------------------------------------
     def create_user(self, username: str, password_hash: str,
-                    role: str = ROLE_USER) -> dict:
+                    role: str = ROLE_USER, email: str = "") -> dict:
         status, payload = self._insert(USERS, {
             "username": username, "password_hash": password_hash,
-            "role": role, "created_utc": stamp()})
+            "role": role, "created_utc": stamp(), "email": email or None})
         if status == 409 and _code(payload) == UNIQUE_VIOLATION:
             raise UsernameTaken("username already exists: " + str(username))
         if status != 201:
@@ -313,6 +313,21 @@ class SupabaseStore:
 
     def set_role(self, user_id: int, role: str) -> None:
         self._update(USERS, _where(id=("eq", user_id)), {"role": role}, select="id")
+
+    def set_email(self, user_id: int, email: str) -> None:
+        self._update(USERS, _where(id=("eq", user_id)), {"email": email or None},
+                     select="id")
+
+    def user_by_email(self, email: str) -> Optional[dict]:
+        """Addresses are stored lower-case, so this is an exact match."""
+        return self._one(USERS, _where(email=("eq", (email or "").lower())))
+
+    def admin_contacts(self) -> list[dict]:
+        """Enabled administrators with an address on file: who hears of a request."""
+        rows = self._select(USERS, _where(role=("eq", ROLE_ADMIN), disabled=("eq", 0),
+                                          email=("not.is", "null")),
+                            order="username.asc", select="username,email")
+        return [r for r in rows if r.get("email")]
 
     def set_disabled(self, user_id: int, disabled: bool) -> None:
         self._update(USERS, _where(id=("eq", user_id)),

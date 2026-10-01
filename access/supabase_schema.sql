@@ -32,8 +32,11 @@ create table if not exists public.access_users (
     failed_count     integer not null default 0,
     first_fail_utc   text collate "C",
     locked_until_utc text collate "C",
-    disabled         integer not null default 0 check (disabled in (0, 1))
+    disabled         integer not null default 0 check (disabled in (0, 1)),
+    email            text
 );
+-- Added 1 Oct 2026 for the mail notices; brings a table made earlier up to date.
+alter table public.access_users add column if not exists email text;
 
 create table if not exists public.access_requests (
     id                  bigint generated always as identity primary key,
@@ -197,7 +200,8 @@ $$;
 create or replace function public.access_list_requests(
     p_statuses text[], p_limit integer, p_user_id bigint)
 returns jsonb language sql stable set search_path = '' as $$
-    select coalesce(jsonb_agg(to_jsonb(r) || jsonb_build_object('username', u.username)
+    select coalesce(jsonb_agg(to_jsonb(r) || jsonb_build_object('username', u.username,
+                                                              'email', u.email)
                               order by r.id desc), '[]'::jsonb)
       from (select * from public.access_requests
              where (coalesce(cardinality(p_statuses), 0) = 0

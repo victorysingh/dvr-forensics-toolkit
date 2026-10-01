@@ -13,6 +13,14 @@ export function bytes(n) {
 
 export const num = (n) => Number(n || 0).toLocaleString("en-US");
 
+// "1 clip", "2,025 clips": a count and its noun, never "clip(s)".
+export const plural = (n, word, many = word + "s") =>
+  `${num(n)} ${Number(n) === 1 ? word : many}`;
+
+// A UTC stamp as written by the pipeline (2026-09-25T06:34:57.298Z), shown
+// as 2026-09-25 06:34:57 for a reader who sees "UTC" printed beside it.
+export const utcTime = (s) => (s ? String(s).replace("T", " ").replace(/(\.\d+)?Z$/, "") : "—");
+
 export function dur(s) {
   s = Math.round(Number(s) || 0);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);

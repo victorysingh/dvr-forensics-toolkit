@@ -3,7 +3,7 @@
 // The field-provenance table is the point of this screen: it shows that
 // every field above was read from a documented offset, and cites the source.
 import { Section, Card, DL, Pill, Empty, DataTable, Kpi } from "../components/index.jsx";
-import { num, bytes, hex, dur, clockTime, camColor } from "../lib/format.js";
+import { num, bytes, hex, dur, clockTime, camColor, plural } from "../lib/format.js";
 
 export default function Recordings({ c }) {
   const p = c.parse;
@@ -36,7 +36,7 @@ export default function Recordings({ c }) {
         hint={<>{p.file} &middot; <Pill status={p.validation_status} /></>}>
         <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(215px,1fr))]">
           <Kpi label="Recordings" value={p.recordings_total}
-            sub={`${Object.keys(cams).length} camera(s)`} src={p.file} />
+            sub={plural(Object.keys(cams).length, "camera")} src={p.file} />
           <Kpi label="Remnants" value={p.remnants_total}
             sub="index entries with no live recording" src={p.file} />
           {p.parser_rule && (
@@ -45,7 +45,7 @@ export default function Recordings({ c }) {
         </div>
         {(p.summary || []).length > 0 && (
           <Card className="mt-3">
-            <h3 className="dim text-[13px] uppercase font-semibold mb-2">Volume</h3>
+            <h3 className="micro mb-2">Volume</h3>
             {/* the parser writes [key, value] pairs; an empty key continues the row above */}
             <div className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5 text-[12.5px]">
               {p.summary.map((x, i) => {
