@@ -5215,6 +5215,15 @@ def test_access(tmp: str) -> None:
     check("the waiting room's poll starts only once the page it paints exists",
           "DOMContentLoaded" in wait_js
           and nasty.index("<script") < nasty.index('id="dot"'))
+    form = pages.signup_page().decode()
+    check("the sign-up form asks for an email, required, styled like the other fields",
+          'name="email"' in form and "optional" not in form.lower()
+          and 'type="email"' in form and " required" in form[form.index('name="email"'):][:220]
+          and "input[type=email]" in form)
+    check("a sign-up from the form without an address is refused, even with mail off",
+          not ac.signup("noemail", "noemailpassword1", require_email=True).ok
+          and ac.signup("withemail", "withemailpass1", email="w@example.org",
+                        require_email=True).ok)
     check("every gate page carries the console's own tab icon, inline",
           all('rel="icon" href="data:image/svg+xml' in pg for pg in (
               nasty, pages.login_page().decode(), pages.signup_page().decode())))
@@ -5513,6 +5522,14 @@ def test_signing(tmp: str) -> None:
         with open(os.path.join(d, "report.json"), "w", encoding="utf-8") as fh:
             json.dump({"summary": "synthetic"}, fh)
         return d
+
+    from report.case import list_cases
+    marked = make_case("synthetic")
+    open(os.path.join(marked, "SYNTHETIC"), "w").write("made up\n")
+    real = make_case("realcase")
+    flags = {c["id"]: c["synthetic"] for c in list_cases(tmp)}
+    check("a case says it is synthetic only when its folder carries a SYNTHETIC file",
+          flags.get("sig-synthetic") is True and flags.get("sig-realcase") is False)
 
     if not signing.available():
         d = make_case("nocrypto")

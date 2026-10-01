@@ -137,10 +137,14 @@ function TopBar({ cases, caseId, screen, c }) {
       {live && <Badge tone="live">LIVE {pct(live.fraction)}</Badge>}
       {ver && <Badge tone={ver.valid ? "ok" : "bad"}>
         {ver.valid ? "chain intact" : "chain broken"}</Badge>}
-      {isDemo()
+      {isDemo() && cases.length && cases.every((x) => x.synthetic)
         ? <Badge tone="warn" title="A public demonstration of the interface, served from static
             snapshots of synthetic cases. Not an evidence workstation, and not real evidence.">
             demo &middot; synthetic data</Badge>
+        : isDemo()
+        ? <Badge tone="warn" title="Served over the internet for review, behind sign-in and an
+            administrator's approval. The tool itself runs offline on an examiner's machine.">
+            hosted &middot; approved access</Badge>
         : <span className="hidden sm:inline-flex">
             <Badge title="Binds 127.0.0.1, never opens an evidence device, never writes">
               offline &middot; read-only</Badge></span>}
@@ -356,12 +360,18 @@ function CasesHome({ cases }) {
       {isDemo() && (
         <div className="rounded-xl border border-synthetic/45 bg-synthetic/10 px-3.5 py-3 mb-4
           text-[12.5px]">
-          <b className="text-synthetic">Demonstration build.</b> These cases are
-          <b> synthetic disks generated for the demo</b> &mdash; not evidence, and not
-          vendor samples. The screens are the real interface reading real pipeline
-          output; the acquisition, carving and custody chain all ran, on made-up disks.
-          The actual tool runs offline on an examiner's own machine and binds the
-          loopback interface only.
+          {cases.every((x) => x.synthetic) ? (<>
+            <b className="text-synthetic">Demonstration build.</b> These cases are
+            <b> synthetic disks generated for the demo</b> &mdash; not evidence, and not
+            vendor samples. The screens are the real interface reading real pipeline
+            output; the acquisition, carving and custody chain all ran, on made-up disks.
+            The actual tool runs offline on an examiner's own machine and binds the
+            loopback interface only.</>) : (<>
+            <b className="text-synthetic">Hosted for review, behind approval.</b> The cases
+            are the team's own acquisitions of two real DVR drives, as the pipeline
+            produced them; any marked <b>synthetic</b> were generated for the demo. The raw
+            recovered video stays on the examiner's machine. The tool itself runs offline
+            and binds the loopback interface only; this copy is served for review.</>)}
         </div>
       )}
       <div className="flex items-end justify-between gap-4 flex-wrap mb-4">
@@ -453,6 +463,9 @@ function CaseCard({ c }) {
           : <span className="hairline border dim rounded-full px-2 py-px text-[10.5px]
               whitespace-nowrap">vendor not identified</span>}
       </div>
+      {c.synthetic && (
+        <div className="text-synthetic font-mono text-[10.5px] uppercase tracking-wide -mt-1 mb-1.5"
+          title="Generated for the demo from a made-up disk - not evidence">synthetic disk</div>)}
       <div className="text-[17px] font-semibold break-all group-hover:text-accent">{c.id}</div>
       <div className="dim font-mono text-[12px] mt-0.5 truncate" title={c.device}>
         {bytes(c.size_bytes)} &middot; {shortDevice(c.device)}</div>

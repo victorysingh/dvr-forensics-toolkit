@@ -265,7 +265,7 @@ class Gate:
             form_token, cookie = self._form_token(h)
             return self._html(h, pages.signup_page(
                 csrf=csrf_token(form_token), min_len=MIN_PASSWORD_LEN,
-                require_email=self.ac.mailer is not None), cookie=cookie)
+                require_email=True), cookie=cookie)
 
         if tail == "logout" and method == "POST":
             token = self._token(h)
@@ -330,7 +330,7 @@ class Gate:
         form = self._form(h)
         token = self._token(h)
         keep = dict(username=form.get("username", ""), email=form.get("email", ""),
-                    min_len=MIN_PASSWORD_LEN, require_email=self.ac.mailer is not None)
+                    min_len=MIN_PASSWORD_LEN, require_email=True)
         if not check_csrf(token, form.get("csrf", "")):
             fresh, cookie = self._form_token(h)
             return self._html(h, pages.signup_page(
@@ -342,7 +342,7 @@ class Gate:
                 **keep), code=400)
         r = self.ac.signup(form.get("username", ""), form.get("password", ""),
                            self._client(h), self._agent(h),
-                           email=form.get("email", ""))
+                           email=form.get("email", ""), require_email=True)
         if not r.ok:
             return self._html(h, pages.signup_page(
                 error=r.message, csrf=csrf_token(token), **keep), code=400)
