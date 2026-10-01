@@ -5473,10 +5473,196 @@ def test_access_supabase(tmp: str) -> None:
                 os.environ[k] = v
 
 
+def test_signing(tmp: str) -> None:
+    """Examiner signatures over a case (core/signing.py, acquire/signatures.py).
+
+    What a signature must catch - a changed output, a rewritten ledger, a
+    statement edited behind the signature, a key swapped in - and what it must
+    not cry wolf over: an output made after signing, or a report regenerated
+    and signed again.  With the optional `cryptography` package absent, the
+    tool has to say so and carry on.
+    """
+    print("\n[examiner signatures]")
+    from acquire import signatures as SG
+    from acquire.ledger import CustodyLedger
+    from core import signing
+
+    def make_case(name: str) -> str:
+        d = os.path.join(tmp, "sig-" + name)
+        os.makedirs(d, exist_ok=True)
+        led = CustodyLedger(os.path.join(d, "custody_ledger.jsonl"), actor="examiner",
+                            case_id="SIG-" + name)
+        led.append("device_opened", {"serial": "TEST0001"})
+        led.append("scan_completed", {"blocks": 8}, data_hash="ab" * 32)
+        with open(os.path.join(d, "scan_report.json"), "w", encoding="utf-8") as fh:
+            json.dump({"tool_version": "test", "case": {"case_id": "SIG-" + name},
+                       "device": {"model": "SYNTH", "serial": "TEST0001", "size_bytes": 4096},
+                       "hashes": [{"algorithm": "sha256", "value": "cd" * 32,
+                                   "scope": "full_device", "length": 4096}],
+                       "merkle_root": "ab" * 32, "generated_utc": "2026-10-01T00:00:00.000Z"}, fh)
+        with open(os.path.join(d, "report.json"), "w", encoding="utf-8") as fh:
+            json.dump({"summary": "synthetic"}, fh)
+        return d
+
+    if not signing.available():
+        d = make_case("nocrypto")
+        os.makedirs(os.path.join(d, "signatures"))
+        with open(os.path.join(d, "signatures", "000_x.json"), "w") as fh:
+            fh.write("{}")
+        r = SG.verify_case(d)
+        check("without the cryptography package, signatures are reported, not judged",
+              r["signed"] and r.get("checked") is False and "cryptography" in r["message"])
+        print("  (skipped the rest - the optional 'cryptography' package is not installed)")
+        return
+
+    kdir = os.path.join(tmp, "sig-keys")
+    k = signing.generate("Examiner One", os.path.join(kdir, "one.pem"))
+    check("a key is RSA-3072, named, with a 64-hex fingerprint and a 16-hex id",
+          k["bits"] == 3072 and k["name"] == "Examiner One"
+          and len(k["fingerprint"]) == 64 and k["key_id"] == k["fingerprint"][:16])
+    if os.name == "posix":
+        check("the private key file is readable by its owner only",
+              (os.stat(k["path"]).st_mode & 0o077) == 0)
+    try:
+        signing.generate("Someone Else", k["path"])
+        check("an existing key is never overwritten", False)
+    except signing.SigningError:
+        check("an existing key is never overwritten", True)
+
+    locked = signing.generate("Examiner Two", os.path.join(kdir, "two.pem"),
+                              passphrase="a long passphrase")
+    saved_pp = os.environ.pop(signing.PASSPHRASE_ENV, None)
+    try:
+        for pp, want, label in ((None, "passphrase", "asks for its passphrase"),
+                                ("wrong one", "did not open", "refuses a wrong passphrase")):
+            try:
+                signing.load_signer(locked["path"], pp)
+                check(f"a protected key {label}", False)
+            except signing.SigningError as exc:
+                check(f"a protected key {label}", want in str(exc))
+        check("...and opens with the right one",
+              signing.load_signer(locked["path"], "a long passphrase").name == "Examiner Two")
+    finally:
+        if saved_pp is not None:
+            os.environ[signing.PASSPHRASE_ENV] = saved_pp
+
+    one = signing.load_signer(k["path"])
+    d = make_case("main")
+    first = SG.sign_case(d, one, reason="acquisition completed")
+    led = CustodyLedger(os.path.join(d, "custody_ledger.jsonl"))
+    last = led.entries[-1]
+    check("signing writes a statement and records it in the custody ledger",
+          os.path.exists(first["path"]) and last["action"] == "case_signed"
+          and last["data_hash"] == SG._sha256(first["path"])[0] and led.verify()["valid"])
+    check("the statement covers the device, the hashes, the root, the ledger head and the outputs",
+          first["statement"]["device"]["serial"] == "TEST0001"
+          and first["statement"]["acquisition"]["merkle_root"] == "ab" * 32
+          and first["statement"]["ledger"]["entries"] == 2
+          and {f["path"] for f in first["statement"]["files"]} == {"scan_report.json", "report.json"})
+
+    ok = SG.verify_case(d, [k["public_path"]])
+    check("a fresh signature verifies, and is trusted when its key is",
+          ok["valid"] and ok["signatures"][0]["trusted"] is True)
+    other = signing.generate("Stranger", os.path.join(kdir, "stranger.pem"))
+    strange = SG.verify_case(d, [other["public_path"]])
+    check("a valid signature by a key the verifier does not trust says so",
+          strange["valid"] and strange["signatures"][0]["trusted"] is False)
+
+    rp = os.path.join(d, "report.json")
+    original = open(rp, encoding="utf-8").read()
+    with open(rp, "w", encoding="utf-8") as fh:
+        fh.write(original.replace("synthetic", "edited"))
+    bad = SG.verify_case(d)
+    check("an output changed after signing fails, and is named",
+          not bad["valid"] and "report.json" in bad["signatures"][-1]["changed"])
+    with open(rp, "w", encoding="utf-8") as fh:
+        fh.write(original)
+    check("...and passes again once restored", SG.verify_case(d)["valid"])
+
+    with open(os.path.join(d, "parse_synth.json"), "w") as fh:
+        fh.write("{}")
+    later = SG.verify_case(d)
+    check("an output made after signing is not a failure - it is named as not yet signed",
+          later["valid"] and later["signatures"][-1]["unsigned_newer"] == ["parse_synth.json"])
+
+    with open(rp, "w", encoding="utf-8") as fh:
+        fh.write(original.replace("synthetic", "regenerated"))
+    second = SG.sign_case(d, one, reason="report generated")
+    both = SG.verify_case(d)
+    check("a regenerated report signed again: both statements verify, newest covers the change",
+          both["valid"] and len(both["signatures"]) == 2
+          and both["signatures"][-1]["files_checked"] == 3)
+
+    sig_file = second["path"]
+    rec = json.load(open(sig_file, encoding="utf-8"))
+    forged = json.loads(json.dumps(rec))
+    forged["statement"]["acquisition"]["merkle_root"] = "ee" * 32
+    json.dump(forged, open(sig_file, "w", encoding="utf-8"))
+    check("a statement edited behind its signature fails",
+          not SG.verify_case(d)["signatures"][-1]["signature_valid"])
+    swapped = json.loads(json.dumps(rec))
+    swapped["public_key_pem"] = open(other["public_path"], encoding="utf-8").read()
+    json.dump(swapped, open(sig_file, "w", encoding="utf-8"))
+    check("a different key swapped into a statement fails",
+          not SG.verify_case(d)["signatures"][-1]["signature_valid"])
+    json.dump(rec, open(sig_file, "w", encoding="utf-8"), indent=1, sort_keys=True)
+
+    lp = os.path.join(d, "custody_ledger.jsonl")
+    lines = open(lp, encoding="utf-8").read().splitlines(True)
+    with open(lp, "w", encoding="utf-8") as fh:
+        fh.writelines(lines[:1])
+    cut = SG.verify_case(d)
+    check("a ledger cut back behind a signed head fails",
+          not cut["valid"] and not cut["signatures"][0]["ledger_ok"])
+    with open(lp, "w", encoding="utf-8") as fh:
+        fh.writelines(lines)
+    try:
+        with open(lp, "a", encoding="utf-8") as fh:
+            fh.write(lines[-1].replace('"case_signed"', '"case_unsigned"'))
+        SG.sign_case(d, one)
+        check("a case whose ledger does not verify is never signed", False)
+    except signing.SigningError as exc:
+        check("a case whose ledger does not verify is never signed", "does not verify" in str(exc))
+    with open(lp, "w", encoding="utf-8") as fh:
+        fh.writelines(lines)
+
+    sp = os.path.join(d, "scan_report.json")
+    scan = json.load(open(sp, encoding="utf-8"))
+    scan["hashes"][0]["value"] = "00" * 32
+    json.dump(scan, open(sp, "w", encoding="utf-8"))
+    acq = SG.verify_case(d)
+    check("a changed acquisition hash fails every statement, not only the newest",
+          not acq["valid"] and all(not s["acquisition_ok"] for s in acq["signatures"]))
+
+    import contextlib
+    import io as _io
+    import cli as _cli
+    saved_key = os.environ.get(signing.KEY_ENV)
+    os.environ[signing.KEY_ENV] = locked["path"]
+    saved_pp = os.environ.pop(signing.PASSPHRASE_ENV, None)
+    try:
+        d2 = make_case("auto")
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _cli._auto_sign(d2, "report generated")
+        check("unattended signing with a protected key steps aside and says how to sign",
+              "not signed" in buf.getvalue() and "cli.py sign" in buf.getvalue()
+              and not os.path.isdir(os.path.join(d2, "signatures")))
+    finally:
+        if saved_key is None:
+            os.environ.pop(signing.KEY_ENV, None)
+        else:
+            os.environ[signing.KEY_ENV] = saved_key
+        if saved_pp is not None:
+            os.environ[signing.PASSPHRASE_ENV] = saved_pp
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     # seal keys go under the test folder, never into the examiner's own ~/.ps26150
     os.environ["PS26150_SEAL_KEY"] = os.path.join(tmp, "seal_keys", "suite.key")
+    # ...and no test scan is ever signed with the examiner's own key
+    os.environ["PS26150_SIGNING_KEY"] = os.path.join(tmp, "no_signing_key", "none.pem")
     try:
         test_merkle()
         test_ledger(tmp)
@@ -5546,6 +5732,7 @@ def main() -> int:
         test_godrej(tmp)
         test_daylight(tmp)
         test_access(tmp)
+        test_signing(tmp)
         test_access_supabase(tmp)
         test_dahua_real_media()
     finally:

@@ -2,5 +2,7 @@
 # The tool must run on an air-gapped forensic workstation.
 #
 # Optional, for later phases:
-# cryptography>=42.0      # Ed25519 report signing (Phase 2)
+# cryptography>=41        # examiner signatures: RSA-PSS over each case
+#                          (cli.py keygen / sign / verify; docs/SIGNING.md).
+#                          Without it every other command runs unchanged.
 # pytest>=8.0             # test runner (dev only)

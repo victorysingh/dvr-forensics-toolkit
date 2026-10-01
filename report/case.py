@@ -203,6 +203,12 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
                                "updated_utc": state.get("updated_utc"),
                                "fraction": done / size if size else 0.0}
     case["custody"] = {"entries": ledger.entries, "verify": verified, "head": ledger.head}
+    try:
+        from acquire.signatures import verify_case
+        case["signatures"] = verify_case(case_dir)
+    except Exception as exc:                               # noqa: BLE001
+        case["signatures"] = {"signed": False, "valid": False, "signatures": [],
+                              "message": f"signatures could not be checked: {exc}"}
 
     manifest = _load(j("preserved", "manifest.json"))
     if manifest:
