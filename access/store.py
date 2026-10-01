@@ -29,7 +29,7 @@ from access.policy import (ACTIVE, APPROVED, GRANTING_STATES, PENDING,
 
 FILENAME = "access.db"
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2          # 2: users.email, for the optional mail notices
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS users (
     failed_count     INTEGER NOT NULL DEFAULT 0,
     first_fail_utc   TEXT,
     locked_until_utc TEXT,
-    disabled         INTEGER NOT NULL DEFAULT 0
+    disabled         INTEGER NOT NULL DEFAULT 0,
+    email            TEXT
 );
 
 CREATE TABLE IF NOT EXISTS requests (
@@ -135,17 +136,22 @@ class Store:
         conn = self._conn()
         with conn:
             conn.executescript(SCHEMA)
+            # A store made before the email column gains it in place; the
+            # rows already there simply have no address.
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+            if "email" not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
             conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
 
     # -- users -------------------------------------------------------------
     def create_user(self, username: str, password_hash: str,
-                    role: str = ROLE_USER) -> dict:
+                    role: str = ROLE_USER, email: str = "") -> dict:
         try:
             with self._conn() as c:
                 cur = c.execute(
-                    "INSERT INTO users (username, password_hash, role, created_utc) "
-                    "VALUES (?,?,?,?)",
-                    (username, password_hash, role, stamp()))
+                    "INSERT INTO users (username, password_hash, role, created_utc, email) "
+                    "VALUES (?,?,?,?,?)",
+                    (username, password_hash, role, stamp(), email or None))
         except sqlite3.IntegrityError as exc:
             raise UsernameTaken("username already exists: " + str(username)) from exc
         return self.user_by_id(cur.lastrowid)            # type: ignore[arg-type]
@@ -176,6 +182,22 @@ class Store:
     def set_role(self, user_id: int, role: str) -> None:
         with self._conn() as c:
             c.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+
+    def set_email(self, user_id: int, email: str) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE users SET email=? WHERE id=?", (email or None, user_id))
+
+    def user_by_email(self, email: str) -> Optional[dict]:
+        """Addresses are stored lower-case, so this is an exact match."""
+        return _dict(self._conn().execute(
+            "SELECT * FROM users WHERE email=? LIMIT 1", ((email or "").lower(),)).fetchone())
+
+    def admin_contacts(self) -> list[dict]:
+        """Enabled administrators with an address on file: who hears of a request."""
+        return [dict(r) for r in self._conn().execute(
+            "SELECT username, email FROM users WHERE role=? AND disabled=0 "
+            "AND email IS NOT NULL AND email != '' ORDER BY username",
+            (ROLE_ADMIN,)).fetchall()]
 
     def set_disabled(self, user_id: int, disabled: bool) -> None:
         with self._conn() as c:
@@ -238,7 +260,7 @@ class Store:
 
     def list_requests(self, statuses: tuple = (), limit: int = 200,
                       user_id: Optional[int] = None) -> list[dict]:
-        sql = ("SELECT r.*, u.username FROM requests r "
+        sql = ("SELECT r.*, u.username, u.email FROM requests r "
                "JOIN users u ON u.id = r.user_id")
         where: list[str] = []
         args: list[Any] = []

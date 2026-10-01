@@ -1076,11 +1076,14 @@ def cmd_serve(args) -> int:
         serve(args.out, args.port, require_access=args.require_access,
               access_dir=args.access_dir, allow_signup=not args.no_signup,
               access_store=args.access_store, supabase_env=args.supabase_env,
-              cookie_secure=args.cookie_secure, trust_proxy=args.trust_proxy)
+              cookie_secure=args.cookie_secure, trust_proxy=args.trust_proxy,
+              mail=args.mail, mail_env=args.mail_env)
     except Exception as exc:                               # noqa: BLE001
         from access.store import StoreError   # imported only if the gate was asked for
         if isinstance(exc, StoreError):
             raise SystemExit(f"  [!] access store: {exc}")
+        if type(exc).__name__ == "MailConfigError":
+            raise SystemExit(f"  [!] mail: {exc}")
         raise
     return 0
 
@@ -1136,13 +1139,16 @@ def cmd_access_admin(args) -> int:
     if existing:
         r = ac.set_role(name, "admin", actor="cli")
         print(f"  {'[+]' if r.ok else '[!]'} {r.message}")
+        if r.ok and args.email:
+            m = ac.set_email(name, args.email, actor="cli")
+            print(f"  {'[+]' if m.ok else '[!]'} {m.message}")
         if r.ok and args.password_too:
             p = ac.set_password(name, _ask_password(
                 from_stdin=args.password_stdin), actor="cli")
             print(f"  {'[+]' if p.ok else '[!]'} {p.message}")
         return 0 if r.ok else 1
     r = ac.create_user(name, _ask_password(from_stdin=args.password_stdin),
-                       role="admin", actor="cli")
+                       role="admin", actor="cli", email=args.email)
     print(f"  {'[+]' if r.ok else '[!]'} {r.message}")
     if r.ok:
         print(f"      {name} may now approve requests at /admin")
@@ -1157,11 +1163,11 @@ def cmd_access_user(args) -> int:
         if not users:
             print("  no accounts yet")
             return 0
-        print(f"  {'USER':<20} {'ROLE':<6} {'STATE':<9} LAST SIGN-IN")
+        print(f"  {'USER':<20} {'ROLE':<6} {'STATE':<9} {'EMAIL':<30} LAST SIGN-IN")
         for u in users:
             state = "disabled" if u["disabled"] else "enabled"
             print(f"  {u['username']:<20} {u['role']:<6} {state:<9} "
-                  f"{u['last_login_utc'] or 'never'}")
+                  f"{(u.get('email') or '-'):<30} {u['last_login_utc'] or 'never'}")
         return 0
 
     if not args.username:
@@ -1171,7 +1177,7 @@ def cmd_access_user(args) -> int:
 
     if args.action == "add":
         r = ac.create_user(name, _ask_password(from_stdin=args.password_stdin),
-                           role="user", actor="cli")
+                           role="user", actor="cli", email=args.email)
     elif args.action == "passwd":
         r = ac.set_password(name, _ask_password(from_stdin=args.password_stdin),
                             actor="cli")
@@ -1179,6 +1185,8 @@ def cmd_access_user(args) -> int:
         r = ac.set_disabled(name, True, actor="cli")
     elif args.action == "enable":
         r = ac.set_disabled(name, False, actor="cli")
+    elif args.action == "email":
+        r = ac.set_email(name, args.email, actor="cli")
     else:
         print("  [!] unknown action")
         return 2
@@ -2772,6 +2780,14 @@ def main() -> int:
                    help="with --require-access, mark the session cookie Secure: "
                         "for a deployment reached over HTTPS through a proxy "
                         "(a browser drops a Secure cookie on plain HTTP)")
+    p.add_argument("--mail", action="store_true",
+                   help="with --require-access, email notices: 'account created' "
+                        "to a new user, 'access requested' to every administrator "
+                        "with an address (see access/mail.py; needs SMTP settings)")
+    p.add_argument("--mail-env", default="",
+                   help="with --mail: a file holding SMTP_HOST, SMTP_PORT, SMTP_USER, "
+                        "SMTP_PASSWORD, MAIL_FROM and PUBLIC_URL, read when they are "
+                        "not in the environment (default ~/.config/anokhidrishti/mail.env)")
     p.add_argument("--trust-proxy", action="store_true",
                    help="with --require-access, key the per-address rate limits "
                         "on X-Forwarded-For: only behind a reverse proxy, where "
@@ -2794,6 +2810,9 @@ def main() -> int:
     p.add_argument("--username", required=True)
     p.add_argument("--password-too", action="store_true",
                    help="also set a new password when promoting")
+    p.add_argument("--email", default="",
+                   help="the administrator's address, where 'access requested' "
+                        "notices go (with serve --mail)")
     p.add_argument("--password-stdin", action="store_true",
                    help="read the password from the first line of stdin "
                         "instead of prompting (getpass cannot be piped on "
@@ -2803,8 +2822,11 @@ def main() -> int:
     p = sub.add_parser("access-user", help="list or manage access accounts")
     _access_args(p)
     p.add_argument("--action", default="list",
-                   choices=["list", "add", "passwd", "disable", "enable"])
+                   choices=["list", "add", "passwd", "disable", "enable", "email"])
     p.add_argument("--username", default="")
+    p.add_argument("--email", default="",
+                   help="with add: the new account's address; with --action email: "
+                        "set (or, empty, remove) it")
     p.add_argument("--password-stdin", action="store_true",
                    help="read the password from the first line of stdin "
                         "instead of prompting")

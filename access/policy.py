@@ -57,6 +57,12 @@ RATE_AUTH_BURST_PER_MIN = 60        # per address, across all accounts
 RATE_DECIDE_PER_MIN = 60            # an administrator clearing a real queue
 RATE_GENERAL_PER_MIN = 300          # everything else, including status polls
 
+# -- mail notices (access/mail.py): what one address, or the whole server,
+# may cause to be sent, so the notices cannot be turned into a mail bomb ---
+SIGNUPS_PER_HOUR_PER_ADDRESS = 5    # new accounts from one client address
+MAIL_PER_HOUR = 60                  # everything this server sends, in total
+MAIL_PER_RECIPIENT_PER_HOUR = 6     # to any one account, administrators included
+
 # -- credentials ----------------------------------------------------------
 MIN_PASSWORD_LEN = 10
 MAX_PASSWORD_LEN = 256              # scrypt is not free; refuse a memory bomb

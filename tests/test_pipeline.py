@@ -5208,6 +5208,16 @@ def test_access(tmp: str) -> None:
           "<img src=x" not in nasty and "&lt;img" in nasty)
     check("no page in the gate reaches for anything off this machine",
           not any(s in nasty for s in ("http://", "https://", "//cdn")))
+    # The waiting room's script sits in <head>.  Run at once, it found none of
+    # the elements it paints, threw on the first poll inside a swallowed
+    # promise, and the room never moved - approved or not (fixed 1 Oct).
+    wait_js = nasty[nasty.index("<script"):nasty.index("</script>")]
+    check("the waiting room's poll starts only once the page it paints exists",
+          "DOMContentLoaded" in wait_js
+          and nasty.index("<script") < nasty.index('id="dot"'))
+    check("every gate page carries the console's own tab icon, inline",
+          all('rel="icon" href="data:image/svg+xml' in pg for pg in (
+              nasty, pages.login_page().decode(), pages.signup_page().decode())))
 
 
 def test_access_supabase(tmp: str) -> None:
@@ -5811,6 +5821,179 @@ def test_sealed(tmp: str) -> None:
                   for m in t.getmembers()))
 
 
+def test_access_mail(tmp: str) -> None:
+    """The gate's email notices (access/mail.py), with a fake mailer.
+
+    Who hears what and when, what a notice may never carry, and the budgets
+    that stop the notices being turned into a mail bomb or a lockout alarm
+    that floods an inbox.  Nothing here touches a network.
+    """
+    print("\n[access mail notices]")
+
+    import sqlite3 as _sq
+    from access import audit as A
+    from access import mail as M
+    from access.service import AccessControl
+    from access.store import Store
+
+    class FakeMailer:
+        def __init__(self, fail=False):
+            self.config = M.MailConfig("smtp.example.org", 465, "u", "pw",
+                                       "notices@example.org", "https://demo.example.org")
+            self.sent, self.fail = [], fail
+
+        def send(self, to, subject, text, html_body, on_done=None):
+            if self.fail:
+                raise OSError("connection refused")
+            self.sent.append({"to": to, "subject": subject, "text": text, "html": html_body})
+            if on_done:
+                on_done(True, "")
+
+    mailer = FakeMailer()
+    ac = AccessControl(os.path.join(tmp, "access-mail"), mailer=mailer)
+    ac.create_user("chief", "chiefpassword1", role="admin", email="Chief@Example.org")
+    mailer.sent.clear()
+
+    check("with mail on, signing up without an address is refused",
+          not ac.signup("noaddr", "noaddrpassword1").ok)
+    check("an address that is not an address is refused",
+          not ac.signup("badaddr", "badaddrpassword1", email="not-an-email").ok
+          and not ac.signup("badaddr2", "badaddrpassword1",
+                            email="a@b.co\r\nBcc: x@y.z").ok)
+    r = ac.signup("alice", "alicepassword1", "10.0.0.5", email="Alice@Example.org")
+    sent = mailer.sent[-1] if mailer.sent else {}
+    check("signing up mails the new user an 'account created' notice",
+          r.ok and sent.get("to") == "alice@example.org"
+          and "alice" in sent.get("subject", ""))
+    check("the notice holds no password, and no sign-in link that works on its own",
+          "alicepassword1" not in sent.get("text", "") + sent.get("html", "")
+          and "https://demo.example.org/access/login" in sent.get("text", ""))
+    check("one account per address (any case), so a notice cannot be aimed at an inbox",
+          not ac.signup("alice2", "alicepassword1", email="ALICE@example.org").ok)
+
+    mailer.sent.clear()
+    login = ac.login("alice", "alicepassword1", "10.0.0.5", "test")
+    req = login.data.get("request") or {}
+    to_admin = [m for m in mailer.sent if m["to"] == "chief@example.org"]
+    body = to_admin[0]["text"] + to_admin[0]["html"] if to_admin else ""
+    check("a new access request mails every administrator with an address",
+          login.ok and len(to_admin) == 1 and req.get("public_id", "?") in to_admin[0]["subject"])
+    check("...with the panel's row: request, user, email, asked, from",
+          all(s in body for s in (req.get("public_id", "?"), "alice",
+                                  "alice@example.org", "10.0.0.5", " UTC")))
+    import re as _re2
+    check("...and nothing that decides it: no token, and the only link is /admin itself",
+          login.data.get("token", "?") not in body and "/admin/decide" not in body
+          and set(_re2.findall(r"https?://[^\s\"'<>]+", body))
+              == {"https://demo.example.org/admin"})
+    mailer.sent.clear()
+    ac.login("alice", "alicepassword1", "10.0.0.5", "test")
+    check("signing in again onto the same live request does not mail the admins again",
+          not [m for m in mailer.sent if m["to"] == "chief@example.org"])
+
+    mailer.sent.clear()
+    ac.rate.reset()
+    for _ in range(5):
+        ac.login("alice", "wrong password here", "203.0.113.9")
+    locked = [m for m in mailer.sent if m["to"] == "alice@example.org"]
+    check("a lockout mails the account's owner, naming where the attempts came from",
+          len(locked) == 1 and "locked" in locked[0]["subject"]
+          and "203.0.113.9" in locked[0]["text"])
+
+    entries = ac.audit.reread().entries
+    check("the audit log names recipients by username, never by address",
+          any(e["action"] == A.MAIL_SENT for e in entries)
+          and not any("@example.org" in json.dumps(e) for e in entries))
+
+    # -- budgets ------------------------------------------------------------
+    ac.rate.reset()
+    mailer.sent.clear()
+    for i in range(8):
+        ac._mail("test", "chief", "chief@example.org", ("s", "t", "h"))
+    check("one recipient gets at most 6 notices an hour; the rest are skipped and logged",
+          len(mailer.sent) == 6
+          and sum(1 for e in ac.audit.reread().entries[-3:]
+                  if e["action"] == A.MAIL_SKIPPED) == 2)
+    ac.rate.reset()
+    made = [ac.signup(f"spam{i}", "spampassword12", "198.51.100.7",
+                      email=f"spam{i}@example.org").ok for i in range(7)]
+    check("one client address can make at most 5 accounts an hour",
+          made == [True] * 5 + [False] * 2)
+
+    # -- failure and absence ------------------------------------------------
+    broken = AccessControl(os.path.join(tmp, "access-mail-broken"), mailer=FakeMailer(fail=True))
+    ok = broken.signup("bob", "bobpassword123", email="bob@example.org").ok
+    check("a mail server that is down never blocks a signup; the failure is logged",
+          ok and any(e["action"] == A.MAIL_FAILED for e in broken.audit.reread().entries))
+    quiet = AccessControl(os.path.join(tmp, "access-mail-noadmin"), mailer=FakeMailer())
+    quiet.create_user("lonely", "lonelypassword1", role="admin")        # no address
+    quiet.signup("carol", "carolpassword1", email="carol@example.org")
+    quiet.login("carol", "carolpassword1")
+    check("with no administrator address on file, the request notice is skipped, and logged",
+          any(e["action"] == A.MAIL_SKIPPED and e["detail"].get("reason", "").startswith("no admin")
+              for e in quiet.audit.reread().entries))
+    off = AccessControl(os.path.join(tmp, "access-mail-off"))
+    check("with mail off (the workstation), an address is optional",
+          off.signup("dave", "davepassword12").ok)
+
+    # -- the message itself ---------------------------------------------------
+    hostile = M.access_requested({"public_id": "123456789", "remote_ip": "<b>x</b>",
+                                  "created_utc": "2026-10-01T03:41:15.008Z"},
+                                 {"username": "eve", "email": "eve@example.org"}, "")
+    check("anything a client sent is escaped in the HTML notice",
+          "<b>x</b>" not in hostile[2] and "&lt;b&gt;x&lt;/b&gt;" in hostile[2])
+    captured = []
+    real = M.Mailer(M.MailConfig("smtp.example.org", 465, "u", "pw", "notices@example.org"),
+                    background=False)
+    real._deliver = captured.append
+    real.send("x@example.org", "Subject", "plain", "<p>html</p>")
+    msg = captured[0] if captured else None
+    check("a sent message names the product, and carries plain text and HTML",
+          msg is not None and msg["From"] == "AnokhiDrishti <notices@example.org>"
+          and msg.get_content_type() == "multipart/alternative")
+
+    # -- configuration ------------------------------------------------------
+    saved = {k: os.environ.pop(k, None) for k in M.KEYS}
+    try:
+        env = os.path.join(tmp, "mail.env")
+        with open(env, "w", encoding="utf-8") as fh:
+            fh.write("SMTP_HOST=smtp.example.org\nSMTP_PORT=587\nSMTP_USER=u@example.org\n"
+                     "SMTP_PASSWORD=s3cret-app-password\nPUBLIC_URL=https://demo.example.org/\n")
+        os.chmod(env, 0o600)
+        cfg = M.load_mail_config(env)
+        check("mail settings load from a private file; the password never shows in repr",
+              cfg.port == 587 and cfg.sender == "u@example.org"
+              and cfg.public_url == "https://demo.example.org"
+              and "s3cret" not in repr(cfg))
+        if os.name == "posix":
+            os.chmod(env, 0o644)
+            try:
+                M.load_mail_config(env)
+                check("a mail settings file others can read is refused", False)
+            except M.MailConfigError as exc:
+                check("a mail settings file others can read is refused",
+                      "chmod 600" in str(exc) and "s3cret" not in str(exc))
+    finally:
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+
+    # -- a store made before the column --------------------------------------
+    old = os.path.join(tmp, "access-old", "access.db")
+    os.makedirs(os.path.dirname(old), exist_ok=True)
+    con = _sq.connect(old)
+    con.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE,"
+                " password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user',"
+                " created_utc TEXT NOT NULL, last_login_utc TEXT, failed_count INTEGER NOT NULL"
+                " DEFAULT 0, first_fail_utc TEXT, locked_until_utc TEXT,"
+                " disabled INTEGER NOT NULL DEFAULT 0)")
+    con.execute("INSERT INTO users (username, password_hash, created_utc) VALUES ('old','h','t')")
+    con.commit(); con.close()
+    st = Store(old)
+    check("a store made before the email column gains it, and keeps its rows",
+          (st.user_by_name("old") or {}).get("email", "missing") is None)
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     # seal keys go under the test folder, never into the examiner's own ~/.ps26150
@@ -5889,6 +6072,7 @@ def main() -> int:
         test_signing(tmp)
         test_sealed(tmp)
         test_access_supabase(tmp)
+        test_access_mail(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

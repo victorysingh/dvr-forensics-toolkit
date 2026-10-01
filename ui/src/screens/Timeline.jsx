@@ -61,9 +61,9 @@ export default function Timeline({ c }) {
       </Section>
 
       {gaps.length > 0 && (
-        <Section title={<span className="text-danger">Gaps</span>}
+        <Section title="Gaps"
           hint="a gap is an absence of footage, not proof of deletion">
-          <DataTable search={false} page={60}
+          <DataTable search={false} page={60} initialSort="from"
             rows={gaps.map((g, i) => ({
               __k: i,
               from: g.start_local ?? "", to: g.end_local ?? "",

@@ -264,8 +264,8 @@ class Gate:
                 return self._do_signup(h)
             form_token, cookie = self._form_token(h)
             return self._html(h, pages.signup_page(
-                csrf=csrf_token(form_token), min_len=MIN_PASSWORD_LEN),
-                cookie=cookie)
+                csrf=csrf_token(form_token), min_len=MIN_PASSWORD_LEN,
+                require_email=self.ac.mailer is not None), cookie=cookie)
 
         if tail == "logout" and method == "POST":
             token = self._token(h)
@@ -329,23 +329,23 @@ class Gate:
     def _do_signup(self, h) -> bool:
         form = self._form(h)
         token = self._token(h)
+        keep = dict(username=form.get("username", ""), email=form.get("email", ""),
+                    min_len=MIN_PASSWORD_LEN, require_email=self.ac.mailer is not None)
         if not check_csrf(token, form.get("csrf", "")):
             fresh, cookie = self._form_token(h)
             return self._html(h, pages.signup_page(
-                error="That form expired. Try again.",
-                username=form.get("username", ""), csrf=csrf_token(fresh),
-                min_len=MIN_PASSWORD_LEN), code=400, cookie=cookie)
+                error="That form expired. Try again.", csrf=csrf_token(fresh),
+                **keep), code=400, cookie=cookie)
         if form.get("password", "") != form.get("password2", ""):
             return self._html(h, pages.signup_page(
-                error="The two passwords do not match.",
-                username=form.get("username", ""), csrf=csrf_token(token),
-                min_len=MIN_PASSWORD_LEN), code=400)
+                error="The two passwords do not match.", csrf=csrf_token(token),
+                **keep), code=400)
         r = self.ac.signup(form.get("username", ""), form.get("password", ""),
-                           self._client(h), self._agent(h))
+                           self._client(h), self._agent(h),
+                           email=form.get("email", ""))
         if not r.ok:
             return self._html(h, pages.signup_page(
-                error=r.message, username=form.get("username", ""),
-                csrf=csrf_token(token), min_len=MIN_PASSWORD_LEN), code=400)
+                error=r.message, csrf=csrf_token(token), **keep), code=400)
         return self._redirect(h, "/access/login?new=1")
 
     # -- the waiting room --------------------------------------------------
@@ -466,8 +466,10 @@ class Gate:
 
 def build_gate(directory: str, cookie_secure: bool = False,
                allow_signup: bool = True, backend: str = "sqlite",
-               supabase_env: str = "", trust_proxy: bool = False) -> Gate:
+               supabase_env: str = "", trust_proxy: bool = False,
+               mail: bool = False, mail_env: str = "") -> Gate:
     """Open the store (in `directory`, or Supabase) and return a gate over it."""
-    return Gate(open_control(directory, backend, supabase_env),
+    return Gate(open_control(directory, backend, supabase_env, mail=mail,
+                             mail_env=mail_env),
                 cookie_secure=cookie_secure, allow_signup=allow_signup,
                 trust_proxy=trust_proxy)

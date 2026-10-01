@@ -4,7 +4,7 @@
 // ledger.verify() on every load.  What this screen shows is therefore a
 // check made just now, not a claim the file makes about itself.
 import { Section, Card, DL, Empty, Hash } from "../components/index.jsx";
-import { num } from "../lib/format.js";
+import { num, utcTime } from "../lib/format.js";
 
 const isHash = (v) => typeof v === "string" && /^[0-9a-f]{64}$/i.test(v);
 
@@ -19,8 +19,9 @@ function DetailValue({ v }) {
     if (!v.length) return <span className="dim">none</span>;
     return (
       <span className="flex flex-wrap gap-1">
-        {v.map((x, i) => typeof x === "object"
-          ? <span key={i} className="font-mono block w-full">{JSON.stringify(x)}</span>
+        {v.map((x, i) => x && typeof x === "object"
+          ? <span key={i} className="block w-full hairline border-l pl-2 my-0.5">
+              <DetailValue v={x} /></span>
           : <span key={i} className="hairline border rounded-full px-2 py-px text-[10.5px] dim">
               {String(x)}</span>)}
       </span>
@@ -108,7 +109,7 @@ export default function Custody({ c, reload, toast }) {
                   {String(e.action || "").replace(/_/g, " ")}
                 </div>
                 <div className="dim font-mono text-[11.5px]">
-                  {e.ts_utc || ""} UTC &middot; {e.actor || ""}
+                  {utcTime(e.ts_utc)} UTC &middot; {e.actor || ""}
                   {e.case_id && <> &middot; {e.case_id}</>}
                 </div>
                 {det ? (
@@ -167,7 +168,7 @@ function Signatures({ sg }) {
             <span className="font-mono dim">{s.file}</span>
             <span>{s.signer || "unnamed key"}</span>
             <span className="font-mono dim" title={s.fingerprint}>key {s.key_id}</span>
-            <span className="dim">{String(s.signed_utc || "").replace("T", " ").replace(/(\.\d+)?Z$/, "")} UTC</span>
+            <span className="dim">{utcTime(s.signed_utc)} UTC</span>
             {!s.valid && <span className="text-danger basis-full">
               {(s.problems || []).join("; ")}</span>}
             {s.unsigned_newer && s.unsigned_newer.length > 0 && (
