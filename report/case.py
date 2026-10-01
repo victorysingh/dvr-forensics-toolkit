@@ -445,6 +445,10 @@ def list_cases(root: str) -> list[dict]:
         top = (scan.get("detections") or [{}])[0]      # the detector's best match
         out.append({"id": name, "case_id": scan.get("case", {}).get("case_id", ""),
                     "vendor": top.get("vendor", ""),
+                    # A case made from a generated disk says so with a SYNTHETIC
+                    # file (deploy/make_demo_cases.py), so a hosted console can
+                    # label it and never pass a made-up disk off as evidence.
+                    "synthetic": os.path.exists(os.path.join(d, "SYNTHETIC")),
                     "vendor_confidence": top.get("confidence", 0),
                     "device": (scan.get("device") or {}).get("path") or ident.get("path", ""),
                     "size_bytes": (scan.get("device") or {}).get("size_bytes")

@@ -64,7 +64,7 @@ h2{font-size:14.5px;margin:26px 0 9px}
 p.lead{color:var(--dim);margin:0 0 18px;font-size:13px}
 label{display:block;font-size:12px;color:var(--dim);margin:14px 0 5px;
   letter-spacing:.03em;text-transform:uppercase}
-input[type=text],input[type=password]{width:100%;padding:9px 11px;
+input[type=text],input[type=password],input[type=email]{width:100%;padding:9px 11px;
   background:var(--surface2);color:var(--ink);border:1px solid var(--line);
   border-radius:var(--radius);font:inherit}
 input:focus{outline:2px solid var(--accent);outline-offset:-1px}
@@ -186,7 +186,7 @@ an administrator on this machine has to approve.</p>
 
 def signup_page(error: str = "", username: str = "", csrf: str = "",
                 min_len: int = 10, email: str = "",
-                require_email: bool = False) -> bytes:
+                require_email: bool = True) -> bytes:
     body = f"""<div class="panel">
 <h1>Create an account</h1>
 <p class="lead">A new account is an ordinary user. It cannot approve anything,

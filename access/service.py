@@ -299,7 +299,8 @@ class AccessControl:
         return Result.win("Account created.", user=user)
 
     def signup(self, username: str, password: str, remote_ip: str = "",
-               user_agent: str = "", email: str = "") -> Result:
+               user_agent: str = "", email: str = "",
+               require_email: Optional[bool] = None) -> Result:
         if not self.auth_allowed(remote_ip, username):
             self._audit(A.RATE_LIMITED, username or "?", where="signup",
                         remote_ip=remote_ip)
@@ -312,11 +313,14 @@ class AccessControl:
                                "Try again in an hour.")
         # Signing yourself up never grants a role: every self-made account is a
         # plain user, and only the command line can mint an administrator.
-        # With mail switched on, a self-made account must give an address -
-        # it is where the "account created" notice goes.
+        # The sign-up form always asks for an address (routes.py); called
+        # directly, an address is needed only when mail is switched on - it is
+        # where the "account created" notice goes.
+        if require_email is None:
+            require_email = self.mailer is not None
         return self.create_user(username, password, ROLE_USER,
                                 actor=(username or "").strip().lower(),
-                                email=email, require_email=self.mailer is not None)
+                                email=email, require_email=require_email)
 
     def set_email(self, username: str, email: str, actor: str = "cli") -> Result:
         from access.mail import valid_email

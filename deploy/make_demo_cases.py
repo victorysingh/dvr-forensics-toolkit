@@ -32,6 +32,12 @@ CASES = [
 NOTE = "Synthetic disk generated for the hosted demonstration - not evidence."
 
 
+def _mark_synthetic(case_dir: str) -> None:
+    """The SYNTHETIC file a console reads to label the case (report.case.list_cases)."""
+    with open(os.path.join(case_dir, "SYNTHETIC"), "w", encoding="utf-8") as fh:
+        fh.write(NOTE + "\nBuilt by deploy/make_demo_cases.py from tests/synth_*.py.\n")
+
+
 def run(*args: str) -> None:
     print("  $ cli.py " + " ".join(args[:2]) + " ...")
     subprocess.run([sys.executable, os.path.join(ROOT, "cli.py"), *args],
@@ -50,6 +56,7 @@ def main() -> int:
         case_dir = os.path.join(args.out, folder)
         if os.path.exists(os.path.join(case_dir, "report.json")):
             print(f"[=] {folder}: already made")
+            _mark_synthetic(case_dir)          # a case made before the marker existed
             continue
         image = os.path.join(args.images, folder + ".img")
         print(f"[+] {folder}: synthetic {vendor} disk -> {image}")
@@ -60,6 +67,7 @@ def main() -> int:
         run("parse", "--device", image, "--vendor", vendor, "--out", case_dir)
         run("timeline", "--out", case_dir)
         run("report", "--out", case_dir, "--notes", NOTE)
+        _mark_synthetic(case_dir)
     return 0
 
 
