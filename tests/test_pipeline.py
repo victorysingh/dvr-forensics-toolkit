@@ -5952,6 +5952,14 @@ def test_access_mail(tmp: str) -> None:
     off = AccessControl(os.path.join(tmp, "access-mail-off"))
     check("with mail off (the workstation), an address is optional",
           off.signup("dave", "davepassword12").ok)
+    from access import pages as P
+    from access.routes import Gate
+    hinted = P.signup_page(mail_from=Gate(quiet)._mail_from).decode()
+    check("with mail on, the sign-up form names the sender and says to check Spam",
+          "notices@example.org" in hinted and "check Spam" in hinted)
+    check("with mail off, the sign-up form names no sender and no Spam folder",
+          Gate(off)._mail_from == ""
+          and "Spam" not in P.signup_page(mail_from=Gate(off)._mail_from).decode())
 
     # -- the message itself ---------------------------------------------------
     hostile = M.access_requested({"public_id": "123456789", "remote_ip": "<b>x</b>",

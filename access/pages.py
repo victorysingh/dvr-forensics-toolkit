@@ -186,7 +186,11 @@ an administrator on this machine has to approve.</p>
 
 def signup_page(error: str = "", username: str = "", csrf: str = "",
                 min_len: int = 10, email: str = "",
-                require_email: bool = True) -> bytes:
+                require_email: bool = True, mail_from: str = "") -> bytes:
+    # A new sending address has no reputation, so its first notices tend to be
+    # filed as spam: say who they come from and where to look.
+    spam_hint = (f'<p class="tiny">The confirmation comes from {_e(mail_from)}. '
+                 "If it is not in your inbox, check Spam.</p>") if mail_from else ""
     body = f"""<div class="panel">
 <h1>Create an account</h1>
 <p class="lead">A new account is an ordinary user. It cannot approve anything,
@@ -200,6 +204,7 @@ including its own requests.</p>
 <label for="m">Email{'' if require_email else ' &mdash; optional'}</label>
 <input id="m" name="email" type="email" value="{_e(email)}" autocomplete="email"
   autocapitalize="none" spellcheck="false"{' required' if require_email else ''}>
+{spam_hint}
 <label for="p">Password &mdash; at least {min_len} characters</label>
 <input id="p" name="password" type="password" required>
 <label for="p2">Repeat password</label>
