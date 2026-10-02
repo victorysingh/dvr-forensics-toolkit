@@ -230,6 +230,28 @@ class AccessControl:
                    M.account_locked(user["username"], until, remote_ip, after,
                                     self.mailer.config.public_url))
 
+    def _notify_decision(self, request: dict, status: str, admin: str) -> None:
+        """Tell the user what was decided about their request."""
+        if self.mailer is None:
+            return
+        user = self.store.user_by_id(request["user_id"]) or {}
+        if not user.get("email"):
+            return
+        from access import mail as M
+        self._mail("access_" + status, user["username"], user["email"],
+                   M.access_decided(request, user["username"], status, admin,
+                                    self.mailer.config.public_url))
+
+    def _notify_admins_approved(self, request: dict, admin: str) -> None:
+        """Every administrator hears of an approval, not only the one who made it."""
+        if self.mailer is None:
+            return
+        from access import mail as M
+        username = (self.store.user_by_id(request["user_id"]) or {}).get("username", "?")
+        message = M.approval_confirmed(request, username, admin, self.mailer.config.public_url)
+        for contact in self.store.admin_contacts():
+            self._mail("approval_confirmed", contact["username"], contact["email"], message)
+
     def _notify_admins(self, request: dict, user: dict) -> None:
         """Tell every administrator with an address that a request is waiting."""
         if self.mailer is None:
@@ -669,6 +691,8 @@ class AccessControl:
         self._audit(A.REQUEST_APPROVED, admin, public_id=public_id,
                     user_id=request["user_id"], access_expires_utc=expires,
                     hours=ACCESS_WINDOW_HOURS, note=note[:200])
+        self._notify_decision(moved, "approved", admin)
+        self._notify_admins_approved(moved, admin)
         return Result.win(
             f"Approved - access valid for {ACCESS_WINDOW_HOURS} hours.",
             request=moved)
@@ -688,6 +712,7 @@ class AccessControl:
         self.store.revoke_sessions_for_request(request["id"])
         self._audit(A.REQUEST_REJECTED, admin, public_id=public_id,
                     user_id=request["user_id"], note=note[:200])
+        self._notify_decision(moved, "rejected", admin)
         return Result.win("Rejected.", request=moved)
 
     def revoke(self, public_id: str, admin: str, note: str = "") -> Result:
@@ -707,6 +732,7 @@ class AccessControl:
         self._audit(A.REQUEST_REVOKED, admin, public_id=public_id,
                     user_id=request["user_id"], sessions_revoked=n,
                     note=note[:200])
+        self._notify_decision(moved, "revoked", admin)
         return Result.win("Access revoked - the session is dead immediately.",
                           request=moved, sessions_revoked=n)
 
@@ -803,7 +829,7 @@ BACKENDS = ("sqlite", "supabase")
 
 def open_control(directory: str, backend: str = "sqlite",
                  supabase_env: str = "", mail: bool = False,
-                 mail_env: str = "") -> AccessControl:
+                 mail_env: str = "", field_key: str = "") -> AccessControl:
     """The access layer over the store named by `backend`.
 
     sqlite, the default, keeps everything in `directory` on this machine - the
@@ -815,11 +841,17 @@ def open_control(directory: str, backend: str = "sqlite",
     if mail:
         from access.mail import Mailer, load_mail_config
         mailer = Mailer(load_mail_config(mail_env))
-    if backend == "sqlite":
-        return AccessControl(directory, mailer=mailer)
+    if backend not in BACKENDS:
+        raise ValueError(f"unknown access store {backend!r}; one of {', '.join(BACKENDS)}")
+    audit = None
     if backend == "supabase":
         from access.supabase import open_supabase
         store, audit = open_supabase(supabase_env)
-        return AccessControl(directory, store=store, audit=audit,   # type: ignore[arg-type]
-                             mailer=mailer)
-    raise ValueError(f"unknown access store {backend!r}; one of {', '.join(BACKENDS)}")
+    else:
+        store = open_store(directory)
+    if field_key:
+        # Email addresses encrypted at rest (access/fieldcrypt.py).
+        from access.fieldcrypt import EmailCrypt, EncryptedEmails, load_key
+        store = EncryptedEmails(store, EmailCrypt(load_key(field_key)))
+    return AccessControl(directory, store=store, audit=audit,       # type: ignore[arg-type]
+                         mailer=mailer)

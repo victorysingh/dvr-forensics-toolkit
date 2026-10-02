@@ -113,6 +113,10 @@ def load_mail_config(env_file: str = "") -> MailConfig:
         port = int(values["SMTP_PORT"] or 465)
     except ValueError:
         raise MailConfigError("SMTP_PORT must be a number (465 or 587)") from None
+    password = values["SMTP_PASSWORD"]
+    if values["SMTP_HOST"].lower().endswith("gmail.com"):
+        # Google shows an app password in four groups; the spaces are not part of it.
+        password = password.replace(" ", "")
     sender = values["MAIL_FROM"] or values["SMTP_USER"]
     if not valid_email(sender.split("<")[-1].rstrip(">").strip()):
         raise MailConfigError("MAIL_FROM is not an email address")
@@ -120,7 +124,7 @@ def load_mail_config(env_file: str = "") -> MailConfig:
     if public and not public.startswith(("https://", "http://127.0.0.1", "http://localhost")):
         raise MailConfigError("PUBLIC_URL must be an https:// address")
     return MailConfig(host=values["SMTP_HOST"], port=port, user=values["SMTP_USER"],
-                      password=values["SMTP_PASSWORD"], sender=sender,
+                      password=password, sender=sender,
                       public_url=public, source=source)
 
 
@@ -209,6 +213,23 @@ text-decoration:none;padding:10px 16px;font-weight:600">{e(label)}</a>
 </div></div></body></html>"""
 
 
+def _browser(agent: str) -> str:
+    """A readable name for a User-Agent string: what an admin needs to recognise it."""
+    a = agent or ""
+    for name, mark in (("Edge", "Edg/"), ("Opera", "OPR/"), ("Chrome", "Chrome/"),
+                       ("Firefox", "Firefox/"), ("Safari", "Safari/")):
+        if mark in a:
+            browser = name
+            break
+    else:
+        return (a[:60] + "...") if len(a) > 60 else (a or "-")
+    for system, mark in (("Android", "Android"), ("iPhone", "iPhone"), ("iPad", "iPad"),
+                         ("Windows", "Windows"), ("macOS", "Mac OS X"), ("Linux", "Linux")):
+        if mark in a:
+            return f"{browser} on {system}"
+    return browser
+
+
 def account_created(username: str, email: str, created_utc: str,
                     public_url: str) -> tuple[str, str, str]:
     """(subject, text, html) for the new user."""
@@ -256,6 +277,7 @@ def access_requested(request: dict, user: dict, public_url: str) -> tuple[str, s
     rows = [("Request", pid), ("User", who), ("Email", user.get("email") or "-"),
             ("Asked", _utc(request.get("created_utc", ""))),
             ("From", request.get("remote_ip") or "-"),
+            ("Browser", _browser(request.get("user_agent", ""))),
             ("Expires", _utc(request.get("request_expires_utc", "")) + " if undecided")]
     note = (f"Approve or reject it on the admin page, signed in as an administrator. "
             f"An approval grants {ACCESS_WINDOW_HOURS} hours; an undecided request "
@@ -265,4 +287,57 @@ def access_requested(request: dict, user: dict, public_url: str) -> tuple[str, s
             + "\n".join(f"  {k:<8} {v}" for k, v in rows)
             + f"\n\nDecide at: {admin}\n\n{note}\n")
     return subject, text, _html("Access request waiting for you", intro, rows,
+                                ("Open the admin page", admin), note)
+
+
+def access_decided(request: dict, username: str, status: str, decided_by: str,
+                   public_url: str) -> tuple[str, str, str]:
+    """(subject, text, html) for the user, when their request is approved,
+    rejected, or a live grant is revoked."""
+    pid = request.get("public_id", "")
+    if status == "approved":
+        site = _link(public_url, "/")
+        subject = f"{PRODUCT}: access approved - request {pid}"
+        intro = (f"An administrator approved your access request. It is valid for "
+                 f"{ACCESS_WINDOW_HOURS} hours from the approval. If the waiting page is "
+                 "still open, it moves into the console by itself; otherwise sign in again.")
+        rows = [("Request", pid), ("Account", username), ("Approved by", decided_by),
+                ("Valid until", _utc(request.get("access_expires_utc", "")))]
+        action = ("Open AnokhiDrishti", site)
+        note = ("This email does not sign you in: open the site in the browser you asked "
+                "from, or sign in with your own account. The access lapses on its own.")
+        title = "Access approved"
+    else:
+        site = _link(public_url, "/access/login")
+        subject = (f"{PRODUCT}: access request {pid} was not approved" if status == "rejected"
+                   else f"{PRODUCT}: your access was withdrawn - request {pid}")
+        intro = ("An administrator did not approve your access request." if status == "rejected"
+                 else "An administrator ended your access before its time ran out.")
+        rows = [("Request", pid), ("Account", username),
+                ("Decided by", decided_by), ("Note", request.get("decision_note") or "-")]
+        action = ("Go to sign in", site)
+        note = "You can sign in again to ask for access, if you need it."
+        title = "Access not approved" if status == "rejected" else "Access withdrawn"
+    text = (f"{PRODUCT} - {title.lower()}\n\n{intro}\n\n"
+            + "\n".join(f"  {k:<12} {v}" for k, v in rows)
+            + f"\n\n{action[0]}: {action[1]}\n\n{note}\n")
+    return subject, text, _html(title, intro, rows, action, note)
+
+
+def approval_confirmed(request: dict, username: str, decided_by: str,
+                       public_url: str) -> tuple[str, str, str]:
+    """(subject, text, html) for every administrator after an approval."""
+    admin = _link(public_url, "/admin")
+    pid = request.get("public_id", "")
+    subject = f"{PRODUCT}: {decided_by} approved request {pid} for {username}"
+    intro = (f"{decided_by} approved {username}'s access request. The grant lasts "
+             f"{ACCESS_WINDOW_HOURS} hours and can be revoked from the admin page at any time.")
+    rows = [("Request", pid), ("User", username), ("Approved by", decided_by),
+            ("Valid until", _utc(request.get("access_expires_utc", "")))]
+    note = ("Revoking ends the user's session on their very next request. This email "
+            "cannot revoke or approve anything by itself.")
+    text = (f"{PRODUCT} - approval recorded\n\n{intro}\n\n"
+            + "\n".join(f"  {k:<12} {v}" for k, v in rows)
+            + f"\n\nAdmin page: {admin}\n\n{note}\n")
+    return subject, text, _html("Approval recorded", intro, rows,
                                 ("Open the admin page", admin), note)

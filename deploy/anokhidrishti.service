@@ -12,11 +12,14 @@ WorkingDirectory=/opt/anokhidrishti
 # The seal key for the access log lives in the service's own state directory.
 Environment=PS26150_SEAL_KEY=/var/lib/anokhidrishti/ledger_seal.key
 Environment=PYTHONUNBUFFERED=1
+# Optional switches, kept out of this file: e.g.
+#   SERVE_EXTRA=--mail --mail-env /etc/anokhidrishti/mail.env --field-key /etc/anokhidrishti/field.key
+EnvironmentFile=-/etc/anokhidrishti/serve.env
 # Binds 127.0.0.1 only (viewer/server.py); Caddy is the one public listener.
 ExecStart=/usr/bin/python3 cli.py serve --out /srv/anokhidrishti/out --port 8150 \
     --require-access --access-store supabase \
     --supabase-env /etc/anokhidrishti/supabase.env \
-    --cookie-secure --trust-proxy
+    --cookie-secure --trust-proxy $SERVE_EXTRA
 Restart=always
 RestartSec=3
 

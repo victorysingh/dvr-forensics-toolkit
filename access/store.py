@@ -29,7 +29,7 @@ from access.policy import (ACTIVE, APPROVED, GRANTING_STATES, PENDING,
 
 FILENAME = "access.db"
 
-SCHEMA_VERSION = 2          # 2: users.email, for the optional mail notices
+SCHEMA_VERSION = 3          # 2: users.email; 3: users.email_hash (encrypted addresses)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS users (
     first_fail_utc   TEXT,
     locked_until_utc TEXT,
     disabled         INTEGER NOT NULL DEFAULT 0,
-    email            TEXT
+    email            TEXT,
+    email_hash       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS requests (
@@ -141,17 +142,20 @@ class Store:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
             if "email" not in cols:
                 conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            if "email_hash" not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN email_hash TEXT")
             conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
 
     # -- users -------------------------------------------------------------
     def create_user(self, username: str, password_hash: str,
-                    role: str = ROLE_USER, email: str = "") -> dict:
+                    role: str = ROLE_USER, email: str = "", email_hash: str = "") -> dict:
         try:
             with self._conn() as c:
                 cur = c.execute(
-                    "INSERT INTO users (username, password_hash, role, created_utc, email) "
-                    "VALUES (?,?,?,?,?)",
-                    (username, password_hash, role, stamp(), email or None))
+                    "INSERT INTO users (username, password_hash, role, created_utc, email, "
+                    "email_hash) VALUES (?,?,?,?,?,?)",
+                    (username, password_hash, role, stamp(), email or None,
+                     email_hash or None))
         except sqlite3.IntegrityError as exc:
             raise UsernameTaken("username already exists: " + str(username)) from exc
         return self.user_by_id(cur.lastrowid)            # type: ignore[arg-type]
@@ -183,9 +187,16 @@ class Store:
         with self._conn() as c:
             c.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
 
-    def set_email(self, user_id: int, email: str) -> None:
+    def set_email(self, user_id: int, email: str, email_hash: str = "") -> None:
         with self._conn() as c:
-            c.execute("UPDATE users SET email=? WHERE id=?", (email or None, user_id))
+            c.execute("UPDATE users SET email=?, email_hash=? WHERE id=?",
+                      (email or None, email_hash or None, user_id))
+
+    def user_by_email_hash(self, digest: str) -> Optional[dict]:
+        """An encrypted address is found by its keyed hash (access/fieldcrypt.py)."""
+        return _dict(self._conn().execute(
+            "SELECT * FROM users WHERE email_hash=? LIMIT 1", (digest,)).fetchone()) \
+            if digest else None
 
     def user_by_email(self, email: str) -> Optional[dict]:
         """Addresses are stored lower-case, so this is an exact match."""

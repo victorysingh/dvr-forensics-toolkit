@@ -284,10 +284,12 @@ class SupabaseStore:
 
     # -- users -------------------------------------------------------------
     def create_user(self, username: str, password_hash: str,
-                    role: str = ROLE_USER, email: str = "") -> dict:
-        status, payload = self._insert(USERS, {
-            "username": username, "password_hash": password_hash,
-            "role": role, "created_utc": stamp(), "email": email or None})
+                    role: str = ROLE_USER, email: str = "", email_hash: str = "") -> dict:
+        row = {"username": username, "password_hash": password_hash,
+               "role": role, "created_utc": stamp(), "email": email or None}
+        if email_hash:                    # only sent when addresses are encrypted
+            row["email_hash"] = email_hash
+        status, payload = self._insert(USERS, row)
         if status == 409 and _code(payload) == UNIQUE_VIOLATION:
             raise UsernameTaken("username already exists: " + str(username))
         if status != 201:
@@ -314,9 +316,15 @@ class SupabaseStore:
     def set_role(self, user_id: int, role: str) -> None:
         self._update(USERS, _where(id=("eq", user_id)), {"role": role}, select="id")
 
-    def set_email(self, user_id: int, email: str) -> None:
-        self._update(USERS, _where(id=("eq", user_id)), {"email": email or None},
-                     select="id")
+    def set_email(self, user_id: int, email: str, email_hash: str = "") -> None:
+        values = {"email": email or None}
+        if email_hash or email == "":
+            values["email_hash"] = email_hash or None
+        self._update(USERS, _where(id=("eq", user_id)), values, select="id")
+
+    def user_by_email_hash(self, digest: str) -> Optional[dict]:
+        """An encrypted address is found by its keyed hash (access/fieldcrypt.py)."""
+        return self._one(USERS, _where(email_hash=("eq", digest))) if digest else None
 
     def user_by_email(self, email: str) -> Optional[dict]:
         """Addresses are stored lower-case, so this is an exact match."""

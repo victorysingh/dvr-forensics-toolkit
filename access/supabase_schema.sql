@@ -37,6 +37,10 @@ create table if not exists public.access_users (
 );
 -- Added 1 Oct 2026 for the mail notices; brings a table made earlier up to date.
 alter table public.access_users add column if not exists email text;
+-- Added 2 Oct 2026: with a field key, `email` holds AES-256-GCM ciphertext and
+-- this holds the keyed hash that "already registered?" is answered from.
+alter table public.access_users add column if not exists email_hash text;
+create index if not exists ix_access_users_email_hash on public.access_users(email_hash);
 
 create table if not exists public.access_requests (
     id                  bigint generated always as identity primary key,
