@@ -60,6 +60,9 @@ class Gate:
         self.cookie_secure = cookie_secure
         self.allow_signup = allow_signup
         self.trust_proxy = trust_proxy
+        # Accounts that see the real cases (serve --real-cases-for), so the
+        # admin panel can mark them; the viewer enforces it.
+        self.real_cases_for: frozenset = frozenset()
 
     @property
     def _mail_from(self) -> str:
@@ -442,7 +445,7 @@ class Gate:
             user["username"], self.ac.overview(), self.ac.pending(),
             self.ac.recent(40), self.ac.store.list_users(),
             self.ac.audit.recent(40), csrf_token(token),
-            error=error, note=note))
+            error=error, note=note, real_for=self.real_cases_for))
 
     def _do_decide(self, h, user: dict, token: str) -> bool:
         form = self._form(h)

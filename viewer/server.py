@@ -239,6 +239,7 @@ def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
                   + "--username <name>")
         if names:
             Handler.real_cases_for = names
+            Handler.gate.real_cases_for = names
             for name in sorted(names):
                 if not Handler.gate.ac.store.user_by_name(name):
                     print(f"  WARNING: --real-cases-for names {name!r}, which has no "

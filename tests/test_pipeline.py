@@ -5277,7 +5277,10 @@ def test_case_split(tmp: str) -> None:
     class _H(Handler):
         out_root = out
         gate = Gate(ac)
-        real_cases_for = frozenset({"demo"})
+        real_cases_for = frozenset({"demo", "judge"})
+
+    _H.gate.real_cases_for = _H.real_cases_for
+    ac.signup("judge", "judgepassword12")
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _H)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -5327,6 +5330,20 @@ def test_case_split(tmp: str) -> None:
         guide = json.loads(body).get("guide", {}) if st == 200 else {}
         check("every account gets the brand guide with the vendor list",
               len(guide.get("brands", [])) == 9 and len(guide.get("steps", [])) == 4)
+        ac.login("judge", "judgepassword12", "127.0.0.1", "UA/1")     # left pending
+        st, page = get(boss, "/admin")
+        page = page.decode()
+        tag = "demo &middot; sees real cases"
+        rows = {u: page[page.index(f"<tr><td>{u}</td>"):][:400] for u in ("demo", "olga")
+                if f"<tr><td>{u}</td>" in page}
+        pend = page[page.index("Waiting for a decision"):page.index("Recent requests")] \
+            if "Recent requests" in page else ""
+        check("the admin panel marks the account that sees the real cases, and no other",
+              st == 200 and tag in rows.get("demo", "") and tag not in rows.get("olga", "x"),
+              f"{st} {sorted(rows)}")
+        check("a pending request from such an account is marked too, where the "
+              "approval is given",
+              "<td>judge <span class=\"pill real\"" in pend)
     finally:
         httpd.shutdown()
 
