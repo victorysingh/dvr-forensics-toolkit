@@ -467,9 +467,9 @@ class Gate:
 def build_gate(directory: str, cookie_secure: bool = False,
                allow_signup: bool = True, backend: str = "sqlite",
                supabase_env: str = "", trust_proxy: bool = False,
-               mail: bool = False, mail_env: str = "") -> Gate:
+               mail: bool = False, mail_env: str = "", field_key: str = "") -> Gate:
     """Open the store (in `directory`, or Supabase) and return a gate over it."""
     return Gate(open_control(directory, backend, supabase_env, mail=mail,
-                             mail_env=mail_env),
+                             mail_env=mail_env, field_key=field_key),
                 cookie_secure=cookie_secure, allow_signup=allow_signup,
                 trust_proxy=trust_proxy)

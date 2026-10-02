@@ -1077,7 +1077,7 @@ def cmd_serve(args) -> int:
               access_dir=args.access_dir, allow_signup=not args.no_signup,
               access_store=args.access_store, supabase_env=args.supabase_env,
               cookie_secure=args.cookie_secure, trust_proxy=args.trust_proxy,
-              mail=args.mail, mail_env=args.mail_env)
+              mail=args.mail, mail_env=args.mail_env, field_key=args.field_key)
     except Exception as exc:                               # noqa: BLE001
         from access.store import StoreError   # imported only if the gate was asked for
         if isinstance(exc, StoreError):
@@ -1099,8 +1099,9 @@ def _access(args):
 
     directory = args.access_dir or os.path.join(args.out, ".access")
     try:
-        return open_control(directory, args.access_store, args.supabase_env)
-    except StoreError as exc:           # includes missing Supabase credentials
+        return open_control(directory, args.access_store, args.supabase_env,
+                            field_key=args.field_key)
+    except StoreError as exc:           # includes missing Supabase credentials or field key
         raise SystemExit(f"  [!] access store: {exc}")
 
 
@@ -1170,6 +1171,14 @@ def cmd_access_user(args) -> int:
                   f"{(u.get('email') or '-'):<30} {u['last_login_utc'] or 'never'}")
         return 0
 
+    if args.action == "encrypt-emails":
+        if not hasattr(ac.store, "encrypt_plaintext"):
+            print("  [!] --field-key is required: it is the key the addresses are sealed with")
+            return 2
+        n = ac.store.encrypt_plaintext()
+        print(f"  [+] {n} address(es) encrypted in place (AES-256-GCM)")
+        return 0
+
     if not args.username:
         print("  [!] --username is required for that action")
         return 2
@@ -1225,6 +1234,44 @@ def cmd_access_request(args) -> int:
         return 2
     print(f"  {'[+]' if r.ok else '[!]'} {r.message}")
     return 0 if r.ok else 1
+
+
+def cmd_access_mail_test(args) -> int:
+    """Send one test notice, synchronously, to prove the SMTP settings work."""
+    from access import mail as M
+    try:
+        cfg = M.load_mail_config(args.mail_env)
+    except M.MailConfigError as exc:
+        print(f"  [!] mail: {exc}")
+        return 1
+    if not M.valid_email(args.to):
+        print("  [!] --to is not an email address")
+        return 2
+    result = {}
+    subject, text, html_body = M.account_created(
+        "mail-test", args.to, "", cfg.public_url)
+    M.Mailer(cfg, background=False).send(
+        args.to, "AnokhiDrishti: test notice (settings check)", text, html_body,
+        on_done=lambda ok, err: result.update(ok=ok, err=err))
+    if result.get("ok"):
+        print(f"  [+] sent via {cfg.host}:{cfg.port} as {cfg.sender} to {args.to}")
+        return 0
+    print(f"  [!] not sent: {result.get('err', 'unknown error')}")
+    return 1
+
+
+def cmd_access_field_key(args) -> int:
+    """Make the key that email addresses are encrypted with at rest."""
+    from access.fieldcrypt import FieldKeyError, create_key
+    try:
+        create_key(args.create)
+    except FieldKeyError as exc:
+        print(f"  [!] {exc}")
+        return 1
+    print(f"  [+] {args.create}  (32 random bytes; readable by its owner only)")
+    print("      Keep it off the database and back it up: addresses sealed with it")
+    print("      cannot be read without it. Pass it with --field-key.")
+    return 0
 
 
 def cmd_access_audit(args) -> int:
@@ -2774,6 +2821,9 @@ def main() -> int:
                                  "SUPABASE_URL and SUPABASE_SERVICE_KEY, read when "
                                  "they are not in the environment (default "
                                  "~/.config/anokhidrishti/supabase.env)")
+        parser.add_argument("--field-key", default="",
+                            help="encrypt email addresses at rest (AES-256-GCM) with "
+                                 "this key file; see cli.py access-field-key")
 
     _store_args(p)
     p.add_argument("--cookie-secure", action="store_true",
@@ -2822,7 +2872,8 @@ def main() -> int:
     p = sub.add_parser("access-user", help="list or manage access accounts")
     _access_args(p)
     p.add_argument("--action", default="list",
-                   choices=["list", "add", "passwd", "disable", "enable", "email"])
+                   choices=["list", "add", "passwd", "disable", "enable", "email",
+                            "encrypt-emails"])
     p.add_argument("--username", default="")
     p.add_argument("--email", default="",
                    help="with add: the new account's address; with --action email: "
@@ -2845,6 +2896,18 @@ def main() -> int:
                    help="with --action list, show only undecided requests")
     p.add_argument("--limit", type=int, default=40)
     p.set_defaults(func=cmd_access_request)
+
+    p = sub.add_parser("access-mail-test",
+                       help="send one test email to prove the SMTP settings work")
+    p.add_argument("--to", required=True)
+    p.add_argument("--mail-env", default="",
+                   help="SMTP settings file (default ~/.config/anokhidrishti/mail.env)")
+    p.set_defaults(func=cmd_access_mail_test)
+
+    p = sub.add_parser("access-field-key",
+                       help="make the key email addresses are encrypted with at rest")
+    p.add_argument("--create", required=True, help="where to write the new key file")
+    p.set_defaults(func=cmd_access_field_key)
 
     p = sub.add_parser("access-audit",
                        help="print the access audit log and verify its chain")

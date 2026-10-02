@@ -6011,6 +6011,104 @@ def test_access_mail(tmp: str) -> None:
           (st.user_by_name("old") or {}).get("email", "missing") is None)
 
 
+def test_access_mail_decisions(tmp: str) -> None:
+    """Decision notices, and email addresses encrypted at rest (access/fieldcrypt.py)."""
+    print("\n[access decision notices and encrypted addresses]")
+    import sqlite3 as _sq
+    from access import mail as M
+    from access.fieldcrypt import EmailCrypt, EncryptedEmails, create_key, load_key
+    from access.service import AccessControl
+    from access.store import open_store
+
+    class FakeMailer:
+        def __init__(self):
+            self.config = M.MailConfig("smtp.example.org", 465, "u", "pw",
+                                       "notices@example.org", "https://demo.example.org")
+            self.sent = []
+
+        def send(self, to, subject, text, html_body, on_done=None):
+            self.sent.append({"to": to, "subject": subject, "text": text})
+            if on_done:
+                on_done(True, "")
+
+    try:
+        import cryptography  # noqa: F401
+        crypto = True
+    except ImportError:
+        crypto = False
+    d = os.path.join(tmp, "access-decide")
+    mailer = FakeMailer()
+    store = open_store(d)
+    keyfile = os.path.join(tmp, "field.key")
+    if crypto:
+        create_key(keyfile)
+        store = EncryptedEmails(store, EmailCrypt(load_key(keyfile)))
+    ac = AccessControl(d, store=store, mailer=mailer)
+    ac.create_user("boss", "bosspassword12", role="admin", email="boss@example.org")
+    ac.create_user("deputy", "deputypassword1", role="admin", email="deputy@example.org")
+    ac.signup("vera", "verapassword12", "10.1.1.1", email="Vera@Example.org")
+    mailer.sent.clear()
+    r = ac.login("vera", "verapassword12", "10.1.1.1",
+                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36")
+    req = r.data["request"]
+    asked = [m for m in mailer.sent if "waiting for a decision" in m["subject"]]
+    check("the request notice tells admins who is asking, from where and on what",
+          len(asked) == 2 and "Chrome on Linux" in asked[0]["text"]
+          and "10.1.1.1" in asked[0]["text"] and "vera@example.org" in asked[0]["text"])
+
+    mailer.sent.clear()
+    ac.approve(req["public_id"], "boss")
+    to_user = [m for m in mailer.sent if m["to"] == "vera@example.org"]
+    to_admins = sorted(m["to"] for m in mailer.sent if "approved request" in m["subject"])
+    check("an approval mails the user, with the real site and how long it lasts",
+          len(to_user) == 1 and "approved" in to_user[0]["subject"]
+          and "https://demo.example.org/" in to_user[0]["text"] and "Valid until" in to_user[0]["text"])
+    check("...and mails every administrator, with the admin page",
+          to_admins == ["boss@example.org", "deputy@example.org"]
+          and "https://demo.example.org/admin" in mailer.sent[-1]["text"])
+    mailer.sent.clear()
+    ac.revoke(req["public_id"], "deputy", "audit finished")
+    check("a revocation tells the user, with the reason",
+          any("withdrawn" in m["subject"] and "audit finished" in m["text"]
+              for m in mailer.sent if m["to"] == "vera@example.org"))
+    r2 = ac.login("vera", "verapassword12", "10.1.1.1")
+    mailer.sent.clear()
+    ac.reject(r2.data["request"]["public_id"], "boss", "not today")
+    check("a rejection tells the user it was not approved",
+          any("not approved" in m["subject"] for m in mailer.sent if m["to"] == "vera@example.org"))
+
+    if not crypto:
+        print("  (skipped encryption checks - the optional 'cryptography' package is not installed)")
+        return
+    raw = _sq.connect(os.path.join(d, "access.db")).execute(
+        "SELECT username, email, email_hash FROM users").fetchall()
+    check("addresses are stored only as AES-256-GCM ciphertext, with a keyed hash",
+          all(e and e.startswith("enc:v1:") and "@" not in e and h and len(h) == 64
+              for _, e, h in raw))
+    check("...and read back as the address, through the store",
+          store.user_by_name("vera")["email"] == "vera@example.org")
+    check("one account per address still holds, without decrypting anything",
+          not ac.signup("vera2", "verapassword12", "10.1.1.2", email="VERA@example.org").ok)
+    other = EncryptedEmails(open_store(d), EmailCrypt(os.urandom(32)))
+    check("with the wrong key an address cannot be read",
+          other.user_by_name("vera")["email"] is None)
+    legacy = open_store(os.path.join(tmp, "access-legacy"))
+    legacy.create_user("old", "h", email="old@example.org")
+    wrapped = EncryptedEmails(legacy, EmailCrypt(load_key(keyfile)))
+    check("an address written before encryption is still found and read",
+          wrapped.user_by_email("old@example.org")["email"] == "old@example.org")
+    n = wrapped.encrypt_plaintext()
+    stored = legacy.user_by_name("old")["email"]
+    check("...and encrypt-emails seals it in place",
+          n == 1 and stored.startswith("enc:v1:")
+          and wrapped.user_by_name("old")["email"] == "old@example.org")
+    try:
+        create_key(keyfile)
+        check("a field key is never overwritten", False)
+    except Exception:
+        check("a field key is never overwritten", True)
+
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="ps26150-tests-")
     # seal keys go under the test folder, never into the examiner's own ~/.ps26150
@@ -6090,6 +6188,7 @@ def main() -> int:
         test_sealed(tmp)
         test_access_supabase(tmp)
         test_access_mail(tmp)
+        test_access_mail_decisions(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
