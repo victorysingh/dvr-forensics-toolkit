@@ -606,6 +606,14 @@ python cli.py serve            # then open http://127.0.0.1:8150
 The viewer only reads `out/`; it never opens a drive. `#case=<id>&tab=tl` in
 the URL opens a case and tab directly.
 
+**Start here** (top bar, and the first page on a first visit): pick the brand
+on the recorder's label and the console shows what the tool can honestly do
+for it (its status, from the vendor matrix), the four steps from a disk in
+hand to an opened case, with the scan options for that brand filled in, the
+commands to run after the scan, and any case of that brand already here. The
+brand is still detected from the disk; the choice only sets what to expect
+(`viewer/guide.py`). `#/start/<brand>` links to one brand, e.g. `#/start/cp-plus`.
+
 ## 4. Proving a piece of evidence later
 
 ```bash

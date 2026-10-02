@@ -157,8 +157,37 @@ cli.py serve --require-access --access-store supabase     # + --cookie-secure --
   `--trust-proxy` keys the per-address limits on `X-Forwarded-For`. A client
   that reaches the origin directly can set that header, so only those limits
   lean on it; the per-account limit and the stored lockout do not.
-* `deploy/` holds the hosted setup: Ubuntu, systemd and Caddy for HTTPS, with
-  synthetic cases only, and Vercel forwarding to it.
+* `deploy/` holds the hosted setup: Ubuntu, systemd and Caddy for HTTPS, and
+  Vercel forwarding to it. `deploy/update_server.sh <user@host> <commit>`
+  updates it: it tests the new copy on the server first, swaps it in only on
+  "0 failed", and puts the old copy back if the service does not answer.
+
+## A hosted demo: real cases for named accounts only
+
+A hosted copy can hold the team's real acquisitions next to generated ones
+(case folders holding a `SYNTHETIC` file, `deploy/make_demo_cases.py`). Real
+cases carry real people's faces in their thumbnails and a recorder's serial
+numbers, so they should reach only the logins handed out for the demo:
+
+```bash
+cli.py access-user --access-store supabase --action add --username demo
+cli.py serve --require-access --access-store supabase --real-cases-for demo
+```
+
+| Signed in as | Sees |
+|---|---|
+| an account named in `--real-cases-for` | the real cases only |
+| an administrator | every case |
+| any other account (a sign-up) | the generated cases only, and the Start here guide |
+
+The server enforces it, not the page: `/api/cases` lists only what the
+account may see, and `/api/case/<id>`, `/report/<id>` and `/thumb/<id>/...`
+answer 404 for any other case, so typing a hidden case's name opens nothing.
+An account the gate did not name falls to the generated cases (fails closed).
+The demo account still needs an administrator's approval at every sign-in,
+like any other. Without the switch, every approved account sees every case,
+as before; it is refused without `--require-access`, where there is no
+account to tell apart (`viewer/server.py::visible_cases`).
 
 ## The policy numbers
 

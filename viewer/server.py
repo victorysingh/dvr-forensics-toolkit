@@ -34,6 +34,7 @@ if ROOT not in sys.path:
 import parsers  # noqa: E402,F401  (registers plugins, loads drop-ins)
 from report.case import list_cases, load_case, plugins_view, vendor_matrix  # noqa: E402
 from report.html import render  # noqa: E402
+from viewer.guide import brand_guide  # noqa: E402
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -77,11 +78,36 @@ def _static_file(url_path: str) -> str | None:
     return full if os.path.isfile(full) else None
 
 
-def _case_dir(out_root: str, case_id: str) -> str | None:
+def _case_dir(out_root: str, case_id: str, cases: list[dict]) -> str | None:
+    """The folder of one case, if it is among `cases` - the ones this request
+    may see - and None otherwise, so a case hidden from a list cannot be
+    opened by typing its name either."""
     name = os.path.basename(unquote(case_id))
-    if name in {c["id"] for c in list_cases(out_root)}:
+    if name in {c["id"] for c in cases}:
         return os.path.join(out_root, name)
     return None
+
+
+def visible_cases(cases: list[dict], user: dict | None,
+                  real_for: frozenset | None) -> list[dict]:
+    """Which cases one signed-in account may see.
+
+    `real_for` is None unless the server was started with --real-cases-for:
+    then everyone sees everything, as before.  With it, the accounts named
+    there see only the real cases, administrators see all of them, and every
+    other account sees only the generated ones (a SYNTHETIC file in the case
+    folder).  So the real drives - real people's faces, a recorder's serial
+    number - reach only the logins handed out for that purpose, never an
+    ordinary sign-up.  An account the gate did not name sees only the
+    generated cases: the split fails closed.
+    """
+    if real_for is None:
+        return cases
+    user = user or {}
+    if user.get("role") == "admin":
+        return cases
+    real = user.get("username", "") in real_for
+    return [c for c in cases if c["synthetic"] != real]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -92,6 +118,14 @@ class Handler(BaseHTTPRequestHandler):
     #: Set by the gate when it rotates a session token on a request it is
     #: passing through, so the new cookie rides out on the real response.
     access_set_cookie = ""
+
+    #: Usernames that see the real cases (serve --real-cases-for), or None:
+    #: no split. Only ever set together with the gate.
+    real_cases_for: frozenset | None = None
+
+    #: The account the gate let this request through as. Reset on every
+    #: request: one handler serves every request on a kept-alive connection.
+    access_user: dict | None = None
 
     def log_message(self, fmt, *args):             # quiet by default
         pass
@@ -110,23 +144,29 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, code: int = 200) -> None:
         self._send(code, json.dumps(obj, default=str).encode(), "application/json")
 
+    def _cases(self) -> list[dict]:
+        """The cases this request may see (visible_cases)."""
+        real_for = self.real_cases_for if self.gate is not None else None
+        return visible_cases(list_cases(self.out_root), self.access_user, real_for)
+
     def do_GET(self):                              # noqa: N802
+        self.access_user = None
         if self.gate is not None and self.gate.dispatch(self, "GET"):
             return                                 # the gate answered it
         path = urlparse(self.path).path
         try:
             if path == "/api/cases":
-                return self._json(list_cases(self.out_root))
+                return self._json(self._cases())
             if path == "/api/vendors":
                 return self._json({"vendors": vendor_matrix(), "plugins": plugins_view(),
-                                   "onboarding": ONBOARDING})
+                                   "onboarding": ONBOARDING, "guide": brand_guide()})
             if path.startswith("/api/case/"):
-                d = _case_dir(self.out_root, path[len("/api/case/"):])
+                d = _case_dir(self.out_root, path[len("/api/case/"):], self._cases())
                 if not d:
                     return self._json({"error": "no such case"}, 404)
                 return self._json(load_case(d))
             if path.startswith("/report/"):
-                d = _case_dir(self.out_root, path[len("/report/"):])
+                d = _case_dir(self.out_root, path[len("/report/"):], self._cases())
                 if not d:
                     return self._send(404, b"no such case", "text/plain")
                 case = load_case(d)
@@ -137,7 +177,8 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/thumb/"):
                 # /thumb/<case>/<file>: analytics thumbnails only, by basename
                 parts = path[len("/thumb/"):].split("/")
-                d = _case_dir(self.out_root, parts[0]) if len(parts) == 2 else None
+                d = (_case_dir(self.out_root, parts[0], self._cases())
+                     if len(parts) == 2 else None)
                 f = os.path.join(d, "analytics", "thumbnails",
                                  os.path.basename(unquote(parts[1]))) if d else ""
                 if f and f.endswith(".jpg") and os.path.isfile(f):
@@ -155,6 +196,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):                             # noqa: N802
         """Only the gate posts. The viewer itself remains read-only."""
+        self.access_user = None
         if self.gate is not None and self.gate.dispatch(self, "POST"):
             return
         return self._send(405, b"method not allowed", "text/plain")
@@ -164,7 +206,8 @@ def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
           access_dir: str = "", allow_signup: bool = True,
           access_store: str = "sqlite", supabase_env: str = "",
           cookie_secure: bool = False, trust_proxy: bool = False,
-          mail: bool = False, mail_env: str = "", field_key: str = "") -> None:
+          mail: bool = False, mail_env: str = "", field_key: str = "",
+          real_cases_for: str = "") -> None:
     """Serve the console on loopback, optionally behind the approval gate.
 
     `access_dir` defaults to a dot-directory inside the case folder.  It holds
@@ -175,6 +218,11 @@ def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
     """
     Handler.out_root = out_root
     Handler.gate = None
+    Handler.real_cases_for = None
+    names = frozenset(n.strip() for n in real_cases_for.split(",") if n.strip())
+    if real_cases_for and not require_access:
+        raise SystemExit("  [!] --real-cases-for needs --require-access: without the "
+                         "gate there is no signed-in account to tell apart")
     if require_access:
         from access.routes import build_gate
 
@@ -189,6 +237,12 @@ def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
             print("           create one first:  cli.py access-admin "
                   + ("--access-store supabase " if access_store == "supabase" else "")
                   + "--username <name>")
+        if names:
+            Handler.real_cases_for = names
+            for name in sorted(names):
+                if not Handler.gate.ac.store.user_by_name(name):
+                    print(f"  WARNING: --real-cases-for names {name!r}, which has no "
+                          "account yet; create it with cli.py access-user --action add")
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"AnokhiDrishti on http://127.0.0.1:{port}/  (cases from {os.path.abspath(out_root)})")
@@ -199,6 +253,9 @@ def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
         m = Handler.gate.ac.mailer
         print(f"  mail notices: {'on, via ' + m.config.host if m else 'off'}")
         print(f"  email addresses: {'encrypted at rest (AES-256-GCM)' if field_key else 'stored as plain text'}")
+        print("  real cases: " + (f"only {', '.join(sorted(names))} and administrators; "
+                                  "every other account sees the generated cases"
+                                  if names else "every approved account"))
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

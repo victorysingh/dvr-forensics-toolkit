@@ -5229,6 +5229,157 @@ def test_access(tmp: str) -> None:
               nasty, pages.login_page().decode(), pages.signup_page().decode())))
 
 
+def test_case_split(tmp: str) -> None:
+    """serve --real-cases-for: real cases for named accounts, generated ones for
+    everyone else - enforced by the server, on every route that opens a case."""
+    print("\n[hosted demo: real cases only for named accounts]")
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from access.routes import COOKIE, Gate
+    from access.service import AccessControl
+    from viewer.server import Handler, visible_cases
+
+    real = {"id": "real-drive", "synthetic": False}
+    made = {"id": "made-disk", "synthetic": True}
+    both = [real, made]
+    check("with no split, every account sees every case, as before",
+          visible_cases(both, {"username": "olga", "role": "user"}, None) == both)
+    check("a named account sees only the real cases",
+          visible_cases(both, {"username": "demo", "role": "user"},
+                        frozenset({"demo"})) == [real])
+    check("any other account sees only the generated cases",
+          visible_cases(both, {"username": "olga", "role": "user"},
+                        frozenset({"demo"})) == [made])
+    check("an administrator sees all of them",
+          visible_cases(both, {"username": "boss", "role": "admin"},
+                        frozenset({"demo"})) == both)
+    check("a request with no account named fails closed, to the generated cases",
+          visible_cases(both, None, frozenset({"demo"})) == [made])
+
+    out = os.path.join(tmp, "split-out")
+    for name, synthetic in (("real-drive", False), ("made-disk", True)):
+        d = os.path.join(out, name, "analytics", "thumbnails")
+        os.makedirs(d)
+        open(os.path.join(out, name, "custody_ledger.jsonl"), "w").close()
+        with open(os.path.join(d, "face.jpg"), "wb") as fh:
+            fh.write(b"\xff\xd8 not really a jpeg")
+        if synthetic:
+            open(os.path.join(out, name, "SYNTHETIC"), "w").close()
+
+    ac = AccessControl(os.path.join(tmp, "split-access"))
+    ac.create_user("boss", "bosspassword123", role="admin")
+    ac.signup("demo", "demopassword123")
+    ac.signup("olga", "olgapassword123")
+
+    class _H(Handler):
+        out_root = out
+        gate = Gate(ac)
+        real_cases_for = frozenset({"demo"})
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+    def signed_in(name, password):
+        r = ac.login(name, password, "127.0.0.1", "UA/1")
+        if r.data["user"]["role"] != "admin":
+            ac.approve(r.data["request"]["public_id"], "boss")
+        return {"token": r.data["token"]}
+
+    def get(who, path):
+        rq = urllib.request.Request(base + path)
+        rq.add_header("Cookie", f"{COOKIE}={who['token']}")
+        try:
+            with urllib.request.urlopen(rq) as r:
+                status, headers, body = r.status, r.headers, r.read()
+        except urllib.error.HTTPError as e:
+            status, headers, body = e.code, e.headers, e.read()
+        for c in headers.get_all("Set-Cookie") or []:       # a rotated token
+            if c.startswith(COOKIE + "="):
+                who["token"] = c.split(";")[0].split("=", 1)[1]
+        return status, body
+
+    def ids(who):
+        st, body = get(who, "/api/cases")
+        return sorted(c["id"] for c in json.loads(body)) if st == 200 else st
+
+    try:
+        demo, olga = signed_in("demo", "demopassword123"), signed_in("olga", "olgapassword123")
+        boss = signed_in("boss", "bosspassword123")
+        check("over HTTP, the demo account lists only the real case",
+              ids(demo) == ["real-drive"], f"{ids(demo)}")
+        check("an ordinary account lists only the generated case",
+              ids(olga) == ["made-disk"], f"{ids(olga)}")
+        check("the administrator lists both", ids(boss) == ["made-disk", "real-drive"])
+        check("an ordinary account cannot open the real case by its name, nor its "
+              "thumbnails (real faces) or report",
+              get(olga, "/api/case/real-drive")[0] == 404
+              and get(olga, "/thumb/real-drive/face.jpg")[0] == 404
+              and get(olga, "/report/real-drive")[0] == 404)
+        check("the demo account cannot open the generated case either",
+              get(demo, "/api/case/made-disk")[0] == 404)
+        check("the demo account opens its real case's thumbnails",
+              get(demo, "/thumb/real-drive/face.jpg")[0] == 200)
+        st, body = get(olga, "/api/vendors")
+        guide = json.loads(body).get("guide", {}) if st == 200 else {}
+        check("every account gets the brand guide with the vendor list",
+              len(guide.get("brands", [])) == 9 and len(guide.get("steps", [])) == 4)
+    finally:
+        httpd.shutdown()
+
+    try:
+        from viewer.server import serve
+        serve(out, 0, require_access=False, real_cases_for="demo")
+        check("--real-cases-for without the gate is refused", False)
+    except SystemExit as exc:
+        check("--real-cases-for without the gate is refused",
+              "--require-access" in str(exc))
+    finally:
+        Handler.real_cases_for = None
+
+
+def test_brand_guide(tmp: str) -> None:
+    """Start here: one entry per PS vendor, statuses from the vendor matrix, and
+    only commands and options the CLI really has."""
+    print("\n[start here: brand guide]")
+    import shlex
+    import subprocess
+    from report.case import vendor_matrix
+    from viewer.guide import BRANDS, brand_guide
+
+    REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    g = brand_guide()
+    matrix = {v["vendor"]: v["parser_status"] for v in vendor_matrix()}
+    names = [b["vendor"] for b in g["brands"]]
+    check("the guide covers all eight PS vendors, plus 'other'",
+          set(matrix) <= set(names) and "Other / not sure" in names, f"{names}")
+    check("each brand's status is the vendor matrix's own (the weakest evidence), "
+          "never written into the guide",
+          all(b["status"] == matrix.get(b["vendor"], "") for b in g["brands"])
+          and not any("status" in b for b in BRANDS))
+    scan_help = subprocess.run([sys.executable, os.path.join(REPO, "cli.py"), "scan", "-h"],
+                               capture_output=True, text=True).stdout
+    flags = {f for b in g["brands"] for f in b["flags"].split()}
+    check("every scan option the guide adds exists on `scan`",
+          flags and all(f in scan_help for f in flags), f"{flags}")
+    cmds = [line for s in g["steps"] for line in s["cmd"].splitlines()
+            if "cli.py" in line] + [c for b in g["brands"] for c in b["after"]]
+    bad = []
+    for line in cmds:
+        argv = shlex.split(line.replace("{flags}", "").replace("<id from parse>", "x"))
+        sub = argv[argv.index("cli.py") + 1]
+        r = subprocess.run([sys.executable, os.path.join(REPO, "cli.py"), sub, "-h"],
+                           capture_output=True, text=True)
+        opts = [a for a in argv if a.startswith("--")]
+        if r.returncode != 0 or any(o not in r.stdout for o in opts):
+            bad.append(line)
+    check("every command in the guide is a real subcommand with real options",
+          not bad, f"{bad}")
+
+
 def test_access_supabase(tmp: str) -> None:
     """The access gate's Supabase store (access/supabase.py), without a network.
 
@@ -6199,6 +6350,8 @@ def main() -> int:
         test_access_supabase(tmp)
         test_access_mail(tmp)
         test_access_mail_decisions(tmp)
+        test_case_split(tmp)
+        test_brand_guide(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

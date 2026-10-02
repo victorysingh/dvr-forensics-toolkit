@@ -217,7 +217,10 @@ class Gate:
         d = self.ac.authorize(self._token(h), self._client(h), path)
         if d.allowed:
             # Authorised. Hand the request back to the viewer untouched, but
-            # carry a rotated token out on the same response if there is one.
+            # carry a rotated token out on the same response if there is one,
+            # and say whose request it is (the viewer shows some accounts
+            # cases it hides from others: viewer/server.py::visible_cases).
+            h.access_user = d.user
             if d.new_token:
                 h.access_set_cookie = self._cookie_header(
                     d.new_token,
