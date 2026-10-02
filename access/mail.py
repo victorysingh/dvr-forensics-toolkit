@@ -32,7 +32,7 @@ import stat
 import threading
 from dataclasses import dataclass, field
 from email.message import EmailMessage
-from email.utils import formataddr, make_msgid
+from email.utils import formataddr, formatdate, make_msgid
 from typing import Callable, Optional
 
 from access.policy import ACCESS_WINDOW_HOURS, REQUEST_TTL_MINUTES
@@ -156,6 +156,8 @@ class Mailer:
         msg["From"] = formataddr((PRODUCT, self.config.sender))
         msg["To"] = to
         msg["Subject"] = subject
+        # RFC 5322 requires a Date, and spam filters count a missing one against a message.
+        msg["Date"] = formatdate(usegmt=True)
         msg["Message-ID"] = make_msgid(domain=self.config.sender.split("@")[-1])
         msg.set_content(text)
         msg.add_alternative(html_body, subtype="html")

@@ -1239,6 +1239,7 @@ def cmd_access_request(args) -> int:
 def cmd_access_mail_test(args) -> int:
     """Send one test notice, synchronously, to prove the SMTP settings work."""
     from access import mail as M
+    from access.policy import stamp
     try:
         cfg = M.load_mail_config(args.mail_env)
     except M.MailConfigError as exc:
@@ -1249,7 +1250,7 @@ def cmd_access_mail_test(args) -> int:
         return 2
     result = {}
     subject, text, html_body = M.account_created(
-        "mail-test", args.to, "", cfg.public_url)
+        "mail-test", args.to, stamp(), cfg.public_url)
     M.Mailer(cfg, background=False).send(
         args.to, "AnokhiDrishti: test notice (settings check)", text, html_body,
         on_done=lambda ok, err: result.update(ok=ok, err=err))
