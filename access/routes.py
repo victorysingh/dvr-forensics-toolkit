@@ -61,6 +61,12 @@ class Gate:
         self.allow_signup = allow_signup
         self.trust_proxy = trust_proxy
 
+    @property
+    def _mail_from(self) -> str:
+        """The address notices come from, or "" when mail is off."""
+        mailer = getattr(self.ac, "mailer", None)
+        return mailer.config.sender if mailer is not None else ""
+
     # -- request helpers ---------------------------------------------------
     @staticmethod
     def _cookies(h) -> dict:
@@ -249,6 +255,9 @@ class Gate:
                 return self._redirect(h, "/" + d.request["public_id"])
             note = ("Account created. Sign in to place an access request."
                     if query.get("new") else "")
+            if note and self._mail_from:
+                note += (f" A confirmation email is on its way from {self._mail_from};"
+                         " if it is not in your inbox, check Spam.")
             form_token, cookie = self._form_token(h)
             return self._html(h, pages.login_page(
                 note=note, allow_signup=self.allow_signup,
@@ -265,7 +274,7 @@ class Gate:
             form_token, cookie = self._form_token(h)
             return self._html(h, pages.signup_page(
                 csrf=csrf_token(form_token), min_len=MIN_PASSWORD_LEN,
-                require_email=True), cookie=cookie)
+                require_email=True, mail_from=self._mail_from), cookie=cookie)
 
         if tail == "logout" and method == "POST":
             token = self._token(h)
@@ -330,7 +339,8 @@ class Gate:
         form = self._form(h)
         token = self._token(h)
         keep = dict(username=form.get("username", ""), email=form.get("email", ""),
-                    min_len=MIN_PASSWORD_LEN, require_email=True)
+                    min_len=MIN_PASSWORD_LEN, require_email=True,
+                    mail_from=self._mail_from)
         if not check_csrf(token, form.get("csrf", "")):
             fresh, cookie = self._form_token(h)
             return self._html(h, pages.signup_page(
