@@ -5968,6 +5968,8 @@ def test_access_mail(tmp: str) -> None:
     check("a sent message names the product, and carries plain text and HTML",
           msg is not None and msg["From"] == "AnokhiDrishti <notices@example.org>"
           and msg.get_content_type() == "multipart/alternative")
+    check("a sent message carries the Date and Message-ID headers RFC 5322 asks for",
+          msg is not None and bool(msg["Date"]) and bool(msg["Message-ID"]))
 
     # -- configuration ------------------------------------------------------
     saved = {k: os.environ.pop(k, None) for k in M.KEYS}
