@@ -181,12 +181,14 @@ class Gate:
             h.wfile.write(body)
         return True
 
-    def _json(self, h, obj, code: int = 200) -> bool:
+    def _json(self, h, obj, code: int = 200, cookie: str = "") -> bool:
         body = json.dumps(obj, default=str).encode()
         h.send_response(code)
         h.send_header("Content-Type", "application/json")
         h.send_header("Content-Length", str(len(body)))
         self._security_headers(h)
+        if cookie:
+            h.send_header("Set-Cookie", cookie)
         h.end_headers()
         if h.command != "HEAD":
             h.wfile.write(body)
@@ -296,6 +298,9 @@ class Gate:
                 csrf=csrf_token(form_token), min_len=MIN_PASSWORD_LEN,
                 require_email=True, mail_from=self._mail_from), cookie=cookie)
 
+        if tail == "me" and method in ("GET", "HEAD"):
+            return self._me(h)
+
         if tail == "logout" and method == "POST":
             token = self._token(h)
             if not check_csrf(token, self._form(h).get("csrf", "")):
@@ -307,6 +312,40 @@ class Gate:
 
         return self._html(h, pages.denied_page(
             "Not found", "There is nothing at that address."), code=404)
+
+    def _me(self, h) -> bool:
+        """Who is signed in, for the console's profile menu.
+
+        Answers only a browser the gate would let into the console; anyone
+        else gets 401 and learns nothing. It carries the CSRF value the
+        sign-out form needs: the session cookie is HttpOnly, so the page
+        cannot derive that itself, and a page on another origin cannot read
+        this response. Without --require-access there is no gate, the viewer
+        answers 404, and the console knows sign-in is off.
+        """
+        if not self.ac.rate.allow("gen:" + self._client(h), RATE_GENERAL_PER_MIN):
+            return self._json(h, {"error": "rate limited"}, 429)
+        token = self._token(h)
+        d = self.ac.authorize(token, self._client(h), PREFIX + "me")
+        if not d.allowed:
+            return self._json(h, {"error": "not signed in"}, 401)
+        user, request, session = d.user or {}, d.request or {}, d.session or {}
+        expires = request.get("access_expires_utc") or session.get("expires_utc", "")
+        cookie = ""
+        if d.new_token:
+            # The first use of a fresh grant rotates the token (see _guard).
+            token = d.new_token
+            cookie = self._cookie_header(
+                token, seconds_left(expires) or ACCESS_WINDOW_HOURS * 3600)
+        return self._json(h, {
+            "username": user.get("username", ""),
+            "role": user.get("role", ""),
+            "email": user.get("email") or "",
+            "public_id": request.get("public_id", ""),
+            "signed_in_utc": session.get("created_utc", ""),
+            "expires_utc": expires,
+            "csrf": csrf_token(token),
+        }, cookie=cookie)
 
     def _form_token(self, h) -> tuple:
         """(token, Set-Cookie) for the sign-in and sign-up forms.

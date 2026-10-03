@@ -15,4 +15,23 @@ export const api = {
   thumbUrl: (id, f) => `/thumb/${encodeURIComponent(id)}/${encodeURIComponent(f)}`,
   fileUrl: (id, rel) =>
     `/file/${encodeURIComponent(id)}/${String(rel).split("/").map(encodeURIComponent).join("/")}`,
+  me,
 };
+
+// Who is signed in (access/routes.py::Gate._me), as one of:
+//   { gate: true, user: {...} }   signed in behind serve --require-access
+//   { gate: true, user: null }    behind the gate, but the session has ended
+//   { gate: false }               no sign-in: the local viewer says so, and
+//                                 the static demo has no server at all
+async function me() {
+  try {
+    const r = await fetch("/access/me", { cache: "no-store" });
+    if (r.status === 401) return { gate: true, user: null };
+    const json = (r.headers.get("content-type") || "").includes("json");
+    if (!r.ok || !json) return { gate: false };
+    const body = await r.json();
+    return body.gate === false ? { gate: false } : { gate: true, user: body };
+  } catch {
+    return { gate: false };
+  }
+}

@@ -174,6 +174,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/vendors":
                 return self._json({"vendors": vendor_matrix(), "plugins": plugins_view(),
                                    "onboarding": ONBOARDING, "guide": brand_guide()})
+            if path == "/access/me":
+                # Reached only with sign-in off: behind --require-access the
+                # gate answers everything under /access/ itself. No account,
+                # and the console's profile menu says so.
+                return self._json({"gate": False})
             if path.startswith("/api/case/"):
                 d = _case_dir(self.out_root, path[len("/api/case/"):], self._cases())
                 if not d:

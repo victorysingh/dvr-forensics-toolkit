@@ -382,10 +382,23 @@
 
   /* The screen rail slides in when a case is opened (the home has none). */
   .rail-in { animation: rail-in 0.18s ease-out; }
+
+  /* The profile menu drops in from the bar rather than appearing. */
+  .menu-pop { animation: menu-pop 0.12s ease-out; transform-origin: top right; }
+}
+
+/* A phone gives a headline figure half the width it was drawn for: step it
+   down rather than cut "139.8 GiB" to "139.8 G…". Outside the layers, so it
+   outranks the per-look .figure sizes above. */
+@media (max-width: 639px) {
+  .figure-fit { font-size: 20px; }
 }
 
 @keyframes rail-in {
   from { opacity: 0; transform: translateX(-10px); }
+}
+@keyframes menu-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
 }
 
 @media (prefers-reduced-motion: reduce) {

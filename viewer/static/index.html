@@ -8,17 +8,17 @@
      any other, and on an air-gapped workstation nothing may leave the page. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2306080a'/%3E%3Crect x='7' y='8' width='18' height='16' rx='2' fill='none' stroke='%23c6f24e' stroke-width='2.5'/%3E%3Crect x='7' y='8' width='9' height='16' fill='%23c6f24e'/%3E%3C/svg%3E">
 <script>
-  // Pick the look and the theme before first paint, so the page never
-  // flashes one and settles into another. Wrapped because localStorage
-  // throws in a locked-down profile.
+  // Pick the theme before first paint, so the page never flashes one and
+  // settles into another. Wrapped because localStorage throws in a
+  // locked-down profile.
   //
   // With nothing stored, the theme follows the operating system: an
   // examiner who has set their machine light should not be handed a dark
   // console to argue with.
+  //
+  // The look is fixed by the attribute above. A look chosen while the
+  // switcher existed is ignored, so every browser shows the same console.
   try {
-    const l = localStorage.getItem("anokhidrishti-look");
-    if (l) document.documentElement.dataset.look = l;
-
     const t = localStorage.getItem("anokhidrishti-theme");
     const prefersLight = window.matchMedia
       && window.matchMedia("(prefers-color-scheme: light)").matches;
@@ -27,8 +27,8 @@
     }
   } catch (e) { /* keep the dark default in the html attributes */ }
 </script>
-  <script type="module" crossorigin src="/assets/app-ByKA7jVl.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BKbXp7fH.css">
+  <script type="module" crossorigin src="/assets/app-Bj8T9NJj.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-D2Ct7zxP.css">
 </head>
 <body>
 <div id="root"></div>

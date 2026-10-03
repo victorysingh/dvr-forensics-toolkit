@@ -114,7 +114,8 @@ explicit `--access-dir`.
 |---|---|---|
 | `/access/login` | anyone | sign in; creates or rejoins a request |
 | `/access/signup` | anyone | make a plain user (`--no-signup` closes it) |
-| `/access/logout` | POST only | ends the session |
+| `/access/logout` | POST only | ends the session; lands on the sign-in page |
+| `/access/me` | an approved browser | JSON for the console's profile menu: username, role, email, request id, deadline, and the sign-out form's token; 401 for anyone else. With sign-in off the viewer answers `{"gate": false}` |
 | `/<9 digits>` | anyone with the id | the waiting room; polls itself |
 | `/access/status/<id>` | anyone with the id | JSON: state only |
 | `/admin` | `admin` role | approve, reject, revoke, read the audit log |

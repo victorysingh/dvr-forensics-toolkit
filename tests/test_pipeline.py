@@ -5118,6 +5118,9 @@ def test_access(tmp: str) -> None:
         st, hd, _ = _go(op, "/api/cases")
         check("over HTTP, so is the JSON the console reads",
               st == 303, f"{st}")
+        st, _, body = _go(op, "/access/me")
+        check("the profile menu's /access/me tells a signed-out browser nothing",
+              st == 401 and json.loads(body) == {"error": "not signed in"}, f"{st}")
 
         st, hd, body = _go(op, "/access/login")
         tokf = _re.search(rb'name="csrf" value="([^"]*)"', body).group(1).decode()
@@ -5170,6 +5173,14 @@ def test_access(tmp: str) -> None:
               COOKIE + "=" in hd.get("Set-Cookie", ""))
         st, _, _ = _go(op, "/api/cases")
         check("the case API answers an approved browser", st == 200, f"{st}")
+        st, hd, body = _go(op, "/access/me")
+        me = json.loads(body) if st == 200 else {}
+        check("/access/me names the approved account, its request and its deadline",
+              st == 200 and me.get("username") == "gail" and me.get("role") == "user"
+              and me.get("public_id") == pid and me.get("expires_utc")
+              and "password_hash" not in body.decode(), f"{st} {sorted(me)}")
+        check("... with the sign-out form's token, and never stored by a cache",
+              len(me.get("csrf", "")) == 32 and "no-store" in hd.get("Cache-Control", ""))
 
         _H.gate.ac.revoke(pid, "boss", "test")
         st, hd, _ = _go(op, "/")
@@ -5177,6 +5188,8 @@ def test_access(tmp: str) -> None:
               st == 303, f"{st}")
         st, _, _ = _go(op, "/api/cases")
         check("... and the API with it", st == 303, f"{st}")
+        st, _, _ = _go(op, "/access/me")
+        check("... and /access/me no longer knows it", st == 401, f"{st}")
 
         adm = _open()
         st, _, body = _go(adm, "/access/login")
@@ -5194,6 +5207,23 @@ def test_access(tmp: str) -> None:
                        b"csrf=nope&public_id=1&action=approve")
         check("a decision without the form token changes nothing", st == 200)
 
+        # The profile menu's "Log out": a form post carrying the token that
+        # /access/me handed the page, which cannot read the HttpOnly cookie.
+        st, _, body = _go(adm, "/access/me")
+        me = json.loads(body) if st == 200 else {}
+        check("/access/me knows an administrator, who has no request",
+              st == 200 and me.get("role") == "admin" and me.get("public_id") == "",
+              f"{st}")
+        st, hd, _ = _go(adm, "/access/logout", b"csrf=nope")
+        check("signing out without that token is refused", st == 400, f"{st}")
+        st, hd, _ = _go(adm, "/access/logout", f"csrf={me.get('csrf')}".encode())
+        check("signing out with it lands on the sign-in page and clears the cookie",
+              st == 303 and hd.get("Location") == "/access/login"
+              and "Max-Age=0" in hd.get("Set-Cookie", ""), f"{st}")
+        st, hd, _ = _go(adm, "/admin")
+        check("... and the session it ended opens nothing",
+              st == 303 and hd.get("Location") == "/access/login", f"{st}")
+
         # A revoked browser is nobody, and nobody is redirected rather than
         # refused - so the role check needs a plain user who is signed in now.
         _H.gate.ac.signup("hank", "hankpassword123")
@@ -5205,6 +5235,9 @@ def test_access(tmp: str) -> None:
         st, _, body = _go(plain, "/admin")
         check("a signed-in plain user is refused the panel outright",
               st == 403 and b"cannot approve" in body, f"{st}")
+        st, _, _ = _go(plain, "/access/me")
+        check("a request still waiting for approval is not an account to show",
+              st == 401, f"{st}")
 
         # 3 Oct: "That form expired" on sign-up. A link from another site
         # arrives without the SameSite=Strict session cookie, and the page
@@ -5243,6 +5276,22 @@ def test_access(tmp: str) -> None:
         st, _, _ = raw("/access/login", {COOKIE: "x"},
                        f"csrf={csrf_su}&username=gail&password=gailpassword123".encode())
         check("so is a sign-in posted without it", st == 400, f"{st}")
+    finally:
+        httpd.shutdown()
+
+    # Without --require-access there is no gate: the viewer says sign-in is
+    # off, and the profile menu shows a local examiner with nothing to leave.
+    class _Open(Handler):
+        out_root = "out"
+        gate = None
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Open)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{httpd.server_address[1]}/access/me") as r:
+            check("with sign-in off, /access/me says so and names no one",
+                  r.status == 200 and json.loads(r.read()) == {"gate": False})
     finally:
         httpd.shutdown()
 

@@ -3,12 +3,14 @@
 // A screen is a component of the case view and nothing more: it fetches
 // nothing itself, so adding a screen means one entry in SCREENS and one file
 // under screens/.
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "./lib/api.js";
 import { useHashRoute, linkTo, go } from "./lib/useHashRoute.js";
 import { bytes, num, pct } from "./lib/format.js";
 import { isDemo } from "./lib/host.js";
 import { Skeleton, Empty, ToastHost, useToast, DL } from "./components/index.jsx";
+import { ProfileMenu } from "./components/Account.jsx";
+import { useTheme, flipTheme } from "./lib/theme.js";
 
 import Dashboard from "./screens/Dashboard.jsx";
 import Evidence from "./screens/Evidence.jsx";
@@ -99,16 +101,23 @@ function Console() {
   const Screen = screen.C;
   // The screen rail belongs to a case: on the cases home it would list
   // screens that have nothing to show yet, so it only appears once a case is
-  // open, and the home takes the full width.
+  // open, and the home takes the full width. On a phone it is a bar along
+  // the bottom instead, where a thumb reaches it and it costs no width.
+  //
+  // h-dvh, not h-screen: on a phone 100vh includes the browser's own
+  // toolbars, so the bottom of the console would sit underneath them.
   return (
-    <div className="grid grid-rows-[auto_1fr] grid-cols-[minmax(0,1fr)] h-screen">
+    <div className="grid grid-rows-[auto_minmax(0,1fr)] grid-cols-[minmax(0,1fr)] h-dvh">
       <TopBar cases={cases} caseId={caseId} screen={screen.id} c={caseData} />
       <div className={`grid min-h-0 ${caseId
-        ? "grid-cols-[52px_1fr] xl:grid-cols-[208px_1fr]" : "grid-cols-[1fr]"}`}>
+        ? `grid-rows-[minmax(0,1fr)_auto] md:grid-rows-[minmax(0,1fr)]
+           md:grid-cols-[52px_minmax(0,1fr)] xl:grid-cols-[208px_minmax(0,1fr)]`
+        : "grid-cols-[minmax(0,1fr)]"}`}>
         {caseId && <Sidebar caseId={caseId} screen={screen.id} />}
-        <div className="grid grid-rows-[auto_1fr] min-w-0 min-h-0">
+        <div className="grid grid-rows-[auto_minmax(0,1fr)] min-w-0 min-h-0">
           <Stepper c={caseData} caseId={caseId} />
-          <main className="min-w-0 overflow-y-auto px-5 pt-4 pb-10" key={`${caseId}/${screen.id}`}>
+          <main className="min-w-0 overflow-y-auto px-3 sm:px-5 pt-4 pb-10"
+            key={`${caseId}/${screen.id}`}>
             {onGuide ? <StartHere guide={vendorInfo?.guide} cases={cases}
                 brand={route.screen === "dashboard" ? null : route.screen} />
               : !caseId ? <CasesHome cases={cases} />
@@ -132,31 +141,39 @@ function TopBar({ cases, caseId, screen, c }) {
   const ver = c?.custody?.verify;
   const live = c?.in_progress;
   return (
-    <header className="panel rounded-none border-0 border-b flex items-center gap-3.5 px-4 h-13
-      min-h-[52px]">
-      <div className="flex items-center gap-2 font-semibold whitespace-nowrap">
+    // On a phone the name shrinks to its mark and the posture badge moves
+    // into the profile menu, so the case picker keeps the room it needs.
+    <header className="panel rounded-none border-0 border-b flex items-center gap-2 sm:gap-3.5
+      px-3 sm:px-4 h-13 min-h-[52px] relative z-30">
+      <a href="#/" title="All cases"
+        className="flex items-center gap-2 font-semibold whitespace-nowrap shrink-0">
         <span className="text-accent text-lg">&#9703;</span>
-        <span>AnokhiDrishti<span className="dim font-normal text-[11px] hidden sm:inline">
+        <span className="hidden min-[420px]:inline">AnokhiDrishti<span
+          className="dim font-normal text-[11px] hidden lg:inline">
           &nbsp;&middot; DVR/NVR forensics</span></span>
-      </div>
+      </a>
 
       <select value={caseId || ""} aria-label="Case"
         onChange={(e) => go(e.target.value || null, screen)}
-        className="panel-2 hairline border rounded-lg px-2.5 py-1.5 max-w-[320px] min-w-0 text-sm">
+        className="panel-2 hairline border rounded-lg px-2.5 py-1.5 w-0 flex-1 sm:flex-none
+          sm:w-auto max-w-[320px] min-w-0 text-sm">
         <option value="">All cases&hellip;</option>
         {cases.map((x) => (
           <option key={x.id} value={x.id}>{x.id}{x.case_id ? ` · ${x.case_id}` : ""}</option>
         ))}
       </select>
 
-      <a href="#/start" className="text-[13px] whitespace-nowrap hover:text-accent">
-        Start here</a>
+      <a href="#/start" className="hidden sm:inline text-[13px] whitespace-nowrap
+        hover:text-accent">Start here</a>
 
-      <span className="flex-1" />
+      <span className="hidden sm:block flex-1" />
 
       {live && <Badge tone="live">LIVE {pct(live.fraction)}</Badge>}
-      {ver && <Badge tone={ver.valid ? "ok" : "bad"}>
-        {ver.valid ? "chain intact" : "chain broken"}</Badge>}
+      {ver && <Badge tone={ver.valid ? "ok" : "bad"}
+        title={ver.valid ? "Custody chain intact" : "Custody chain broken"}>
+        <span className="hidden min-[400px]:inline">
+          {ver.valid ? "chain intact" : "chain broken"}</span></Badge>}
+      <span className="hidden lg:inline-flex">
       {isDemo() && cases.length && cases.every((x) => x.synthetic)
         ? <Badge tone="warn" title="Sample cases generated for the demonstration from made-up
             disks - not evidence. The tool itself runs offline on an examiner's machine.">
@@ -165,15 +182,15 @@ function TopBar({ cases, caseId, screen, c }) {
         ? <Badge tone="warn" title="Served over the internet for review, behind sign-in and an
             administrator's approval. The tool itself runs offline on an examiner's machine.">
             hosted &middot; approved access</Badge>
-        : <span className="hidden sm:inline-flex">
-            <Badge title="Binds 127.0.0.1, never opens an evidence device, never writes">
-              offline &middot; read-only</Badge></span>}
+        : <Badge title="Binds 127.0.0.1, never opens an evidence device, never writes">
+            offline &middot; read-only</Badge>}
+      </span>
       {c?.scan && (
         <a href={api.reportUrl(c.id)} target="_blank" rel="noopener"
           className="hidden md:inline-flex"><Badge>Report &#8599;</Badge></a>
       )}
-      <LookSwitcher />
       <ThemeToggle />
+      <ProfileMenu />
     </header>
   );
 }
@@ -199,90 +216,41 @@ function Badge({ children, tone, title }) {
   );
 }
 
-/* Three looks, switchable live. This is evaluation scaffolding: once a
-   direction is chosen the other two go, and this becomes one line in
-   index.html. Keeping it here means the comparison is made on real screens
-   with real case data rather than on mockups. */
-export const LOOKS = [
-  { id: "instrument", label: "Instrument" },
-  { id: "dossier", label: "Dossier" },
-  { id: "platter", label: "Platter" },
-];
-
-export function setLook(id) {
-  document.documentElement.dataset.look = id;
-  try { localStorage.setItem("anokhidrishti-look", id); } catch { /* ignore */ }
-}
-
-/* Light and dark are per-look palettes, not one inversion (index.css). With
-   nothing stored the theme follows the operating system, and choosing here
-   pins it — after which the system no longer overrides the choice. */
-export function setTheme(t) {
-  if (t === "light") document.documentElement.dataset.theme = "light";
-  else delete document.documentElement.dataset.theme;
-  try { localStorage.setItem("anokhidrishti-theme", t); } catch { /* ignore */ }
-}
-
-export const currentTheme = () =>
-  document.documentElement.dataset.theme === "light" ? "light" : "dark";
-
-/* The keyboard shortcuts set the attribute directly, so a control holding
-   its own copy would fall out of step the first time one is pressed. Both
-   controls read the attribute instead and re-read it whenever it changes. */
-function useHtmlAttr(read) {
-  const [v, setV] = useState(read);
-  useEffect(() => {
-    const el = document.documentElement;
-    const o = new MutationObserver(() => setV(read()));
-    o.observe(el, { attributes: true, attributeFilter: ["data-theme", "data-look"] });
-    setV(read());
-    return () => o.disconnect();
-  }, [read]);
-  return v;
-}
-
+/* The theme lives in lib/theme.js, so the profile menu can switch it too.
+   On a phone the switch is in that menu only; the bar has no room for both. */
 function ThemeToggle() {
-  const theme = useHtmlAttr(currentTheme);
-  const flip = () => setTheme(theme === "light" ? "dark" : "light");
+  const theme = useTheme();
   return (
-    <button onClick={flip}
+    <button onClick={flipTheme}
       title={`${theme === "light" ? "Dark" : "Light"} mode (press t)`}
       aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
       className="hairline border rounded-[var(--radius-panel)] w-8 h-8 shrink-0
-        dim hover:text-accent hover:border-accent cursor-pointer leading-none">
+        dim hover:text-accent hover:border-accent cursor-pointer leading-none
+        hidden sm:block">
       {theme === "light" ? "◑" : "◐"}
     </button>
   );
 }
 
-const readLook = () => document.documentElement.dataset.look || LOOKS[0].id;
-
-function LookSwitcher() {
-  const look = useHtmlAttr(readLook);
-  return (
-    <div className="hairline border rounded-[var(--radius-panel)] hidden md:flex overflow-hidden"
-      title="Visual direction (press l to cycle)">
-      {LOOKS.map((l) => (
-        <button key={l.id} onClick={() => setLook(l.id)}
-          className={`px-2.5 py-1 text-[11px] cursor-pointer micro
-            ${l.id === look ? "bg-accent/15 text-accent" : "dim"}`}>
-          {l.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------- sidebar */
 function Sidebar({ caseId, screen }) {
+  // On a phone the bar scrolls sideways; keep the open screen in view.
+  const here = useRef(null);
+  useEffect(() => {
+    here.current?.scrollIntoView?.({ block: "nearest", inline: "center" });
+  }, [screen]);
   return (
-    <nav className="panel rounded-none border-0 border-r p-2 overflow-y-auto rail-in"
+    <nav className="panel rounded-none border-0 border-t md:border-t-0 md:border-r p-1 md:p-2
+      order-last md:order-none flex md:block overflow-x-auto md:overflow-x-visible
+      md:overflow-y-auto rail-in"
       aria-label="Screens">
       <a href="#/" title="All cases (Esc)"
-        className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12.5px]
-          justify-center xl:justify-start dim hover:text-accent">
-        <span className="w-[18px] text-center shrink-0">&larr;</span>
-        <span className="hidden xl:inline">All cases</span>
+        className="flex flex-col md:flex-row items-center gap-0.5 md:gap-2.5 shrink-0
+          min-w-[58px] md:min-w-0 px-1.5 md:px-2.5 py-1.5 rounded-lg text-[10.5px]
+          md:text-[12.5px] justify-center xl:justify-start dim hover:text-accent">
+        <span className="w-[18px] text-center shrink-0 text-[15px] md:text-[length:inherit]">
+          &larr;</span>
+        <span className="md:hidden xl:inline">All cases</span>
       </a>
       <div className="hidden xl:block px-2.5 pt-1 pb-2.5 mb-1.5 border-b hairline">
         <div className="micro">Case</div>
@@ -291,12 +259,15 @@ function Sidebar({ caseId, screen }) {
       {SCREENS.map((s, i) => {
         const on = s.id === screen;
         return (
-          <a key={s.id} href={linkTo(caseId, s.id)}
-            className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13.5px]
-              justify-center xl:justify-start
+          <a key={s.id} href={linkTo(caseId, s.id)} ref={on ? here : null}
+            aria-current={on ? "page" : undefined} title={s.label}
+            className={`flex flex-col md:flex-row items-center gap-0.5 md:gap-2.5 shrink-0
+              min-w-[64px] md:min-w-0 px-1.5 md:px-2.5 py-1.5 md:py-2 rounded-lg
+              text-[10.5px] md:text-[13.5px] whitespace-nowrap justify-center xl:justify-start
               ${on ? "bg-accent/15 text-accent" : "dim hover:panel-2 hover:text-current"}`}>
-            <span className="w-[18px] text-center shrink-0">{s.ico}</span>
-            <span className="hidden xl:inline">{s.label}</span>
+            <span className="w-[18px] text-center shrink-0 text-[15px] md:text-[length:inherit]">
+              {s.ico}</span>
+            <span className="md:hidden xl:inline">{s.label}</span>
             <span className="hidden xl:inline ml-auto font-mono text-[10.5px] dim">
               {i + 1}</span>
           </a>
@@ -333,15 +304,17 @@ function Stepper({ c, caseId }) {
   const edge = { done: "var(--color-validated)", part: "var(--color-synthetic)",
                  run: "var(--color-accent)" };
   return (
-    <nav className="hairline border-b px-5 py-2.5 flex gap-1.5 flex-wrap"
-      aria-label="Pipeline stages">
+    // One strip that scrolls sideways on a phone: seven stages wrapped into
+    // rows there took a third of the screen before any evidence showed.
+    <nav className="hairline border-b px-3 sm:px-5 py-2 sm:py-2.5 flex gap-1.5 overflow-x-auto
+      md:flex-wrap md:overflow-x-visible" aria-label="Pipeline stages">
       {stages.map(([t, to, d, cls]) => (
         <button key={t} onClick={() => go(caseId, to)}
           title={`${t}: ${cls === "done" ? "done" : cls === "part" ? "partial"
             : cls === "run" ? "running" : "not run"}`}
           style={{ borderLeft: `3px solid ${edge[cls] || "var(--color-line)"}` }}
-          className="panel px-2.5 py-1.5 text-left flex-1
-            min-w-[120px] basis-[130px] cursor-pointer hover:border-accent">
+          className="panel px-2.5 py-1.5 text-left shrink-0 md:shrink md:flex-1
+            min-w-[118px] md:basis-[130px] cursor-pointer hover:border-accent">
           <div className="text-[12.5px] font-semibold">{t}</div>
           <div className="dim text-[11px]">{d}</div>
         </button>
@@ -411,8 +384,8 @@ function CasesHome({ cases }) {
             Uniview, Matrix or other: what the tool does for it, and the four steps from
             disk to case.</span></span>
       </a>
-      <div className="flex items-end justify-between gap-4 flex-wrap mb-4">
-        <div>
+      <div className="flex items-end justify-between gap-x-4 gap-y-3 flex-wrap mb-4">
+        <div className="min-w-0">
           <h1 className="display text-[22px] font-semibold">Cases</h1>
           <p className="dim text-[13px] mt-0.5">
             Open a case to examine its evidence, recordings, recovered footage,
@@ -421,8 +394,8 @@ function CasesHome({ cases }) {
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)}
           data-table-search placeholder="Filter by case, vendor or device  ( / )"
           aria-label="Filter cases"
-          className="panel-2 hairline border rounded-lg px-3 py-1.5 text-sm w-[300px]
-            max-w-full" />
+          className="panel-2 hairline border rounded-lg px-3 py-1.5 text-sm w-full
+            sm:w-[300px]" />
       </div>
 
       <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mb-6">
@@ -437,7 +410,7 @@ function CasesHome({ cases }) {
       {ready.length > 0 && (
         <section className="mb-7">
           <h2 className="micro mb-2.5">Ready to examine &middot; {ready.length}</h2>
-          <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(300px,1fr))]">
+          <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))]">
             {ready.map((c) => <CaseCard key={c.id} c={c} />)}
           </div>
         </section>
@@ -478,7 +451,10 @@ function HomeStat({ label, value, small }) {
   return (
     <div className="panel px-4 py-3 min-w-0">
       <div className="micro">{label}</div>
-      <div className={`${small ? "text-[15px] font-semibold mt-1.5" : "figure mt-1"} truncate`}
+      {/* A long value (the vendors) wraps to a second line rather than
+          losing its end; a figure steps down a size on a phone. */}
+      <div className={small ? "text-[14px] sm:text-[15px] font-semibold mt-1.5 line-clamp-2"
+        : "figure figure-fit mt-1 truncate"}
         title={String(value)}>{value}</div>
     </div>
   );
@@ -524,16 +500,7 @@ function useKeyboard(screens, caseId) {
     const on = (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
       if (["input", "select", "textarea"].includes(tag) || e.metaKey || e.ctrlKey) return;
-      if (e.key === "l") {
-        const cur = document.documentElement.dataset.look || LOOKS[0].id;
-        const i = LOOKS.findIndex((x) => x.id === cur);
-        setLook(LOOKS[(i + 1) % LOOKS.length].id);
-        return;
-      }
-      if (e.key === "t") {
-        setTheme(currentTheme() === "light" ? "dark" : "light");
-        return;
-      }
+      if (e.key === "t") { flipTheme(); return; }
       if (e.key === "/") {
         const q = document.querySelector("[data-table-search]");
         if (q) { e.preventDefault(); q.focus(); }

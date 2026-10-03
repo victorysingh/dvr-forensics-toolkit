@@ -115,9 +115,11 @@ td.mono,.mono{font-family:var(--mono);font-size:12.5px}
 .stat b{display:block;font-size:21px;font-weight:600}
 .stat span{color:var(--dim);font-size:11.5px}
 .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
-.bar-top{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.bar-top{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
 .bar-top .sp{flex:1}
 .empty{color:var(--dim);text-align:center;padding:22px;font-size:13px}
+.panel:has(table){overflow-x:auto}
+@media (max-width:600px){.panel{padding:16px}th,td{white-space:nowrap}}
 .tiny{color:var(--dim);font-size:11.5px}
 """
 
