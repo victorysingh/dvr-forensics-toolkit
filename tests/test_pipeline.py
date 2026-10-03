@@ -4810,7 +4810,7 @@ def test_access(tmp: str) -> None:
                                RATE_AUTH_BURST_PER_MIN, RATE_AUTH_PER_MIN,
                                RATE_DECIDE_PER_MIN, REJECTED, REVOKED,
                                is_past, now, parse, plus, stamp)
-    from access.routes import COOKIE, Gate
+    from access.routes import COOKIE, FORM_COOKIE, Gate
     from access.service import (AccessControl, check_csrf, csrf_token,
                                 new_public_id)
 
@@ -5125,9 +5125,12 @@ def test_access(tmp: str) -> None:
         st, hd, body = _go(op, "/access/login")
         tokf = _re.search(rb'name="csrf" value="([^"]*)"', body).group(1).decode()
         check("the login form is served to an anonymous browser", st == 200)
-        check("its cookie is HttpOnly and SameSite=Strict",
-              "HttpOnly" in hd.get("Set-Cookie", "")
-              and "SameSite=Strict" in hd.get("Set-Cookie", ""))
+        form_cookie = hd.get("Set-Cookie", "")
+        check("the form's own cookie is HttpOnly and SameSite=Lax, and is not the "
+              "session cookie",
+              form_cookie.startswith(FORM_COOKIE + "=") and "HttpOnly" in form_cookie
+              and "SameSite=Lax" in form_cookie
+              and not any(c.startswith(COOKIE + "=") for c in hd.get_all("Set-Cookie")))
         check("a content-security policy is sent with it",
               "Content-Security-Policy" in hd
               and "frame-ancestors 'none'" in hd["Content-Security-Policy"])
@@ -5142,6 +5145,10 @@ def test_access(tmp: str) -> None:
         loc = hd.get("Location", "")
         check("a correct password redirects to a 9-digit waiting room",
               st == 303 and bool(_re.fullmatch(r"/[1-9]\d{8}", loc)), f"{st} {loc}")
+        session_cookie = next((c for c in hd.get_all("Set-Cookie") or []
+                               if c.startswith(COOKIE + "=")), "")
+        check("the session cookie, set only at sign-in, is HttpOnly and SameSite=Strict",
+              "HttpOnly" in session_cookie and "SameSite=Strict" in session_cookie)
         pid = loc[1:]
 
         st, _, body = _go(op, loc)
@@ -5231,6 +5238,44 @@ def test_access(tmp: str) -> None:
         st, _, _ = _go(plain, "/access/me")
         check("a request still waiting for approval is not an account to show",
               st == 401, f"{st}")
+
+        # 3 Oct: "That form expired" on sign-up. A link from another site
+        # arrives without the SameSite=Strict session cookie, and the page
+        # used to mint a new one over it, so the session was gone and a form
+        # open in another tab no longer matched.
+        def raw(path, cookies, data=None):
+            rq = urllib.request.Request(base + path, data=data,
+                                        method="POST" if data else "GET")
+            rq.add_header("Cookie", "; ".join(f"{k}={v}" for k, v in cookies.items()))
+            if data:
+                rq.add_header("Content-Type", "application/x-www-form-urlencoded")
+            try:
+                with _NoRedirectOpener.open(rq) as r:
+                    return r.status, r.headers, r.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.headers, e.read()
+        _NoRedirectOpener = urllib.request.build_opener(_NoRedirect())
+
+        st, hd, body = raw("/access/signup", {})          # from an email: no cookies sent
+        set_names = [c.split("=", 1)[0] for c in hd.get_all("Set-Cookie") or []]
+        check("a sign-in page reached from another site never sets the session cookie",
+              st == 200 and COOKIE not in set_names and FORM_COOKIE in set_names,
+              f"{set_names}")
+        form_tok = hd.get("Set-Cookie").split(";")[0].split("=", 1)[1]
+        csrf_su = _re.search(rb'name="csrf" value="([^"]*)"', body).group(1).decode()
+        st, hd, _ = raw("/access/signup", {FORM_COOKIE: form_tok, COOKIE: "signed-in-elsewhere"},
+                        f"csrf={csrf_su}&username=ivy&email=ivy%40example.org"
+                        f"&password=ivypassword123&password2=ivypassword123".encode())
+        check("an open sign-up form still works after the session changed in another tab",
+              st == 303 and hd.get("Location") == "/access/login?new=1", f"{st}")
+        st, _, body = raw("/access/signup", {COOKIE: "signed-in-elsewhere"},
+                          f"csrf={csrf_su}&username=jay&email=jay%40example.org"
+                          f"&password=jaypassword1234&password2=jaypassword1234".encode())
+        check("a sign-up posted without the form's cookie (from another site) is refused",
+              st == 400 and b"had expired" in body and b'value="jay"' in body, f"{st}")
+        st, _, _ = raw("/access/login", {COOKIE: "x"},
+                       f"csrf={csrf_su}&username=gail&password=gailpassword123".encode())
+        check("so is a sign-in posted without it", st == 400, f"{st}")
     finally:
         httpd.shutdown()
 
@@ -5276,6 +5321,219 @@ def test_access(tmp: str) -> None:
     check("every gate page carries the console's own tab icon, inline",
           all('rel="icon" href="data:image/svg+xml' in pg for pg in (
               nasty, pages.login_page().decode(), pages.signup_page().decode())))
+
+
+def test_case_split(tmp: str) -> None:
+    """serve --real-cases-for: real cases for named accounts, generated ones for
+    everyone else - enforced by the server, on every route that opens a case."""
+    print("\n[hosted demo: real cases only for named accounts]")
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from access.routes import COOKIE, Gate
+    from access.service import AccessControl
+    from viewer.server import Handler, visible_cases
+
+    real = {"id": "real-drive", "synthetic": False}
+    made = {"id": "made-disk", "synthetic": True}
+    both = [real, made]
+    check("with no split, every account sees every case, as before",
+          visible_cases(both, {"username": "olga", "role": "user"}, None) == both)
+    check("a named account sees only the real cases",
+          visible_cases(both, {"username": "demo", "role": "user"},
+                        frozenset({"demo"})) == [real])
+    check("any other account sees only the generated cases",
+          visible_cases(both, {"username": "olga", "role": "user"},
+                        frozenset({"demo"})) == [made])
+    check("an administrator sees all of them",
+          visible_cases(both, {"username": "boss", "role": "admin"},
+                        frozenset({"demo"})) == both)
+    check("a request with no account named fails closed, to the generated cases",
+          visible_cases(both, None, frozenset({"demo"})) == [made])
+
+    out = os.path.join(tmp, "split-out")
+    for name, synthetic in (("real-drive", False), ("made-disk", True)):
+        d = os.path.join(out, name, "analytics", "thumbnails")
+        os.makedirs(d)
+        open(os.path.join(out, name, "custody_ledger.jsonl"), "w").close()
+        with open(os.path.join(d, "face.jpg"), "wb") as fh:
+            fh.write(b"\xff\xd8 not really a jpeg")
+        if synthetic:
+            open(os.path.join(out, name, "SYNTHETIC"), "w").close()
+
+    ac = AccessControl(os.path.join(tmp, "split-access"))
+    ac.create_user("boss", "bosspassword123", role="admin")
+    ac.signup("demo", "demopassword123")
+    ac.signup("olga", "olgapassword123")
+
+    class _H(Handler):
+        out_root = out
+        gate = Gate(ac)
+        real_cases_for = frozenset({"demo", "judge"})
+
+    _H.gate.real_cases_for = _H.real_cases_for
+    ac.signup("judge", "judgepassword12")
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+    def signed_in(name, password):
+        r = ac.login(name, password, "127.0.0.1", "UA/1")
+        if r.data["user"]["role"] != "admin":
+            ac.approve(r.data["request"]["public_id"], "boss")
+        return {"token": r.data["token"]}
+
+    def get(who, path):
+        rq = urllib.request.Request(base + path)
+        rq.add_header("Cookie", f"{COOKIE}={who['token']}")
+        try:
+            with urllib.request.urlopen(rq) as r:
+                status, headers, body = r.status, r.headers, r.read()
+        except urllib.error.HTTPError as e:
+            status, headers, body = e.code, e.headers, e.read()
+        for c in headers.get_all("Set-Cookie") or []:       # a rotated token
+            if c.startswith(COOKIE + "="):
+                who["token"] = c.split(";")[0].split("=", 1)[1]
+        return status, body
+
+    def ids(who):
+        st, body = get(who, "/api/cases")
+        return sorted(c["id"] for c in json.loads(body)) if st == 200 else st
+
+    try:
+        demo, olga = signed_in("demo", "demopassword123"), signed_in("olga", "olgapassword123")
+        boss = signed_in("boss", "bosspassword123")
+        check("over HTTP, the demo account lists only the real case",
+              ids(demo) == ["real-drive"], f"{ids(demo)}")
+        check("an ordinary account lists only the generated case",
+              ids(olga) == ["made-disk"], f"{ids(olga)}")
+        check("the administrator lists both", ids(boss) == ["made-disk", "real-drive"])
+        check("an ordinary account cannot open the real case by its name, nor its "
+              "thumbnails (real faces) or report",
+              get(olga, "/api/case/real-drive")[0] == 404
+              and get(olga, "/thumb/real-drive/face.jpg")[0] == 404
+              and get(olga, "/report/real-drive")[0] == 404)
+        check("the demo account cannot open the generated case either",
+              get(demo, "/api/case/made-disk")[0] == 404)
+        check("the demo account opens its real case's thumbnails",
+              get(demo, "/thumb/real-drive/face.jpg")[0] == 200)
+        st, body = get(olga, "/api/vendors")
+        guide = json.loads(body).get("guide", {}) if st == 200 else {}
+        check("every account gets the brand guide with the vendor list",
+              len(guide.get("brands", [])) == 9 and len(guide.get("steps", [])) == 4)
+        ac.login("judge", "judgepassword12", "127.0.0.1", "UA/1")     # left pending
+        st, page = get(boss, "/admin")
+        page = page.decode()
+        tag = "demo &middot; sees real cases"
+        rows = {u: page[page.index(f"<tr><td>{u}</td>"):][:400] for u in ("demo", "olga")
+                if f"<tr><td>{u}</td>" in page}
+        pend = page[page.index("Waiting for a decision"):page.index("Recent requests")] \
+            if "Recent requests" in page else ""
+        check("the admin panel marks the account that sees the real cases, and no other",
+              st == 200 and tag in rows.get("demo", "") and tag not in rows.get("olga", "x"),
+              f"{st} {sorted(rows)}")
+        check("a pending request from such an account is marked too, where the "
+              "approval is given",
+              "<td>judge <span class=\"pill real\"" in pend)
+    finally:
+        httpd.shutdown()
+
+    try:
+        from viewer.server import serve
+        serve(out, 0, require_access=False, real_cases_for="demo")
+        check("--real-cases-for without the gate is refused", False)
+    except SystemExit as exc:
+        check("--real-cases-for without the gate is refused",
+              "--require-access" in str(exc))
+    finally:
+        Handler.real_cases_for = None
+
+
+def test_viewer_serving(tmp: str) -> None:
+    """The viewer under load: a deep enough listen queue, and caching only for
+    files named by their content."""
+    print("\n[viewer: concurrency and caching]")
+    import concurrent.futures as cf
+    import threading
+    import time
+    import urllib.request
+
+    from viewer.server import STATIC, Handler, Server
+
+    class _H(Handler):
+        out_root = os.path.join(tmp, "serving-out")
+        gate = None
+
+    httpd = Server(("127.0.0.1", 0), _H)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+    def get(path):
+        with urllib.request.urlopen(base + path) as r:
+            r.read()
+            return r.headers.get("Cache-Control", "")
+    try:
+        check("the server queues more than socketserver's 5 waiting connections",
+              Server.request_queue_size >= 64)
+        get("/api/vendors")
+        t = time.time()
+        with cf.ThreadPoolExecutor(20) as ex:
+            list(ex.map(lambda i: get(f"/api/vendors?{i}"), range(20)))
+        wall = time.time() - t
+        # With a queue of 5, dropped connections are retried after 1 s, so 20
+        # at once took over a second even for a 2 ms answer.
+        check("20 requests at once are answered without a connection retry",
+              wall < 0.8, f"{wall:.2f}s")
+        assets = sorted(os.listdir(os.path.join(STATIC, "assets")))
+        js = next(a for a in assets if a.startswith("app-") and a.endswith(".js"))
+        check("a content-hashed asset may be kept by the browser, privately",
+              "immutable" in get(f"/assets/{js}") and "private" in get(f"/assets/{js}"))
+        check("the page itself and the case data are never stored",
+              get("/") == "no-store" and get("/api/cases") == "no-store")
+    finally:
+        httpd.shutdown()
+
+
+def test_brand_guide(tmp: str) -> None:
+    """Start here: one entry per PS vendor, statuses from the vendor matrix, and
+    only commands and options the CLI really has."""
+    print("\n[start here: brand guide]")
+    import shlex
+    import subprocess
+    from report.case import vendor_matrix
+    from viewer.guide import BRANDS, brand_guide
+
+    REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    g = brand_guide()
+    matrix = {v["vendor"]: v["parser_status"] for v in vendor_matrix()}
+    names = [b["vendor"] for b in g["brands"]]
+    check("the guide covers all eight PS vendors, plus 'other'",
+          set(matrix) <= set(names) and "Other / not sure" in names, f"{names}")
+    check("each brand's status is the vendor matrix's own (the weakest evidence), "
+          "never written into the guide",
+          all(b["status"] == matrix.get(b["vendor"], "") for b in g["brands"])
+          and not any("status" in b for b in BRANDS))
+    scan_help = subprocess.run([sys.executable, os.path.join(REPO, "cli.py"), "scan", "-h"],
+                               capture_output=True, text=True).stdout
+    flags = {f for b in g["brands"] for f in b["flags"].split()}
+    check("every scan option the guide adds exists on `scan`",
+          flags and all(f in scan_help for f in flags), f"{flags}")
+    cmds = [line for s in g["steps"] for line in s["cmd"].splitlines()
+            if "cli.py" in line] + [c for b in g["brands"] for c in b["after"]]
+    bad = []
+    for line in cmds:
+        argv = shlex.split(line.replace("{flags}", "").replace("<id from parse>", "x"))
+        sub = argv[argv.index("cli.py") + 1]
+        r = subprocess.run([sys.executable, os.path.join(REPO, "cli.py"), sub, "-h"],
+                           capture_output=True, text=True)
+        opts = [a for a in argv if a.startswith("--")]
+        if r.returncode != 0 or any(o not in r.stdout for o in opts):
+            bad.append(line)
+    check("every command in the guide is a real subcommand with real options",
+          not bad, f"{bad}")
 
 
 def test_access_supabase(tmp: str) -> None:
@@ -6248,6 +6506,9 @@ def main() -> int:
         test_access_supabase(tmp)
         test_access_mail(tmp)
         test_access_mail_decisions(tmp)
+        test_case_split(tmp)
+        test_viewer_serving(tmp)
+        test_brand_guide(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

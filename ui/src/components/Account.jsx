@@ -260,6 +260,13 @@ export function ProfileMenu() {
               <span className="w-5 text-center shrink-0" aria-hidden="true">&#x25C9;</span>
               Profile
             </button>
+            {/* The top bar's "Start here" link has no room on a phone; here
+                it is one tap away on every size. */}
+            <a href="#/start" role="menuitem" className={ITEM}
+              onClick={() => setTimeout(() => setOpen(false))}>
+              <span className="w-5 text-center shrink-0" aria-hidden="true">&#x25B6;</span>
+              Start here
+            </a>
             <button type="button" role="menuitem" className={ITEM}
               onClick={() => flipTheme()}>
               <span className="w-5 text-center shrink-0" aria-hidden="true">
