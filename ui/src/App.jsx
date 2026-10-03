@@ -19,6 +19,17 @@ import Timeline from "./screens/Timeline.jsx";
 import AILeads from "./screens/AILeads.jsx";
 import Custody from "./screens/Custody.jsx";
 import Exports from "./screens/Exports.jsx";
+import StartHere from "./screens/StartHere.jsx";
+
+// A first visit lands on Start here, once per browser: a newcomer sees how to
+// go from their recorder's brand to a case before a list of cases.
+const SEEN_GUIDE = "anokhidrishti-seen-start";
+function firstVisit() {
+  try { return !localStorage.getItem(SEEN_GUIDE); } catch { return false; }
+}
+function markGuideSeen() {
+  try { localStorage.setItem(SEEN_GUIDE, "1"); } catch { /* ignore */ }
+}
 
 const SCREENS = [
   { id: "dashboard",  label: "Dashboard",  ico: "▦", C: Dashboard },
@@ -49,11 +60,15 @@ function Console() {
     Promise.all([api.cases(), api.vendors()])
       .then(([c, v]) => { setCases(c); setVendorInfo(v); })
       .catch((e) => setBootError(e.message));
+    if (!location.hash.replace(/^#\/?/, "") && firstVisit()) location.hash = "#/start";
   }, []);
 
   // A stale link to a case this folder no longer holds falls back to the
   // home rather than erroring: it should still land somewhere real.
   const caseId = cases && cases.some((c) => c.id === route.caseId) ? route.caseId : null;
+  // #/start is the guide, unless a case folder happens to carry that name.
+  const onGuide = !caseId && route.caseId === "start";
+  useEffect(() => { if (onGuide) markGuideSeen(); }, [onGuide]);
   const screen = SCREENS.find((s) => s.id === route.screen) || SCREENS[0];
 
   const reload = useCallback(() => {
@@ -94,7 +109,9 @@ function Console() {
         <div className="grid grid-rows-[auto_1fr] min-w-0 min-h-0">
           <Stepper c={caseData} caseId={caseId} />
           <main className="min-w-0 overflow-y-auto px-5 pt-4 pb-10" key={`${caseId}/${screen.id}`}>
-            {!caseId ? <CasesHome cases={cases} />
+            {onGuide ? <StartHere guide={vendorInfo?.guide} cases={cases}
+                brand={route.screen === "dashboard" ? null : route.screen} />
+              : !caseId ? <CasesHome cases={cases} />
               : loading || !caseData ? <Skeleton rows={5} />
               : <ErrorBoundary name={screen.label}>
                   <Screen c={caseData} vendorInfo={vendorInfo} reload={reload} toast={toast} />
@@ -132,14 +149,17 @@ function TopBar({ cases, caseId, screen, c }) {
         ))}
       </select>
 
+      <a href="#/start" className="text-[13px] whitespace-nowrap hover:text-accent">
+        Start here</a>
+
       <span className="flex-1" />
 
       {live && <Badge tone="live">LIVE {pct(live.fraction)}</Badge>}
       {ver && <Badge tone={ver.valid ? "ok" : "bad"}>
         {ver.valid ? "chain intact" : "chain broken"}</Badge>}
       {isDemo() && cases.length && cases.every((x) => x.synthetic)
-        ? <Badge tone="warn" title="A public demonstration of the interface, served from static
-            snapshots of synthetic cases. Not an evidence workstation, and not real evidence.">
+        ? <Badge tone="warn" title="Sample cases generated for the demonstration from made-up
+            disks - not evidence. The tool itself runs offline on an examiner's machine.">
             demo &middot; synthetic data</Badge>
         : isDemo()
         ? <Badge tone="warn" title="Served over the internet for review, behind sign-in and an
@@ -345,8 +365,15 @@ const shortDevice = (p) => (!p ? "—" : p.startsWith("/dev/") ? p : p.split(/[\
 function CasesHome({ cases }) {
   const [q, setQ] = useState("");
   if (!cases.length) {
-    return <Empty what="No cases in this folder."
-      how="cli.py serve --out <folder that holds case folders>" />;
+    return (
+      <div className="max-w-[720px] mx-auto">
+        <Empty what="No cases in this folder."
+          how="cli.py serve --out <folder that holds case folders>" />
+        <p className="text-center text-[13px] mt-3">
+          New to this? <a href="#/start" className="text-accent">Start here</a>: pick your
+          recorder's brand and get the steps from disk to case.</p>
+      </div>
+    );
   }
   const needle = q.trim().toLowerCase();
   const shown = cases.filter((c) => !needle || [c.id, c.case_id, c.vendor, c.device]
@@ -369,11 +396,21 @@ function CasesHome({ cases }) {
             loopback interface only.</>) : (<>
             <b className="text-synthetic">Hosted for review, behind approval.</b> The cases
             are the team's own acquisitions of two real DVR drives, as the pipeline
-            produced them; any marked <b>synthetic</b> were generated for the demo. The raw
-            recovered video stays on the examiner's machine. The tool itself runs offline
-            and binds the loopback interface only; this copy is served for review.</>)}
+            produced them{cases.some((x) => x.synthetic) && <>; any marked <b>synthetic</b>{" "}
+            were generated for the demo</>}. The raw recovered video stays on the
+            examiner's machine. The tool itself runs offline and binds the loopback
+            interface only; this copy is served for review.</>)}
         </div>
       )}
+      <a href="#/start" className="panel px-4 py-3 mb-4 flex items-center gap-3 hover:border-accent
+        group">
+        <span className="text-accent text-lg" aria-hidden="true">&#9654;</span>
+        <span className="min-w-0 flex-1 text-[13px]">
+          <b className="group-hover:text-accent">New here? Start with your recorder's brand.</b>
+          <span className="dim"> Dahua, CP Plus, Hikvision, Honeywell, TP-Link, Godrej,
+            Uniview, Matrix or other: what the tool does for it, and the four steps from
+            disk to case.</span></span>
+      </a>
       <div className="flex items-end justify-between gap-4 flex-wrap mb-4">
         <div>
           <h1 className="display text-[22px] font-semibold">Cases</h1>

@@ -105,6 +105,7 @@ td.mono,.mono{font-family:var(--mono);font-size:12.5px}
   padding:1px 9px;font-size:11px;color:var(--dim);white-space:nowrap}
 .pill.pending{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
 .pill.approved,.pill.active{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.pill.real{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
 .pill.rejected,.pill.revoked,.pill.expired{color:var(--bad);
   border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
@@ -319,6 +320,17 @@ def _pill(status: str) -> str:
     return f"<span class=\"pill {_e(status)}\">{_e(status)}</span>"
 
 
+def _real(username: str, real_for: frozenset) -> str:
+    """A tag on an account that sees the real cases (serve --real-cases-for):
+    approving its request opens real evidence, so the panel says so wherever
+    that decision is made."""
+    if username not in real_for:
+        return ""
+    return (" <span class=\"pill real\" title=\"Approving this account opens the real "
+            "cases: real people's faces and a recorder's serial numbers\">"
+            "demo &middot; sees real cases</span>")
+
+
 def _decide_form(public_id: str, action: str, label: str, cls: str,
                  csrf: str) -> str:
     return (f"<form method=\"post\" action=\"/admin/decide\" style=\"display:inline\">"
@@ -330,7 +342,7 @@ def _decide_form(public_id: str, action: str, label: str, cls: str,
 
 def admin_page(admin: str, overview: dict, pending: list, recent: list,
                users: list, audit: list, csrf: str, error: str = "",
-               note: str = "") -> bytes:
+               note: str = "", real_for: frozenset = frozenset()) -> bytes:
     chain = (overview.get("audit_chain") or {})
     chain_ok = bool(chain.get("valid"))
     stats = (
@@ -349,7 +361,7 @@ def admin_page(admin: str, overview: dict, pending: list, recent: list,
     if pending:
         rows = "".join(
             f"<tr><td class=\"mono\">{_e(r['public_id'])}</td>"
-            f"<td>{_e(r['username'])}</td>"
+            f"<td>{_e(r['username'])}{_real(r['username'], real_for)}</td>"
             f"<td class=\"mono tiny\">{_e(r.get('email') or '-')}</td>"
             f"<td class=\"mono tiny\">{_e(_t(r['created_utc']))}</td>"
             f"<td class=\"mono tiny\">{_e(r.get('remote_ip') or '-')}</td>"
@@ -367,7 +379,8 @@ def admin_page(admin: str, overview: dict, pending: list, recent: list,
     if recent:
         rrows = "".join(
             f"<tr><td class=\"mono\">{_e(r['public_id'])}</td>"
-            f"<td>{_e(r['username'])}</td><td>{_pill(r['status'])}</td>"
+            f"<td>{_e(r['username'])}{_real(r['username'], real_for)}</td>"
+            f"<td>{_pill(r['status'])}</td>"
             f"<td class=\"mono tiny\">{_e(r.get('decided_by') or '-')}</td>"
             f"<td class=\"mono tiny\">{_e(_t(r.get('access_expires_utc')))}</td>"
             f"<td>{_decide_form(r['public_id'], 'revoke', 'Revoke', 'bad', csrf) if r['status'] in (APPROVED, ACTIVE) else ''}</td>"
@@ -385,7 +398,8 @@ def admin_page(admin: str, overview: dict, pending: list, recent: list,
             ">rejected<", ">disabled<").replace(">approved<", ">enabled<")
 
     urows = "".join(
-        f"<tr><td>{_e(u['username'])}</td><td>{_e(u['role'])}</td>"
+        f"<tr><td>{_e(u['username'])}</td>"
+        f"<td>{_e(u['role'])}{_real(u['username'], real_for)}</td>"
         f"<td class=\"mono tiny\">{_e(u.get('email') or '-')}</td>"
         f"<td class=\"mono tiny\">{_e(_t(u.get('last_login_utc')) if u.get('last_login_utc') else 'never')}</td>"
         f"<td>{_enabled(u)}</td>"

@@ -35,6 +35,9 @@ from access.service import (AccessControl, check_csrf, csrf_token,
 
 #: The session cookie.  Named for the product, not for a framework.
 COOKIE = "anokhidrishti_access"
+#: The sign-in and sign-up forms' own cookie (see Gate._form_token).
+FORM_COOKIE = "anokhidrishti_form"
+FORM_COOKIE_SECONDS = 12 * 3600
 
 #: A form body larger than this is refused unread.
 MAX_BODY = 64 * 1024
@@ -60,6 +63,9 @@ class Gate:
         self.cookie_secure = cookie_secure
         self.allow_signup = allow_signup
         self.trust_proxy = trust_proxy
+        # Accounts that see the real cases (serve --real-cases-for), so the
+        # admin panel can mark them; the viewer enforces it.
+        self.real_cases_for: frozenset = frozenset()
 
     @property
     def _mail_from(self) -> str:
@@ -130,6 +136,17 @@ class Gate:
         """
         bits = [f"{COOKIE}={token}", "Path=/", "HttpOnly", "SameSite=Strict",
                 f"Max-Age={max_age}"]
+        if self.cookie_secure:
+            bits.append("Secure")
+        return "; ".join(bits)
+
+    def _form_cookie_header(self, token: str) -> str:
+        """Set-Cookie for the forms' cookie. It grants nothing (Gate._form_token),
+        so it can be SameSite=Lax: sent when a link from another site - a notice
+        email, a chat message - opens the sign-in page, so arriving that way
+        neither mints a new one nor breaks a form open in another tab."""
+        bits = [f"{FORM_COOKIE}={token}", "Path=/access", "HttpOnly", "SameSite=Lax",
+                f"Max-Age={FORM_COOKIE_SECONDS}"]
         if self.cookie_secure:
             bits.append("Secure")
         return "; ".join(bits)
@@ -217,7 +234,10 @@ class Gate:
         d = self.ac.authorize(self._token(h), self._client(h), path)
         if d.allowed:
             # Authorised. Hand the request back to the viewer untouched, but
-            # carry a rotated token out on the same response if there is one.
+            # carry a rotated token out on the same response if there is one,
+            # and say whose request it is (the viewer shows some accounts
+            # cases it hides from others: viewer/server.py::visible_cases).
+            h.access_user = d.user
             if d.new_token:
                 h.access_set_cookie = self._cookie_header(
                     d.new_token,
@@ -289,30 +309,33 @@ class Gate:
             "Not found", "There is nothing at that address."), code=404)
 
     def _form_token(self, h) -> tuple:
-        """(token, Set-Cookie) for a form page. Mints one if there is none.
+        """(token, Set-Cookie) for the sign-in and sign-up forms.
 
         The token and the cookie have to be decided together: deriving the
         form's CSRF value from the cookie the browser *had* while handing it a
         different one in the same response means the value can never match on
         the way back, and every sign-in fails.
 
-        The minted token grants nothing - it is not a row in `sessions`, so
-        `authorize` rejects it - it exists only so the CSRF value is specific
-        to this browser instead of being a constant everyone shares.
+        It lives in its own cookie, never in the session cookie. It used to be
+        minted into the session cookie, for 30 minutes. A link from another
+        site (an email's "Sign in" button) arrives without the SameSite=Strict
+        session cookie, so the page minted a new one over it: the browser was
+        signed out, and a form open in another tab failed with "That form
+        expired" - as did any form left open for half an hour (seen 3 Oct).
+
+        The token grants nothing - it is not a row in `sessions` - it exists
+        only so the CSRF value is specific to this browser instead of being a
+        constant everyone shares. Each form page renews it.
         """
-        token = self._token(h)
-        if token:
-            return token, ""
-        token = secrets.token_urlsafe(32)
-        return token, self._cookie_header(token, 1800)
+        token = self._cookies(h).get(FORM_COOKIE, "") or secrets.token_urlsafe(32)
+        return token, self._form_cookie_header(token)
 
     def _do_login(self, h) -> bool:
         form = self._form(h)
-        token = self._token(h)
-        if not check_csrf(token, form.get("csrf", "")):
+        if not check_csrf(self._cookies(h).get(FORM_COOKIE, ""), form.get("csrf", "")):
             fresh, cookie = self._form_token(h)
             return self._html(h, pages.login_page(
-                error="That form expired. Try again.",
+                error="That form had expired. Enter your password again.",
                 username=form.get("username", ""),
                 allow_signup=self.allow_signup, csrf=csrf_token(fresh)),
                 code=400, cookie=cookie)
@@ -337,25 +360,26 @@ class Gate:
 
     def _do_signup(self, h) -> bool:
         form = self._form(h)
-        token = self._token(h)
+        token, cookie = self._form_token(h)
         keep = dict(username=form.get("username", ""), email=form.get("email", ""),
                     min_len=MIN_PASSWORD_LEN, require_email=True,
                     mail_from=self._mail_from)
-        if not check_csrf(token, form.get("csrf", "")):
-            fresh, cookie = self._form_token(h)
+        if not check_csrf(self._cookies(h).get(FORM_COOKIE, ""), form.get("csrf", "")):
             return self._html(h, pages.signup_page(
-                error="That form expired. Try again.", csrf=csrf_token(fresh),
-                **keep), code=400, cookie=cookie)
+                error="That form had expired. Your details are kept: enter the "
+                      "password twice again and create the account.",
+                csrf=csrf_token(token), **keep), code=400, cookie=cookie)
         if form.get("password", "") != form.get("password2", ""):
             return self._html(h, pages.signup_page(
                 error="The two passwords do not match.", csrf=csrf_token(token),
-                **keep), code=400)
+                **keep), code=400, cookie=cookie)
         r = self.ac.signup(form.get("username", ""), form.get("password", ""),
                            self._client(h), self._agent(h),
                            email=form.get("email", ""), require_email=True)
         if not r.ok:
             return self._html(h, pages.signup_page(
-                error=r.message, csrf=csrf_token(token), **keep), code=400)
+                error=r.message, csrf=csrf_token(token), **keep), code=400,
+                cookie=cookie)
         return self._redirect(h, "/access/login?new=1")
 
     # -- the waiting room --------------------------------------------------
@@ -439,7 +463,7 @@ class Gate:
             user["username"], self.ac.overview(), self.ac.pending(),
             self.ac.recent(40), self.ac.store.list_users(),
             self.ac.audit.recent(40), csrf_token(token),
-            error=error, note=note))
+            error=error, note=note, real_for=self.real_cases_for))
 
     def _do_decide(self, h, user: dict, token: str) -> bool:
         form = self._form(h)

@@ -1077,7 +1077,8 @@ def cmd_serve(args) -> int:
               access_dir=args.access_dir, allow_signup=not args.no_signup,
               access_store=args.access_store, supabase_env=args.supabase_env,
               cookie_secure=args.cookie_secure, trust_proxy=args.trust_proxy,
-              mail=args.mail, mail_env=args.mail_env, field_key=args.field_key)
+              mail=args.mail, mail_env=args.mail_env, field_key=args.field_key,
+              real_cases_for=args.real_cases_for)
     except Exception as exc:                               # noqa: BLE001
         from access.store import StoreError   # imported only if the gate was asked for
         if isinstance(exc, StoreError):
@@ -2843,6 +2844,11 @@ def main() -> int:
                    help="with --require-access, key the per-address rate limits "
                         "on X-Forwarded-For: only behind a reverse proxy, where "
                         "every request otherwise shares the proxy's address")
+    p.add_argument("--real-cases-for", default="", metavar="USER[,USER]",
+                   help="with --require-access, a hosted demo: only these accounts "
+                        "see the real cases, administrators see all, and every "
+                        "other account sees only the generated ones (case folders "
+                        "holding a SYNTHETIC file)")
     p.set_defaults(func=cmd_serve)
 
     # -- temporary access control ------------------------------------------

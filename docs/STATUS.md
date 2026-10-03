@@ -1,4 +1,4 @@
-# Project status and handoff — 30 Sep 2026
+# Project status and handoff — 30 Sep 2026 (updated 2 Oct)
 
 Where SIH26150 stands: what is done against the problem statement, what the
 two real drives gave us, how to run it, and — in §6 — what is left in JP's
@@ -43,6 +43,30 @@ Named deliverables:
 | Validation reports | `VALIDATION_REPORT.md` |
 | User manual | `USER_MANUAL.md` |
 | Final project report | `FINAL_REPORT.md` (with `RESEARCH_BASIS.md` for differentiators and references) |
+
+### Added since 30 Sep (2 Oct)
+
+| PS ask it serves | What | Where |
+|---|---|---|
+| Evidence integrity and admissibility | Examiner signatures (RSA-PSS, 3072-bit) over a case statement covering the device, the hashes, the Merkle root, the ledger head and every output; sealed evidence packages (AES-256-GCM, key wrapped to the recipient with RSA-OAEP, signed by the sender) for handing a case over | `SIGNING.md`, `acquire/signatures.py`, `acquire/sealed.py` |
+| Unified workflow, less dependence on vendor tools | **Start here**: pick the recorder's brand and get its honest status, the four steps from disk to case with that brand's scan options, and what to run after. Statuses come from the vendor matrix | `viewer/guide.py`, `USER_MANUAL.md` §3.5 |
+| Functional prototype, shown | Hosted copy behind sign-up and an administrator's approval for each session, with accounts in Supabase and email notices. With `--real-cases-for`, the real acquisitions go only to the demo account; sign-ups see the generated cases | `ACCESS_CONTROL.md`, `deploy/` |
+
+### Still open against the PS
+
+Not code. Each one needs the hardware or the team:
+
+* **No vendor is `validated`.** That needs a recovered clip byte-matched against
+  the recorder's own export (`validate-export`, built). The team's Hikvision unit
+  is in hand. Record a reference on a spare disk, export it, then compare.
+  Never use an evidence drive for this.
+* **UTC.** Every time is still the recorder's own clock. The Hikvision unit's
+  time settings, photographed next to a phone clock (with no evidence disk
+  inside), give drive 2's offset.
+* **Five vendors without real media** (Honeywell, TP-Link, Godrej, Uniview,
+  Matrix) stay `spec_only`. That is the honest status, and the Start here page
+  and the Vendors screen say so.
+* **Final report**: drafted; needs the team's review (§5).
 
 ## 2. The two real drives
 

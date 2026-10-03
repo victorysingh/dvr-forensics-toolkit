@@ -1,7 +1,7 @@
 # The hosted console, behind the approval gate, accounts in Supabase.
 # Installed by deploy/setup_server.sh; Caddy terminates HTTPS in front of it.
 [Unit]
-Description=AnokhiDrishti console (hosted demonstration, synthetic cases)
+Description=AnokhiDrishti console (hosted demonstration, behind approval)
 After=network-online.target
 Wants=network-online.target
 
@@ -14,6 +14,8 @@ Environment=PS26150_SEAL_KEY=/var/lib/anokhidrishti/ledger_seal.key
 Environment=PYTHONUNBUFFERED=1
 # Optional switches, kept out of this file: e.g.
 #   SERVE_EXTRA=--mail --mail-env /etc/anokhidrishti/mail.env --field-key /etc/anokhidrishti/field.key
+#   (add --real-cases-for demo to show the real cases to that account only;
+#   see docs/ACCESS_CONTROL.md)
 EnvironmentFile=-/etc/anokhidrishti/serve.env
 # Binds 127.0.0.1 only (viewer/server.py); Caddy is the one public listener.
 ExecStart=/usr/bin/python3 cli.py serve --out /srv/anokhidrishti/out --port 8150 \
