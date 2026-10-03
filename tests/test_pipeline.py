@@ -4810,7 +4810,7 @@ def test_access(tmp: str) -> None:
                                RATE_AUTH_BURST_PER_MIN, RATE_AUTH_PER_MIN,
                                RATE_DECIDE_PER_MIN, REJECTED, REVOKED,
                                is_past, now, parse, plus, stamp)
-    from access.routes import COOKIE, Gate
+    from access.routes import COOKIE, FORM_COOKIE, Gate
     from access.service import (AccessControl, check_csrf, csrf_token,
                                 new_public_id)
 
@@ -5122,9 +5122,12 @@ def test_access(tmp: str) -> None:
         st, hd, body = _go(op, "/access/login")
         tokf = _re.search(rb'name="csrf" value="([^"]*)"', body).group(1).decode()
         check("the login form is served to an anonymous browser", st == 200)
-        check("its cookie is HttpOnly and SameSite=Strict",
-              "HttpOnly" in hd.get("Set-Cookie", "")
-              and "SameSite=Strict" in hd.get("Set-Cookie", ""))
+        form_cookie = hd.get("Set-Cookie", "")
+        check("the form's own cookie is HttpOnly and SameSite=Lax, and is not the "
+              "session cookie",
+              form_cookie.startswith(FORM_COOKIE + "=") and "HttpOnly" in form_cookie
+              and "SameSite=Lax" in form_cookie
+              and not any(c.startswith(COOKIE + "=") for c in hd.get_all("Set-Cookie")))
         check("a content-security policy is sent with it",
               "Content-Security-Policy" in hd
               and "frame-ancestors 'none'" in hd["Content-Security-Policy"])
@@ -5139,6 +5142,10 @@ def test_access(tmp: str) -> None:
         loc = hd.get("Location", "")
         check("a correct password redirects to a 9-digit waiting room",
               st == 303 and bool(_re.fullmatch(r"/[1-9]\d{8}", loc)), f"{st} {loc}")
+        session_cookie = next((c for c in hd.get_all("Set-Cookie") or []
+                               if c.startswith(COOKIE + "=")), "")
+        check("the session cookie, set only at sign-in, is HttpOnly and SameSite=Strict",
+              "HttpOnly" in session_cookie and "SameSite=Strict" in session_cookie)
         pid = loc[1:]
 
         st, _, body = _go(op, loc)
@@ -5198,6 +5205,44 @@ def test_access(tmp: str) -> None:
         st, _, body = _go(plain, "/admin")
         check("a signed-in plain user is refused the panel outright",
               st == 403 and b"cannot approve" in body, f"{st}")
+
+        # 3 Oct: "That form expired" on sign-up. A link from another site
+        # arrives without the SameSite=Strict session cookie, and the page
+        # used to mint a new one over it, so the session was gone and a form
+        # open in another tab no longer matched.
+        def raw(path, cookies, data=None):
+            rq = urllib.request.Request(base + path, data=data,
+                                        method="POST" if data else "GET")
+            rq.add_header("Cookie", "; ".join(f"{k}={v}" for k, v in cookies.items()))
+            if data:
+                rq.add_header("Content-Type", "application/x-www-form-urlencoded")
+            try:
+                with _NoRedirectOpener.open(rq) as r:
+                    return r.status, r.headers, r.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.headers, e.read()
+        _NoRedirectOpener = urllib.request.build_opener(_NoRedirect())
+
+        st, hd, body = raw("/access/signup", {})          # from an email: no cookies sent
+        set_names = [c.split("=", 1)[0] for c in hd.get_all("Set-Cookie") or []]
+        check("a sign-in page reached from another site never sets the session cookie",
+              st == 200 and COOKIE not in set_names and FORM_COOKIE in set_names,
+              f"{set_names}")
+        form_tok = hd.get("Set-Cookie").split(";")[0].split("=", 1)[1]
+        csrf_su = _re.search(rb'name="csrf" value="([^"]*)"', body).group(1).decode()
+        st, hd, _ = raw("/access/signup", {FORM_COOKIE: form_tok, COOKIE: "signed-in-elsewhere"},
+                        f"csrf={csrf_su}&username=ivy&email=ivy%40example.org"
+                        f"&password=ivypassword123&password2=ivypassword123".encode())
+        check("an open sign-up form still works after the session changed in another tab",
+              st == 303 and hd.get("Location") == "/access/login?new=1", f"{st}")
+        st, _, body = raw("/access/signup", {COOKIE: "signed-in-elsewhere"},
+                          f"csrf={csrf_su}&username=jay&email=jay%40example.org"
+                          f"&password=jaypassword1234&password2=jaypassword1234".encode())
+        check("a sign-up posted without the form's cookie (from another site) is refused",
+              st == 400 and b"had expired" in body and b'value="jay"' in body, f"{st}")
+        st, _, _ = raw("/access/login", {COOKIE: "x"},
+                       f"csrf={csrf_su}&username=gail&password=gailpassword123".encode())
+        check("so is a sign-in posted without it", st == 400, f"{st}")
     finally:
         httpd.shutdown()
 

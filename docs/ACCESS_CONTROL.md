@@ -51,6 +51,16 @@ The credential is a **256-bit session token** in an `HttpOnly`,
 the database — a backup, or a forensic image of the workstation itself — does
 not hand over live sessions.
 
+The sign-in and sign-up forms carry their anti-forgery value in a cookie of
+their own, `anokhidrishti_form`. That cookie is `HttpOnly`, `SameSite=Lax`,
+limited to `/access`, and lasts 12 hours. It grants nothing; it is never the
+session cookie. A link from another site, such as a notice email's "Sign in"
+button, arrives without the Strict session cookie. Until 3 Oct the form page
+then minted a new session cookie over the real one, which signed the browser
+out and made a form open in another tab fail with "That form expired". `Lax`
+is sent on such a link, so the form's cookie survives it. It is not sent on
+a cross-site POST, so a forged sign-in still fails.
+
 The token is **rotated** the first time a grant is used, so the token that
 carried only an identity is never the token that carries eight hours of
 access.
