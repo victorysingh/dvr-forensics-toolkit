@@ -17,9 +17,11 @@ export function ToastHost({ children }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div className="fixed right-4 bottom-4 z-50 flex flex-col gap-2">
+      {/* Above the bottom screen bar on a phone. Opaque, because some looks
+          draw .panel with no fill and a toast must not show the page through. */}
+      <div className="fixed right-3 bottom-[72px] md:right-4 md:bottom-4 z-50 flex flex-col gap-2">
         {items.map((t) => (
-          <div key={t.id}
+          <div key={t.id} style={{ background: "var(--color-surface)" }}
             className="panel border-accent px-3.5 py-2 text-xs shadow-lg shadow-black/30">
             {t.msg}
           </div>
@@ -125,7 +127,7 @@ export function Section({ title, hint, children }) {
   return (
     <section className="mt-5">
       {title && (
-        <h2 className="text-[15px] font-semibold mb-2.5 flex items-baseline gap-2.5">
+        <h2 className="text-[15px] font-semibold mb-2.5 flex flex-wrap items-baseline gap-x-2.5">
           {title}{hint && <span className="dim text-[11.5px] font-normal">{hint}</span>}
         </h2>
       )}
@@ -141,7 +143,8 @@ export function Card({ children, className = "" }) {
 /* ------------------------------------------------------- definition list */
 export function DL({ rows }) {
   return (
-    <dl className="grid grid-cols-[minmax(120px,auto)_1fr] gap-x-4 gap-y-1 text-[12.5px]">
+    <dl className="grid grid-cols-[minmax(96px,auto)_minmax(0,1fr)] sm:grid-cols-[minmax(120px,auto)_minmax(0,1fr)]
+      gap-x-4 gap-y-1 text-[12.5px]">
       {rows.filter(Boolean).map(([k, v], i) => (
         <div key={i} className="contents">
           <dt className="dim">{k}</dt>
