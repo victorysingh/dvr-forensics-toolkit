@@ -5358,6 +5358,51 @@ def test_case_split(tmp: str) -> None:
         Handler.real_cases_for = None
 
 
+def test_viewer_serving(tmp: str) -> None:
+    """The viewer under load: a deep enough listen queue, and caching only for
+    files named by their content."""
+    print("\n[viewer: concurrency and caching]")
+    import concurrent.futures as cf
+    import threading
+    import time
+    import urllib.request
+
+    from viewer.server import STATIC, Handler, Server
+
+    class _H(Handler):
+        out_root = os.path.join(tmp, "serving-out")
+        gate = None
+
+    httpd = Server(("127.0.0.1", 0), _H)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+    def get(path):
+        with urllib.request.urlopen(base + path) as r:
+            r.read()
+            return r.headers.get("Cache-Control", "")
+    try:
+        check("the server queues more than socketserver's 5 waiting connections",
+              Server.request_queue_size >= 64)
+        get("/api/vendors")
+        t = time.time()
+        with cf.ThreadPoolExecutor(20) as ex:
+            list(ex.map(lambda i: get(f"/api/vendors?{i}"), range(20)))
+        wall = time.time() - t
+        # With a queue of 5, dropped connections are retried after 1 s, so 20
+        # at once took over a second even for a 2 ms answer.
+        check("20 requests at once are answered without a connection retry",
+              wall < 0.8, f"{wall:.2f}s")
+        assets = sorted(os.listdir(os.path.join(STATIC, "assets")))
+        js = next(a for a in assets if a.startswith("app-") and a.endswith(".js"))
+        check("a content-hashed asset may be kept by the browser, privately",
+              "immutable" in get(f"/assets/{js}") and "private" in get(f"/assets/{js}"))
+        check("the page itself and the case data are never stored",
+              get("/") == "no-store" and get("/api/cases") == "no-store")
+    finally:
+        httpd.shutdown()
+
+
 def test_brand_guide(tmp: str) -> None:
     """Start here: one entry per PS vendor, statuses from the vendor matrix, and
     only commands and options the CLI really has."""
@@ -6368,6 +6413,7 @@ def main() -> int:
         test_access_mail(tmp)
         test_access_mail_decisions(tmp)
         test_case_split(tmp)
+        test_viewer_serving(tmp)
         test_brand_guide(tmp)
         test_dahua_real_media()
     finally:

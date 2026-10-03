@@ -110,6 +110,20 @@ def visible_cases(cases: list[dict], user: dict | None,
     return [c for c in cases if c["synthetic"] != real]
 
 
+class Server(ThreadingHTTPServer):
+    """The standard threading server with a deeper listen queue.
+
+    socketserver queues only 5 waiting connections. A page that asks for many
+    things at once - the AI leads screen loads dozens of thumbnails - overflows
+    that, and every connection the kernel drops is retried by the client after
+    1 s, then 3 s, then 7 s. Behind a reverse proxy each request is a fresh
+    connection (this server speaks HTTP/1.0), so it bit on the hosted copy:
+    20 requests at once took 9.6 s there. Measured locally, 128 brings 20
+    concurrent requests from about 1 s to under 0.3 s.
+    """
+    request_queue_size = 128
+
+
 class Handler(BaseHTTPRequestHandler):
     out_root = "out"
     server_version = "anokhidrishti-ui"
@@ -130,11 +144,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):             # quiet by default
         pass
 
-    def _send(self, code: int, body: bytes, ctype: str) -> None:
+    def _send(self, code: int, body: bytes, ctype: str, cache: str = "no-store") -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         if self.access_set_cookie:
             self.send_header("Set-Cookie", self.access_set_cookie)
@@ -189,7 +203,14 @@ class Handler(BaseHTTPRequestHandler):
             if f:
                 with open(f, "rb") as fh:
                     ctype = mimetypes.guess_type(f)[0] or "application/octet-stream"
-                    return self._send(200, fh.read(), ctype)
+                    # The build names every file under assets/ by its content
+                    # hash, so one never changes in place: a browser may keep
+                    # it. `private` keeps it out of any shared cache in front
+                    # of the gate. Everything else - index.html, the data -
+                    # stays no-store, so a new build shows on the next load.
+                    cache = ("private, max-age=31536000, immutable"
+                             if path.startswith("/assets/") else "no-store")
+                    return self._send(200, fh.read(), ctype, cache)
             return self._send(404, b"not found", "text/plain")
         except Exception as exc:                   # noqa: BLE001
             return self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
@@ -245,7 +266,7 @@ def serve(out_root: str = "out", port: int = 8150, require_access: bool = False,
                     print(f"  WARNING: --real-cases-for names {name!r}, which has no "
                           "account yet; create it with cli.py access-user --action add")
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    httpd = Server(("127.0.0.1", port), Handler)
     print(f"AnokhiDrishti on http://127.0.0.1:{port}/  (cases from {os.path.abspath(out_root)})")
     if require_access:
         print(f"  approval gate ON - sign in at http://127.0.0.1:{port}/access/login")
