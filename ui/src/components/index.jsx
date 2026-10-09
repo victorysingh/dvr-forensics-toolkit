@@ -32,12 +32,14 @@ export function ToastHost({ children }) {
 }
 
 /* --------------------------------------------------------------- pill */
-export function Pill({ status }) {
+// `label` puts plain words on the pill where a newcomer reads it; the colour
+// still comes from the status, so it agrees with every other screen.
+export function Pill({ status, label }) {
   const s = status || "none";
   const color = STATUS_COLOR[s] || "dim";
   return (
     <span className={`inline-block rounded-full border border-current px-2 py-px
-      text-[11px] font-semibold whitespace-nowrap ${color}`}>{s}</span>
+      text-[11px] font-semibold whitespace-nowrap ${color}`}>{label || s}</span>
   );
 }
 

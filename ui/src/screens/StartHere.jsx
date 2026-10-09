@@ -23,6 +23,33 @@ const MEANS = {
   synthetic_only: "Only ever tested on generated disks.",
 };
 
+// The same statuses in plain words, for the pill a newcomer reads. The raw
+// word stays on the Vendors screen.
+const PLAIN = {
+  validated: "validated",
+  spec_only: "not yet validated",
+  detected_not_parsed: "detected, not parsed",
+  synthetic_only: "generated disks only",
+};
+
+// Whether a real drive of this brand has been read comes from the vendor
+// matrix (`media`), never from the guide's own words.
+const realDisk = (b) => Boolean(b.status && b.media && b.media !== "none");
+
+// The brands grouped by what is actually behind each one, so the first thing
+// a newcomer sees is which brands have been read off a real drive.
+const GROUPS = [
+  { title: "Read from a real disk", mark: "\u25CF", tone: "text-accent",
+    hint: "the parser has run on a real recorder's drive of this brand",
+    has: realDisk },
+  { title: "No real disk yet", mark: "\u25CB", tone: "dim",
+    hint: "written from the brand's own software or documents; the footage is "
+      + "recovered by carving either way",
+    has: (b) => b.status && !realDisk(b) },
+  { title: "Not sure, or another brand", mark: "?", tone: "dim", hint: "",
+    has: (b) => !b.status },
+];
+
 // CP Plus boards are Dahua-built, so a CP Plus disk usually scores as Dahua:
 // either case shows how that family's disks look here.
 const FAMILY = { "CP Plus": ["CP Plus", "Dahua"], Dahua: ["Dahua", "CP Plus"] };
@@ -47,31 +74,55 @@ export default function StartHere({ guide, cases, brand }) {
           workstation, offline - a disk is never connected to a website.</p>
       )}
 
-      <div className="grid gap-2.5 mt-4 grid-cols-[repeat(auto-fill,minmax(170px,1fr))]"
-        role="list" aria-label="Recorder brands">
-        {guide.brands.map((b) => {
-          const on = picked && picked.vendor === b.vendor;
-          return (
-            <a key={b.vendor} role="listitem" href={`#/start/${slug(b.vendor)}`}
-              aria-current={on ? "true" : undefined}
-              className={`panel px-3.5 py-3 block hover:border-accent group
-                ${on ? "border-accent ring-1 ring-accent/40" : ""}`}>
-              <div className={`font-semibold text-[14.5px] ${on ? "text-accent" : "group-hover:text-accent"}`}>
-                {b.vendor}</div>
-              <div className="mt-1.5 flex items-center gap-1.5 flex-wrap min-h-[20px]">
-                {b.status && <Pill status={b.status} />}
-                {b.media && b.media !== "none" && (
-                  <span className="dim text-[11px]">real disk read</span>)}
-              </div>
-            </a>
-          );
-        })}
-      </div>
+      {GROUPS.map((g) => {
+        const list = guide.brands.filter(g.has);
+        return list.length > 0 && (
+          <section key={g.title} className="mt-5">
+            <h2 className="text-[13.5px] font-semibold mb-2 flex flex-wrap items-baseline gap-x-2">
+              <span className={g.tone} aria-hidden="true">{g.mark}</span>{g.title}
+              {g.hint && <span className="dim text-[11.5px] font-normal">{g.hint}</span>}</h2>
+            <div className="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(200px,1fr))]"
+              role="list" aria-label={g.title}>
+              {list.map((b) => <BrandCard key={b.vendor} b={b}
+                on={!!picked && picked.vendor === b.vendor} />)}
+            </div>
+          </section>
+        );
+      })}
+      <ValidatedNote brands={guide.brands} />
 
       {picked
         ? <BrandPlan b={picked} steps={guide.steps} cases={cases} />
         : <p className="dim text-[13px] mt-5">Choose a brand to see the steps for it.</p>}
     </div>
+  );
+}
+
+function BrandCard({ b, on }) {
+  return (
+    <a role="listitem" href={`#/start/${slug(b.vendor)}`}
+      aria-current={on ? "true" : undefined}
+      className={`panel px-3.5 py-3 block hover:border-accent group
+        ${on ? "border-accent ring-1 ring-accent/40" : ""}`}>
+      <div className={`font-semibold text-[14.5px] ${on ? "text-accent" : "group-hover:text-accent"}`}>
+        {b.vendor}</div>
+      {b.source && <div className="dim text-[11.5px] mt-1 leading-snug">{b.source}</div>}
+    </a>
+  );
+}
+
+// "validated" said once, in words, instead of the same pill on every card.
+function ValidatedNote({ brands }) {
+  const done = brands.filter((b) => b.status === "validated").map((b) => b.vendor);
+  return (
+    <p className="dim text-[12px] mt-4 max-w-[820px] leading-relaxed">
+      {done.length
+        ? <>Validated, that is checked byte for byte against the recorder's own export:{" "}
+            <b>{done.join(", ")}</b>. For the others, treat what a parser reports as
+            unconfirmed until the SOP's checks are done.</>
+        : <>No brand is <b>validated</b> yet, that is checked byte for byte against the
+            recorder's own export. Until then, treat what a parser reports as
+            unconfirmed and run the SOP's checks before relying on it.</>}</p>
   );
 }
 
@@ -86,10 +137,10 @@ function BrandPlan({ b, steps, cases }) {
           <p className="text-[13px] leading-relaxed mb-3">{b.note}</p>
           <DL rows={[
             b.status && ["Status", <span key="s" className="inline-flex items-start gap-2 flex-wrap">
-              <Pill status={b.status} />
+              <Pill status={b.status} label={PLAIN[b.status]} />
               <span className="dim text-[12px]">{MEANS[b.status] || ""}</span></span>],
             b.family && ["Parsed as", b.family],
-            b.status && ["Real media held", b.media && b.media !== "none" ? b.media : "none yet"],
+            b.status && ["Real disk read", realDisk(b) ? b.media : "none yet"],
           ]} />
         </Card>
       </Section>

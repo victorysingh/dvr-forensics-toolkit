@@ -12,6 +12,7 @@ import { api } from "../lib/api.js";
 import { isDemo } from "../lib/host.js";
 import { utcTime, dur, camColor } from "../lib/format.js";
 import { useTheme, flipTheme } from "../lib/theme.js";
+import { toGuide } from "../lib/useHashRoute.js";
 
 /* ------------------------------------------------------------- who */
 function describe(acct) {
@@ -168,7 +169,7 @@ const ITEM = `w-full flex items-center gap-3 px-4 py-3 sm:py-2.5 text-left text-
   cursor-pointer hover:bg-[color-mix(in_srgb,var(--color-ink)_7%,transparent)]
   focus-visible:outline-none focus-visible:bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)]`;
 
-export function ProfileMenu() {
+export function ProfileMenu({ guide }) {
   const [acct, setAcct] = useState(null);
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState(false);
@@ -263,9 +264,11 @@ export function ProfileMenu() {
             {/* The top bar's "Start here" link has no room on a phone; here
                 it is one tap away on every size. */}
             <a href="#/start" role="menuitem" className={ITEM}
-              onClick={() => setTimeout(() => setOpen(false))}>
+              aria-current={guide ? "page" : undefined}
+              onClick={(e) => { toGuide(e); setTimeout(() => setOpen(false)); }}>
               <span className="w-5 text-center shrink-0" aria-hidden="true">&#x25B6;</span>
               Start here
+              {guide && <span className="ml-auto dim text-[11px]">you are here</span>}
             </a>
             <button type="button" role="menuitem" className={ITEM}
               onClick={() => flipTheme()}>

@@ -46,51 +46,63 @@ STEPS = [
 
 #: Per brand: the scan options, what to run after the scan, and what to expect.
 #: Keep `note` to what has been shown (docs/STATUS.md, VALIDATION_REPORT.md).
+#: `source` is the brand card's one line: the real drive the parser has read,
+#: or, with no real drive yet, what it was written from.  Whether a real drive
+#: was read is not decided here but by the vendor matrix's `media`.
 BRANDS = [
-    {"vendor": "Dahua", "flags": "--carve",
+    {"vendor": "Dahua", "source": "read on two real drives (DHFS 4.1)",
+     "flags": "--carve",
      "after": ["python cli.py parse --vendor Dahua --device /dev/sdX --out out/CASE-001",
                "python cli.py extract-carved --device /dev/sdX --out out/CASE-001"],
      "note": "DHFS 4.1 read from two real drives. --carve recovers footage outside "
              "every index (deleted or overwritten) in the same pass."},
-    {"vendor": "CP Plus", "flags": "--carve",
+    {"vendor": "CP Plus", "source": "read on the team's own CP Plus drive",
+     "flags": "--carve",
      "after": ["python cli.py parse --vendor Dahua --device /dev/sdX --out out/CASE-001",
                "python cli.py extract-carved --device /dev/sdX --out out/CASE-001"],
      "note": "CP Plus recorders are Dahua-built and write Dahua's DHFS, so they are "
              "parsed as Dahua. Read from the team's own CP Plus drive."},
-    {"vendor": "Hikvision", "flags": "--carve-ps",
+    {"vendor": "Hikvision", "source": "read on a real DS-7B08HUHI-K1's footage",
+     "flags": "--carve-ps",
      "after": ["python cli.py parse --vendor Hikvision --device /dev/sdX --out out/CASE-001",
                "python cli.py hik-log --device /dev/sdX --out out/CASE-001"],
      "note": "Footage dated from Hikvision's HK stream maps, even under a drive "
              "another recorder reformatted; hik-log reads the recorder's own "
              "system log."},
-    {"vendor": "Honeywell", "flags": "--carve-annexb",
+    {"vendor": "Honeywell", "source": "written from published research (DFRWS 2026)",
+     "flags": "--carve-annexb",
      "after": ["python cli.py parse --vendor Honeywell --device /dev/sdX --out out/CASE-001",
                "python cli.py parse --vendor Honeywell --device /dev/sdX --remnants"],
      "note": "Parser written from published research (Yoon & Hwang, DFRWS USA "
              "2026); never run on a real Honeywell disk. --carve-annexb recovers "
              "the raw video regardless."},
-    {"vendor": "TP-Link", "flags": "--carve-annexb",
+    {"vendor": "TP-Link", "source": "written from TP-Link's VIGI firmware",
+     "flags": "--carve-annexb",
      "after": ["python cli.py parse --vendor TP-Link --device /dev/sdX --out out/CASE-001"],
      "note": "Written from TP-Link's firmware; no real disk read yet. The index is "
              "read when it is not encrypted; the footage itself comes from "
              "--carve-annexb, without dates or cameras."},
-    {"vendor": "Godrej", "flags": "--carve-annexb",
+    {"vendor": "Godrej", "source": "written from Qualvision's firmware (SeeThru)",
+     "flags": "--carve-annexb",
      "after": ["python cli.py parse --vendor Godrej --device /dev/sdX --out out/CASE-001"],
      "note": "Godrej's SeeThru recorders run Qualvision's software; parser written "
              "from that firmware, no real disk read yet. A disk without the QVEX "
              "head is a different maker: --carve-annexb still recovers the video."},
-    {"vendor": "Uniview", "flags": "",
+    {"vendor": "Uniview", "source": "written from Uniview's own storage driver",
+     "flags": "",
      "after": ["python cli.py parse --vendor Uniview --device /dev/sdX --out out/CASE-001",
                "python cli.py parse --vendor Uniview --device /dev/sdX --remnants"],
      "note": "Written from Uniview's own storage driver; no real disk read yet. "
              "--remnants finds footage the index no longer lists."},
-    {"vendor": "Matrix", "flags": "",
+    {"vendor": "Matrix", "source": "written from Matrix's own documents",
+     "flags": "",
      "after": ["python cli.py parse --vendor Matrix --device /dev/sdX --out out/CASE-001",
                "python cli.py extract --vendor Matrix --device /dev/sdX --out out/CASE-001 "
                "--recording <id from parse>"],
      "note": "Written from Matrix's own documents; no real disk read yet. Recordings "
              "come out as stored (.stm); Matrix's Device Player converts them."},
-    {"vendor": "Other / not sure", "flags": "--carve-annexb",
+    {"vendor": "Other / not sure", "source": "scan anyway: the disk itself names the brand",
+     "flags": "--carve-annexb",
      "after": ["python cli.py survey --device /dev/sdX",
                "python cli.py extract-carved --device /dev/sdX --out out/CASE-001 "
                "--format annexb"],

@@ -5,7 +5,7 @@
 // under screens/.
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "./lib/api.js";
-import { useHashRoute, linkTo, go } from "./lib/useHashRoute.js";
+import { useHashRoute, linkTo, go, toGuide } from "./lib/useHashRoute.js";
 import { bytes, num, pct } from "./lib/format.js";
 import { isDemo } from "./lib/host.js";
 import { Skeleton, Empty, ToastHost, useToast, DL } from "./components/index.jsx";
@@ -108,7 +108,7 @@ function Console() {
   // toolbars, so the bottom of the console would sit underneath them.
   return (
     <div className="grid grid-rows-[auto_minmax(0,1fr)] grid-cols-[minmax(0,1fr)] h-dvh">
-      <TopBar cases={cases} caseId={caseId} screen={screen.id} c={caseData} />
+      <TopBar cases={cases} caseId={caseId} screen={screen.id} c={caseData} guide={onGuide} />
       <div className={`grid min-h-0 ${caseId
         ? `grid-rows-[minmax(0,1fr)_auto] md:grid-rows-[minmax(0,1fr)]
            md:grid-cols-[52px_minmax(0,1fr)] xl:grid-cols-[208px_minmax(0,1fr)]`
@@ -137,7 +137,7 @@ const Shell = ({ children }) => (
 );
 
 /* ------------------------------------------------------------- top bar */
-function TopBar({ cases, caseId, screen, c }) {
+function TopBar({ cases, caseId, screen, c, guide }) {
   const ver = c?.custody?.verify;
   const live = c?.in_progress;
   return (
@@ -163,8 +163,9 @@ function TopBar({ cases, caseId, screen, c }) {
         ))}
       </select>
 
-      <a href="#/start" className="hidden sm:inline text-[13px] whitespace-nowrap
-        hover:text-accent">Start here</a>
+      <a href="#/start" onClick={toGuide} aria-current={guide ? "page" : undefined}
+        className={`hidden sm:inline text-[13px] whitespace-nowrap
+        ${guide ? "text-accent" : "hover:text-accent"}`}>Start here</a>
 
       <span className="hidden sm:block flex-1" />
 
@@ -190,7 +191,7 @@ function TopBar({ cases, caseId, screen, c }) {
           className="hidden md:inline-flex"><Badge>Report &#8599;</Badge></a>
       )}
       <ThemeToggle />
-      <ProfileMenu />
+      <ProfileMenu guide={guide} />
     </header>
   );
 }
