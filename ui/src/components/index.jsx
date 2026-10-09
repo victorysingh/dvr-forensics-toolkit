@@ -328,3 +328,27 @@ const PagerBtn = ({ disabled, onClick, children }) => (
     {children}
   </button>
 );
+
+/* ------------------------------------------------------------ command */
+// A command block with one copy button. Copying is a convenience: a browser
+// that refuses the clipboard just leaves the text to be selected by hand.
+export function Command({ text }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    try {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }, () => {});
+    } catch { /* no clipboard here */ }
+  };
+  return (
+    <div className="relative mt-2">
+      <pre className="panel-2 hairline border rounded-lg px-3 py-2 pr-16 font-mono text-[12px]
+        overflow-x-auto whitespace-pre">{text}</pre>
+      <button type="button" onClick={copy}
+        className="absolute top-1.5 right-1.5 hairline border rounded px-2 py-0.5 text-[11px]
+          panel hover:border-accent">{copied ? "copied" : "copy"}</button>
+    </div>
+  );
+}

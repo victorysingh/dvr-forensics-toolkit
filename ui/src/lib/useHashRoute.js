@@ -17,16 +17,17 @@ export const go = (caseId, screen) => {
   location.hash = caseId ? linkTo(caseId, screen) : "#/";
 };
 
-// A "Start here" link followed from the guide's own top changes nothing: the
-// hash is already #/start, so no hashchange fires and the click looks dead.
-// Scroll the guide back to its top instead, so the click visibly lands.
-// From a picked brand (#/start/<brand>) the link works as it is.
-export function toGuide(e) {
+// A link to #/start or #/plug followed from that page's own top changes
+// nothing: the hash is already there, so no hashchange fires and the click
+// looks dead. Scroll the page back to its top instead, so the click visibly
+// lands. From a picked brand (#/start/<brand>) the link works as it is.
+export const toPlace = (place) => (e) => {
   const r = parseHash();
-  if (r.caseId !== "start" || r.screen !== "dashboard") return;
+  if (r.caseId !== place || r.screen !== "dashboard") return;
   e.preventDefault();
   document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
-}
+};
+export const toGuide = toPlace("start");
 
 export function useHashRoute() {
   const [route, setRoute] = useState(() => parseHash());

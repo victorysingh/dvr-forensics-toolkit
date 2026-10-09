@@ -34,6 +34,7 @@ if ROOT not in sys.path:
 import parsers  # noqa: E402,F401  (registers plugins, loads drop-ins)
 from report.case import list_cases, load_case, plugins_view, vendor_matrix  # noqa: E402
 from report.html import render  # noqa: E402
+from report.pipeline import station_view  # noqa: E402
 from viewer.guide import brand_guide  # noqa: E402
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -174,6 +175,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/vendors":
                 return self._json({"vendors": vendor_matrix(), "plugins": plugins_view(),
                                    "onboarding": ONBOARDING, "guide": brand_guide()})
+            if path == "/api/station":
+                # Plug and use: the station's status and runs, read from files
+                # the station wrote. The console still opens no device.
+                ids = [c["id"] for c in self._cases()]
+                return self._json(station_view(self.out_root, ids))
             if path == "/access/me":
                 # Reached only with sign-in off: behind --require-access the
                 # gate answers everything under /access/ itself. No account,

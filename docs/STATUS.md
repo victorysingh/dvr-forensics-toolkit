@@ -50,6 +50,7 @@ Named deliverables:
 |---|---|---|
 | Evidence integrity and admissibility | Examiner signatures (RSA-PSS, 3072-bit) over a case statement covering the device, the hashes, the Merkle root, the ledger head and every output; sealed evidence packages (AES-256-GCM, key wrapped to the recipient with RSA-OAEP, signed by the sender) for handing a case over | `SIGNING.md`, `acquire/signatures.py`, `acquire/sealed.py` |
 | Unified workflow, less dependence on vendor tools | **Start here**: pick the recorder's brand and get its honest status, the four steps from disk to case with that brand's scan options, and what to run after. Statuses come from the vendor matrix | `viewer/guide.py`, `USER_MANUAL.md` §3.5 |
+| Automate acquisition and analysis; a unified workflow | **Plug and use** (9 Oct): `cli.py station` waits for a disk, write-blocks it and runs all seven stages with no further input - acquire + identify, preserve, parse, recover, timeline, faces/objects, report - each the ordinary command with its own ledger entry. The console's Plug and use page follows it live and shows the two real drives as finished examples of the same stages | `acquire/station.py`, `report/pipeline.py`, `USER_MANUAL.md` §3.6 |
 | Functional prototype, shown | Hosted copy behind sign-up and an administrator's approval for each session, with accounts in Supabase and email notices. With `--real-cases-for`, the real acquisitions go only to the demo account; sign-ups see the generated cases | `ACCESS_CONTROL.md`, `deploy/` |
 
 ### Still open against the PS

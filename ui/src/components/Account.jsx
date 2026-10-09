@@ -12,7 +12,7 @@ import { api } from "../lib/api.js";
 import { isDemo } from "../lib/host.js";
 import { utcTime, dur, camColor } from "../lib/format.js";
 import { useTheme, flipTheme } from "../lib/theme.js";
-import { toGuide } from "../lib/useHashRoute.js";
+import { toPlace } from "../lib/useHashRoute.js";
 
 /* ------------------------------------------------------------- who */
 function describe(acct) {
@@ -169,7 +169,7 @@ const ITEM = `w-full flex items-center gap-3 px-4 py-3 sm:py-2.5 text-left text-
   cursor-pointer hover:bg-[color-mix(in_srgb,var(--color-ink)_7%,transparent)]
   focus-visible:outline-none focus-visible:bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)]`;
 
-export function ProfileMenu({ guide }) {
+export function ProfileMenu({ place }) {
   const [acct, setAcct] = useState(null);
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState(false);
@@ -261,15 +261,18 @@ export function ProfileMenu({ guide }) {
               <span className="w-5 text-center shrink-0" aria-hidden="true">&#x25C9;</span>
               Profile
             </button>
-            {/* The top bar's "Start here" link has no room on a phone; here
-                it is one tap away on every size. */}
-            <a href="#/start" role="menuitem" className={ITEM}
-              aria-current={guide ? "page" : undefined}
-              onClick={(e) => { toGuide(e); setTimeout(() => setOpen(false)); }}>
-              <span className="w-5 text-center shrink-0" aria-hidden="true">&#x25B6;</span>
-              Start here
-              {guide && <span className="ml-auto dim text-[11px]">you are here</span>}
-            </a>
+            {/* The top bar's "Start here" and "Plug and use" links have no
+                room on a phone; here they are one tap away on every size. */}
+            {[["start", "Start here", "\u25B6"], ["plug", "Plug and use", "\u23CF"]].map(
+              ([id, label, ico]) => (
+                <a key={id} href={`#/${id}`} role="menuitem" className={ITEM}
+                  aria-current={place === id ? "page" : undefined}
+                  onClick={(e) => { toPlace(id)(e); setTimeout(() => setOpen(false)); }}>
+                  <span className="w-5 text-center shrink-0" aria-hidden="true">{ico}</span>
+                  {label}
+                  {place === id && <span className="ml-auto dim text-[11px]">you are here</span>}
+                </a>
+              ))}
             <button type="button" role="menuitem" className={ITEM}
               onClick={() => flipTheme()}>
               <span className="w-5 text-center shrink-0" aria-hidden="true">

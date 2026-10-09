@@ -121,6 +121,12 @@ A parser plugin is handed an open read-only device; it never opens one, so a
 third-party plugin cannot introduce a write path. The viewer has no route
 that opens a block device and listens on 127.0.0.1 only.
 
+The plug-and-use station (`acquire/station.py`, `cli.py station`) is a
+separate process, started as root, that runs the ordinary commands on a disk
+it has write-blocked. The viewer only reads what it writes (`station.json` in
+the case folder, `.station/status.json` in the out folder, through
+`report/pipeline.py`), so the viewer still has no route that opens a device.
+
 ### 4.3 Failure handling
 
 | Event | What the device layer does |

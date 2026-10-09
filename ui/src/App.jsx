@@ -5,7 +5,7 @@
 // under screens/.
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "./lib/api.js";
-import { useHashRoute, linkTo, go, toGuide } from "./lib/useHashRoute.js";
+import { useHashRoute, linkTo, go, toPlace } from "./lib/useHashRoute.js";
 import { bytes, num, pct } from "./lib/format.js";
 import { isDemo } from "./lib/host.js";
 import { Skeleton, Empty, ToastHost, useToast, DL } from "./components/index.jsx";
@@ -22,6 +22,7 @@ import AILeads from "./screens/AILeads.jsx";
 import Custody from "./screens/Custody.jsx";
 import Exports from "./screens/Exports.jsx";
 import StartHere from "./screens/StartHere.jsx";
+import PlugAndUse from "./screens/PlugAndUse.jsx";
 
 // A first visit lands on Start here, once per browser: a newcomer sees how to
 // go from their recorder's brand to a case before a list of cases.
@@ -70,6 +71,10 @@ function Console() {
   const caseId = cases && cases.some((c) => c.id === route.caseId) ? route.caseId : null;
   // #/start is the guide, unless a case folder happens to carry that name.
   const onGuide = !caseId && route.caseId === "start";
+  // #/plug follows the plug-and-use station, on the same terms.
+  const onPlug = !caseId && route.caseId === "plug";
+  const place = onGuide ? "start" : onPlug ? "plug" : null;
+  const refreshCases = useCallback(() => api.cases().then(setCases).catch(() => {}), []);
   useEffect(() => { if (onGuide) markGuideSeen(); }, [onGuide]);
   const screen = SCREENS.find((s) => s.id === route.screen) || SCREENS[0];
 
@@ -108,7 +113,7 @@ function Console() {
   // toolbars, so the bottom of the console would sit underneath them.
   return (
     <div className="grid grid-rows-[auto_minmax(0,1fr)] grid-cols-[minmax(0,1fr)] h-dvh">
-      <TopBar cases={cases} caseId={caseId} screen={screen.id} c={caseData} guide={onGuide} />
+      <TopBar cases={cases} caseId={caseId} screen={screen.id} c={caseData} place={place} />
       <div className={`grid min-h-0 ${caseId
         ? `grid-rows-[minmax(0,1fr)_auto] md:grid-rows-[minmax(0,1fr)]
            md:grid-cols-[52px_minmax(0,1fr)] xl:grid-cols-[208px_minmax(0,1fr)]`
@@ -120,6 +125,7 @@ function Console() {
             key={`${caseId}/${screen.id}`}>
             {onGuide ? <StartHere guide={vendorInfo?.guide} cases={cases}
                 brand={route.screen === "dashboard" ? null : route.screen} />
+              : onPlug ? <PlugAndUse cases={cases} onNewCase={refreshCases} />
               : !caseId ? <CasesHome cases={cases} />
               : loading || !caseData ? <Skeleton rows={5} />
               : <ErrorBoundary name={screen.label}>
@@ -137,7 +143,10 @@ const Shell = ({ children }) => (
 );
 
 /* ------------------------------------------------------------- top bar */
-function TopBar({ cases, caseId, screen, c, guide }) {
+// The two places outside any case, linked from the bar on every screen.
+const PLACES = [["start", "Start here"], ["plug", "Plug and use"]];
+
+function TopBar({ cases, caseId, screen, c, place }) {
   const ver = c?.custody?.verify;
   const live = c?.in_progress;
   return (
@@ -163,9 +172,12 @@ function TopBar({ cases, caseId, screen, c, guide }) {
         ))}
       </select>
 
-      <a href="#/start" onClick={toGuide} aria-current={guide ? "page" : undefined}
-        className={`hidden sm:inline text-[13px] whitespace-nowrap
-        ${guide ? "text-accent" : "hover:text-accent"}`}>Start here</a>
+      {PLACES.map(([id, label]) => (
+        <a key={id} href={`#/${id}`} onClick={toPlace(id)}
+          aria-current={place === id ? "page" : undefined}
+          className={`hidden sm:inline text-[13px] whitespace-nowrap
+          ${place === id ? "text-accent" : "hover:text-accent"}`}>{label}</a>
+      ))}
 
       <span className="hidden sm:block flex-1" />
 
@@ -191,7 +203,7 @@ function TopBar({ cases, caseId, screen, c, guide }) {
           className="hidden md:inline-flex"><Badge>Report &#8599;</Badge></a>
       )}
       <ThemeToggle />
-      <ProfileMenu guide={guide} />
+      <ProfileMenu place={place} />
     </header>
   );
 }

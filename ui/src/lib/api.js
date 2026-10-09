@@ -10,6 +10,7 @@ export const api = {
   cases: () => get("/api/cases"),
   case: (id) => get(`/api/case/${encodeURIComponent(id)}`),
   vendors: () => get("/api/vendors"),
+  station: () => get("/api/station"),
   stamp: (id) => get(`/api/case/${encodeURIComponent(id)}/stamp`),
   reportUrl: (id) => `/report/${encodeURIComponent(id)}`,
   thumbUrl: (id, f) => `/thumb/${encodeURIComponent(id)}/${encodeURIComponent(f)}`,

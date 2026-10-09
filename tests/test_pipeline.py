@@ -5536,6 +5536,164 @@ def test_brand_guide(tmp: str) -> None:
           not bad, f"{bad}")
 
 
+def test_station(tmp: str) -> None:
+    """Plug and use: what the station runs after the scan, a whole run on a
+    generated disk, and what the console reads back - never a device."""
+    print("\n[plug and use: station]")
+    import threading
+    import time
+    import urllib.request
+
+    from acquire import station as ST
+    from report import pipeline as PL
+
+    def carve(case, name, streams, **extra):
+        os.makedirs(os.path.join(case, "carve"), exist_ok=True)
+        with open(os.path.join(case, "carve", name), "w") as fh:
+            json.dump(dict(extra, streams=[{"id": i} for i in range(streams)]), fh)
+
+    def plan(case, dets, ml=True):
+        steps = ST.plan_after_scan({"detections": dets}, case, "/dev/sdz", ml)
+        return {x["id"]: x for x in steps}
+
+    def argv(step):
+        return [c[0] + (" " + " ".join(c[c.index("--vendor") + 1:c.index("--vendor") + 2])
+                        if "--vendor" in c else "") for c in step["commands"]]
+
+    dahua = os.path.join(tmp, "st-dahua")
+    carve(dahua, "carve_report.json", 3, index_used_for_labels=True)
+    p = plan(dahua, [{"vendor": "Dahua", "confidence": 0.99, "parser_available": True}])
+    check("a Dahua disk is parsed as Dahua and its deleted footage saved",
+          argv(p["parse"]) == ["parse Dahua"]
+          and p["recover"]["commands"][0][-2:] == ["--label", "outside_index"])
+    check("faces and objects run on the saved clips at the station's frame rate",
+          p["ml"]["commands"] and p["ml"]["commands"][0][:1] == ["analyse-video"]
+          and "--fps" in p["ml"]["commands"][0])
+    check("every run preserves, builds the timeline and writes the report",
+          all(p[k]["commands"] for k in ("preserve", "timeline", "report")))
+    p = plan(dahua, [{"vendor": "CP Plus", "confidence": 0.9, "parser_available": True}])
+    check("a CP Plus disk is parsed as Dahua, as the guide says", argv(p["parse"]) == ["parse Dahua"])
+
+    hik = os.path.join(tmp, "st-hik")
+    carve(hik, "ps_report.json", 4)
+    p = plan(hik, [{"vendor": "Dahua", "confidence": 0.99, "parser_available": True},
+                   {"vendor": "Hikvision", "confidence": 0.98, "parser_available": True}])
+    check("Hikvision footage under a reformat: cameras from the index and the "
+          "recorder's own log", argv(p["parse"]) == ["parse Dahua", "label-ps", "hik-log"])
+    check("carved MPEG-PS footage is saved", [c[-1] for c in p["recover"]["commands"]] == ["ps"])
+
+    unknown = os.path.join(tmp, "st-unknown")
+    carve(unknown, "annexb_report.json", 2)
+    p = plan(unknown, [{"vendor": "Uniview", "confidence": 0.2, "parser_available": True}])
+    check("a weak match chooses no parser; raw H.264/H.265 is the last resort",
+          not p["parse"]["commands"] and "carving" in p["parse"]["skip"]
+          and p["recover"]["commands"][0][-2:] == ["--format", "annexb"])
+    check("no clips the analytics layer reads: faces and objects skipped, saying why",
+          not p["ml"]["commands"] and "clips" in p["ml"]["skip"])
+    empty = os.path.join(tmp, "st-empty")
+    os.makedirs(empty, exist_ok=True)
+    p = plan(empty, [])
+    check("nothing carved: recovery skipped, saying why",
+          not p["recover"]["commands"] and p["recover"]["skip"])
+    p = plan(dahua, [{"vendor": "Dahua", "confidence": 0.99, "parser_available": True}], ml=False)
+    check("--no-ml skips faces and objects, saying so",
+          not p["ml"]["commands"] and "--no-ml" in p["ml"]["skip"])
+
+    check("a case is named after the disk's serial, cleaned for a folder name",
+          ST.case_name("CASE", {"serial": "WWD4 A3/NX", "path": "/dev/sdb"}) == "CASE-WWD4A3NX"
+          and ST.case_name("CASE", {"serial": "", "path": "/x/drive 2.img"}) == "CASE-drive2")
+    check("a replugged disk is the same disk, whatever path it gets",
+          ST.disk_key({"serial": "S1", "size_bytes": 9, "path": "/dev/sdb"})
+          == ST.disk_key({"serial": "S1", "size_bytes": 9, "path": "/dev/sdc"}))
+    check("an image file needs no kernel flag", ST.ensure_write_block("/tmp/x.img")["ok"])
+
+    # -- a whole run on a generated disk, every step a real child command ------
+    img = os.path.join(tmp, "station.img")
+    synth_dahua.build(img, seconds=14, seed=26150)
+    out = os.path.join(tmp, "station-out")
+    disk = {"path": img, "serial": "", "model": "image file", "size_bytes": os.path.getsize(img)}
+    st = ST.Station(out, "tester", ml=False, quiet=True, poll_s=0.2)
+    rc = st.run(disk)
+    case = os.path.join(out, "CASE-station")
+    with open(os.path.join(case, PL.STATION_FILE)) as fh:
+        rec = json.load(fh)
+    states = {x["id"]: x["state"] for x in rec["stages"]}
+    check("a station run on a generated Dahua disk finishes every stage",
+          rc == 0 and rec["outcome"] == "done"
+          and all(states[k] == "done" for k in ("scan", "preserve", "parse", "recover",
+                                                "timeline", "report"))
+          and states["ml"] == "skipped", f"{rc} {rec['outcome']} {states}")
+    with open(os.path.join(case, "custody_ledger.jsonl")) as fh:
+        acts = [json.loads(line)["action"] for line in fh]
+    check("each step wrote its own custody-ledger entry, as by hand",
+          {"scan_completed", "metadata_preserved", "filesystem_parsed", "timeline_built",
+           "carved_streams_extracted", "report_generated"} <= set(acts), f"{acts}")
+    view = PL.case_stages(case)
+    check("the console reads the same stages back from the files",
+          view["done"] == 6 and view["stages"][5]["state"] == "skipped"
+          and "--no-ml" in view["stages"][5]["result"], f"{view['stages']}")
+    before = os.path.getmtime(os.path.join(case, "scan_report.json"))
+    check("the same disk plugged in again is not acquired twice",
+          st.run(disk) == 0
+          and os.path.getmtime(os.path.join(case, "scan_report.json")) == before)
+
+    # -- the station's status, as the console sees it -----------------------
+    ids = ["CASE-station"]
+    st.beat(state="working", case="CASE-stale")
+    v = PL.station_view(out, ids)
+    check("a running station is seen; a case the account may not see is not named",
+          v["station"]["running"] and v["station"]["case"] is None)
+    stale = os.path.join(out, "CASE-stale")
+    os.makedirs(stale)
+    shutil.copy(os.path.join(case, "custody_ledger.jsonl"), stale)
+    with open(os.path.join(stale, PL.STATION_FILE), "w") as fh:
+        json.dump({"outcome": "running", "started_utc": "2026-10-09T00:00:00Z",
+                   "stages": [{"id": "scan", "state": "running"}]}, fh)
+    v = PL.station_view(out, ids + ["CASE-stale"])
+    live = next(r for r in v["runs"] if r["id"] == "CASE-stale")
+    check("the run a live station is on still reads running", live["outcome"] == "running")
+    st.status["heartbeat"] = time.time() - 3600
+    with open(st.status_path, "w") as fh:
+        json.dump(st.status, fh)
+    v = PL.station_view(out, ids + ["CASE-stale"])
+    dead = next(r for r in v["runs"] if r["id"] == "CASE-stale")
+    check("a station that stopped mid-run leaves that run interrupted, not running",
+          not v["station"]["running"] and dead["outcome"] == "interrupted"
+          and dead["stages"][0]["state"] == "failed")
+
+    from viewer.server import Handler, Server
+
+    class _H(Handler):
+        out_root = out
+        gate = None
+
+    httpd = Server(("127.0.0.1", 0), _H)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}"
+                                    "/api/station") as r:
+            got = json.loads(r.read())
+        check("/api/station serves the seven stages and the station's runs",
+              len(got["stages"]) == 7
+              and {r["id"] for r in got["runs"]} == {"CASE-station", "CASE-stale"})
+    finally:
+        httpd.shutdown()
+
+    # -- waiting for a disk: only one plugged in after the station started --
+    calls = {"n": 0}
+    before_start = dict(disk, path="/dev/sdz-attached-before", serial="BEFORE", size_bytes=1)
+    plugged = dict(disk, serial="station")            # its case exists: no second scan
+
+    def disks():
+        calls["n"] += 1
+        return [before_start] + ([plugged] if calls["n"] > 1 else [])
+    w = ST.Station(out, "tester", ml=False, quiet=True, poll_s=0.05, list_disks=disks)
+    w.watch(once=True)
+    check("a disk plugged in after the station starts is taken; one attached before is not",
+          w.status.get("case") == "CASE-station" and "already acquired" in w.status["message"],
+          f"{w.status}")
+
+
 def test_access_supabase(tmp: str) -> None:
     """The access gate's Supabase store (access/supabase.py), without a network.
 
@@ -6509,6 +6667,7 @@ def main() -> int:
         test_case_split(tmp)
         test_viewer_serving(tmp)
         test_brand_guide(tmp)
+        test_station(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

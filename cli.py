@@ -1069,6 +1069,38 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_station(args) -> int:
+    """Plug and use: wait for a disk, then run every stage on it."""
+    from acquire.station import Station
+
+    print(f"{BANNER} - plug and use station\n")
+    print(f"  out           {os.path.abspath(args.out)}")
+    print(f"  investigator  {args.investigator}")
+    print(f"  stages        acquire + identify, preserve, parse, recover, timeline, "
+          f"{'faces/objects, ' if not args.no_ml else ''}report")
+    print(f"  console       python cli.py serve --out {args.out}  (shows each stage live)\n")
+    if not args.device and not is_admin():
+        print("!! Not running as root/Administrator: a plugged-in disk cannot be read.")
+        print("   Re-run under sudo (or elevated).\n")
+    st = Station(args.out, args.investigator, args.organization, args.case_prefix,
+                 ml=not args.no_ml, ml_fps=args.ml_fps, set_ro=not args.no_setro,
+                 reconnect_wait=args.reconnect_wait)
+    if not args.device:
+        return st.watch(once=args.once)
+    disk = next((d for d in list_physical_drives() if d.get("path") == args.device), None)
+    if disk is None:
+        if not os.path.isfile(args.device):
+            print(f"[!] {args.device} is neither an attached disk nor an image file")
+            return 1
+        disk = {"path": args.device, "model": "image file", "serial": "",
+                "size_bytes": os.path.getsize(args.device)}
+    try:
+        return st.run(disk)
+    except KeyboardInterrupt:
+        print("\n  stopped; run the same command again to resume")
+        return 130
+
+
 def cmd_serve(args) -> int:
     """Start the local web UI (loopback only, read-only viewer)."""
     from viewer.server import serve
@@ -2797,6 +2829,29 @@ def main() -> int:
     p.add_argument("--out", required=True, help="case directory")
     p.add_argument("--notes", default="", help="examiner notes to include")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("station",
+                       help="plug and use: wait for a disk, then run every stage on it "
+                            "(acquire, parse, recover, timeline, faces/objects, report)")
+    p.add_argument("--investigator", required=True)
+    p.add_argument("--organization", default="")
+    p.add_argument("--out", default="out", help="folder the cases go in (the console's --out)")
+    p.add_argument("--case-prefix", default="CASE",
+                   help="case folders are named <prefix>-<disk serial> (default CASE)")
+    p.add_argument("--device", default="",
+                   help="skip waiting: run on this disk or image now, then exit")
+    p.add_argument("--once", action="store_true", help="exit after the first disk")
+    p.add_argument("--no-ml", action="store_true",
+                   help="skip faces and objects (motion is still measured in the scan)")
+    p.add_argument("--ml-fps", type=float, default=0.2,
+                   help="frames per second of footage looked at for faces and objects "
+                        "(default 0.2, as on the real drives: a whole disk is days of video)")
+    p.add_argument("--no-setro", action="store_true",
+                   help="Linux: never set the kernel read-only flag; refuse a writable "
+                        "disk instead (for a hardware blocker or the writeblock-rule)")
+    p.add_argument("--reconnect-wait", type=float, default=30,
+                   help="minutes to wait for a disk that drops off USB mid-scan")
+    p.set_defaults(func=cmd_station)
 
     p = sub.add_parser("serve", help="local web UI over the case directories")
     p.add_argument("--out", default="out", help="directory holding case folders")

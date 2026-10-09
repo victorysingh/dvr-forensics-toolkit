@@ -614,6 +614,41 @@ commands to run after the scan, and any case of that brand already here. The
 brand is still detected from the disk; the choice only sets what to expect
 (`viewer/guide.py`). `#/start/<brand>` links to one brand, e.g. `#/start/cp-plus`.
 
+### 3.6 Plug and use: the whole workflow on its own
+
+The station does §3.2 to §3.4 by itself for every disk plugged in after it
+starts. Do §3.1 first, as for a manual run, then start it once:
+
+```bash
+sudo .venv/bin/python cli.py station --investigator "Your name"   # the venv has the analytics layer
+python cli.py serve                                              # in another terminal; open Plug and use
+```
+
+For each disk it: sets the kernel's read-only flag (and refuses the disk if
+the flag will not stick; `--no-setro` refuses any writable disk instead),
+names the case `CASE-<serial>`, and runs seven stages, each the ordinary
+command, so each writes its own custody-ledger entry:
+
+| Stage | Commands | PS module |
+|---|---|---|
+| Acquire and identify | `scan --carve --carve-ps --carve-annexb --activity` | Acquisition, Device Identification |
+| Preserve metadata | `preserve` | Acquisition |
+| Parse the filesystem | `parse --vendor <detected>`; Hikvision: `label-ps`, `hik-log` | File System & Format Parsing |
+| Recover footage | `extract-carved` (DHAV outside the index, MPEG-PS, or raw H.264/H.265 as a last resort) | Recovery |
+| Timeline | `timeline` | Timeline Analysis |
+| Faces, objects, motion | `analyse-video --fps 0.2` (motion is measured in the scan) | Machine Learning |
+| Report | `report` | Reporting |
+
+A stage that does not apply is skipped with the reason (no parser for the
+detected brand, nothing carved, the analytics layer not installed). A failed
+stage does not stop the later ones. The console's **Plug and use** page
+(`#/plug`) shows the station, each stage live, and finished cases as the same
+seven stages; the console itself still never opens a drive. A disk plugged in
+again resumes an unfinished scan, or is left alone if its acquisition is
+complete. `--device /dev/sdX` (or an image file) skips the waiting;
+`--no-ml` skips faces and objects. Output, per case: `station.json` (stages)
+and `station.log` (every command's output).
+
 ## 4. Proving a piece of evidence later
 
 ```bash
