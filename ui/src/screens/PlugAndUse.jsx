@@ -11,6 +11,7 @@ import { linkTo } from "../lib/useHashRoute.js";
 import { isDemo } from "../lib/host.js";
 import { bytes, dur } from "../lib/format.js";
 import { Section, Command, Skeleton } from "../components/index.jsx";
+import { slug, realDisk } from "./StartHere.jsx";
 
 // Under sudo, the Python that has the analytics layer (analytics/README.md):
 // root's own python3 usually does not, and faces and objects are then skipped.
@@ -66,6 +67,7 @@ export default function PlugAndUse({ cases, onNewCase }) {
   const real = (view?.examples || []).filter((r) => !byId[r.id]?.synthetic);
   const examples = real.length ? real : view?.examples || [];
   const module = Object.fromEntries((view?.stages || []).map((s) => [s.id, s.module]));
+  const titles = Object.fromEntries((view?.stages || []).map((s) => [s.id, s.title]));
 
   return (
     <div className="max-w-[1100px] mx-auto">
@@ -107,6 +109,13 @@ export default function PlugAndUse({ cases, onNewCase }) {
       {examples.length > 0 && (
         <Section title="Examples" hint="finished cases on this console, as the same seven stages">
           <RunGrid runs={examples} byId={byId} />
+        </Section>
+      )}
+
+      {view?.brands?.length > 0 && (
+        <Section title="Brand by brand" hint="what runs after the scan; every disk also gets its
+          hashes, preserved metadata, the timeline and the report">
+          <BrandGrid brands={view.brands} module={module} titles={titles} />
         </Section>
       )}
 
@@ -268,6 +277,50 @@ function RunGrid({ runs, byId }) {
                 );
               })}
             </ul>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Each brand of the Start here guide, and what the station runs on its disk:
+   from the station's own plan (acquire/station.py: brand_plans), so a stage it
+   would skip shows here as skipped, with the reason. */
+function BrandGrid({ brands, module, titles }) {
+  return (
+    <div className="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
+      {brands.map((b) => {
+        const real = realDisk(b);
+        const full = b.stages.every((s) => s.runs.length);
+        return (
+          <a key={b.vendor} href={`#/start/${slug(b.vendor)}`}
+            className="panel px-3.5 py-3 block hover:border-accent group">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-semibold text-[13.5px] group-hover:text-accent">{b.vendor}</span>
+              <span className={`text-[11.5px] whitespace-nowrap ${real ? "text-accent" : "dim"}`}>
+                {!b.status ? "the scan decides" : real ? "\u25CF real disk read" : "\u25CB no real disk yet"}</span>
+            </div>
+            <div className="dim text-[11.5px] mt-0.5">{b.source}</div>
+            <ul className="mt-2.5 grid gap-1.5">
+              {b.stages.map((s) => (
+                <li key={s.id} className="grid grid-cols-[62px_1fr] gap-2 text-[12px] leading-snug">
+                  <span className={`font-semibold ${s.runs.length ? "text-validated" : "dim"}`}>
+                    {s.runs.length ? "runs" : "not run"}</span>
+                  <span className="min-w-0">
+                    <span title={module[s.id]}>{titles[s.id] || s.id}</span>
+                    {s.runs.map((r) => (
+                      <span key={r.cmd} className="block">
+                        <span className="dim">{r.says}</span>
+                        <code className="block text-[11px] dim break-words">{r.cmd}</code>
+                      </span>
+                    ))}
+                    {!s.runs.length && <span className="block dim">{s.skip}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {full && <div className="text-validated text-[11px] mt-2">every stage runs on its own</div>}
           </a>
         );
       })}

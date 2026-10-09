@@ -33,7 +33,7 @@ const PLAIN = {
 
 // Whether a real drive of this brand has been read comes from the vendor
 // matrix (`media`), never from the guide's own words.
-const realDisk = (b) => Boolean(b.status && b.media && b.media !== "none");
+export const realDisk = (b) => Boolean(b.status && b.media && b.media !== "none");
 
 // The brands grouped by what is actually behind each one, so the first thing
 // a newcomer sees is which brands have been read off a real drive.

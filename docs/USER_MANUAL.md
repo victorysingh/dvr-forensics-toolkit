@@ -542,7 +542,7 @@ Optional: it needs ffmpeg, numpy and onnxruntime, installed apart from the
 forensic core (`analytics/README.md`); the packaged `.exe` does not include it.
 
 ```bash
-python cli.py analyse-video --out out/CASE-001            # every clip extract-carved wrote
+python cli.py analyse-video --out out/CASE-001            # every clip extract-carved wrote (DHAV, MPEG-PS, raw H.264/H.265)
 python cli.py analyse-video --out out/CASE-001 --ids carve-00012,carve-00013 --fps 2
 ```
 
@@ -648,6 +648,19 @@ again resumes an unfinished scan, or is left alone if its acquisition is
 complete. `--device /dev/sdX` (or an image file) skips the waiting;
 `--no-ml` skips faces and objects. Output, per case: `station.json` (stages)
 and `station.log` (every command's output).
+
+What it runs differs by brand only in three stages. The Plug and use page's
+**Brand by brand** section shows it for each brand of Start here, made from
+the station's own plan (`acquire/station.py: brand_plans`), so it cannot claim
+a step the station would skip:
+
+| Brand | Parse | Recover | Faces, objects |
+|---|---|---|---|
+| Dahua, CP Plus | `parse --vendor Dahua` | DHAV outside the index | yes |
+| Hikvision | `parse`, `label-ps`, `hik-log` | MPEG-PS | yes |
+| Honeywell, TP-Link, Godrej | `parse --vendor <brand>` | raw H.264/H.265 | yes |
+| Uniview, Matrix | `parse --vendor <brand>` | none: no carver reads their footage yet; Start here has the commands | no clips |
+| Other / not sure | none (no brand matched) | raw H.264/H.265 | yes |
 
 ## 4. Proving a piece of evidence later
 

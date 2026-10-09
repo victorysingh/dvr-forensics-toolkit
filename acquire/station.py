@@ -81,13 +81,25 @@ def plan_after_scan(scan: dict, case_dir: str, device: str, ml: bool = True,
     Returns one entry per stage: {"id", "commands": [[arg, ...], ...],
     "skip": reason or ""}.  Pure apart from reading the carve reports in
     `case_dir`, so the choice can be tested without a disk."""
-    dets = [d for d in scan.get("detections") or []
-            if d.get("confidence", 0) >= MIN_CONFIDENCE]
+    rep = _load(os.path.join(case_dir, "carve", "carve_report.json")) or {}
+    return plan_stages(scan.get("detections") or [], case_dir, device,
+                       dhav=_streams(case_dir, "carve_report.json"),
+                       ps=_streams(case_dir, "ps_report.json"),
+                       es=_streams(case_dir, "annexb_report.json"),
+                       indexed=bool(rep.get("index_used_for_labels")), ml=ml, ml_fps=ml_fps)
+
+
+def plan_stages(detections: list[dict], case_dir: str, device: str, dhav: int = 0,
+                ps: int = 0, es: int = 0, indexed: bool = False, ml: bool = True,
+                ml_fps: float = 0.2) -> list[dict]:
+    """plan_after_scan, from what the scan found rather than its files: the
+    brand detections, how many DHAV, MPEG-PS and raw H.264/H.265 streams were
+    carved, and whether a DHAV index labelled them.  Wholly pure, so the
+    console can show what the station would run for each brand."""
+    dets = [d for d in detections if d.get("confidence", 0) >= MIN_CONFIDENCE]
     vendors = {d.get("vendor") for d in dets}
     top = dets[0] if dets else None
     dev, out = ["--device", device], ["--out", case_dir]
-    dhav, ps = _streams(case_dir, "carve_report.json"), _streams(case_dir, "ps_report.json")
-    es = _streams(case_dir, "annexb_report.json")
 
     parse: list[list[str]] = []
     if top and top.get("parser_available"):
@@ -101,10 +113,9 @@ def plan_after_scan(scan: dict, case_dir: str, device: str, ml: bool = True,
 
     recover: list[list[str]] = []
     if dhav:
-        rep = _load(os.path.join(case_dir, "carve", "carve_report.json")) or {}
         # With an index, what it no longer lists is the deleted footage; with
         # none, every carved stream is all there is.
-        label = "outside_index" if rep.get("index_used_for_labels") else "all"
+        label = "outside_index" if indexed else "all"
         recover.append(["extract-carved", *dev, *out, "--format", "dhav", "--label", label])
     if ps:
         recover.append(["extract-carved", *dev, *out, "--format", "ps"])
@@ -120,14 +131,81 @@ def plan_after_scan(scan: dict, case_dir: str, device: str, ml: bool = True,
         {"id": "recover", "commands": recover,
          "skip": "" if recover else "no footage was carved from this disk"},
         {"id": "timeline", "commands": [["timeline", *out]], "skip": ""},
-        # analyse-video reads the DHAV and MPEG-PS clips extract-carved saves
+        # analyse-video reads every clip extract-carved saves: DHAV, MPEG-PS,
+        # and raw H.264/H.265 when that is all the disk gave
         {"id": "ml", "commands": [["analyse-video", *out, "--fps", f"{ml_fps:g}"]]
-         if ml and (dhav or ps) else [],
-         "skip": "" if ml and (dhav or ps) else
-                 ("turned off (--no-ml)" if not ml else "no recovered clips it can read")},
+         if ml and recover else [],
+         "skip": "" if ml and recover else
+                 ("turned off (--no-ml)" if not ml else "no recovered clips to look at")},
         {"id": "report", "commands": [["report", *out]], "skip": ""},
     ]
 
+
+
+# ---------------------------------------------------------------------------
+# What the station runs, brand by brand
+# ---------------------------------------------------------------------------
+#: Which of the scan's carvers finds a brand's footage, from the brand's scan
+#: option in the Start here guide (viewer/guide.py).  The station runs every
+#: carver anyway; this is the one that finds something on that brand's disk.
+CARVED_BY = {"--carve": "dhav", "--carve-ps": "ps", "--carve-annexb": "es"}
+
+#: Each command the station may run, in plain words.
+SAYS = {
+    "parse": "the recorder's index: its recordings, cameras and times",
+    "label-ps": "cameras named from what is left of the index",
+    "hik-log": "the recorder's own system log",
+    ("extract-carved", "dhav"): "DHAV clips the index no longer lists: the deleted footage",
+    ("extract-carved", "ps"): "MPEG-PS clips, each with the recorder's clock",
+    ("extract-carved", "annexb"): "raw H.264/H.265 clips, without dates or cameras",
+    "analyse-video": "people, faces and vehicles in every recovered clip",
+}
+
+NOT_CARVED = ("none of the scan's carvers reads this brand's footage yet: the "
+              "index lists the recordings, and Start here has the commands")
+
+
+def _say(cmd: list[str]) -> dict:
+    """A command as the console shows it: its plain words, and the command
+    without the disk and case folder, which every command takes."""
+    short, it = [], iter(cmd)
+    for a in it:
+        if a in ("--device", "--out"):
+            next(it, None)
+        else:
+            short.append(a)
+    fmt = cmd[cmd.index("--format") + 1] if "--format" in cmd else ""
+    return {"cmd": " ".join(short), "says": SAYS.get((cmd[0], fmt)) or SAYS.get(cmd[0], "")}
+
+
+def brand_plans(brands: list[dict], parsers: set[str], ml: bool = True) -> list[dict]:
+    """For each brand of the Start here guide (viewer.guide.brand_guide), what
+    the station runs after the scan on that brand's disk.
+
+    Made by plan_stages itself, on the detection a disk of that brand gives
+    and the footage its carver finds, so the console shows the station's own
+    choice rather than a claim written beside it.  Only the stages that
+    differ by brand are kept: the scan, preserving metadata, the timeline and
+    the report run on every disk."""
+    rows = []
+    for b in brands:
+        vendor, fmt = b["vendor"], CARVED_BY.get(b.get("flags", ""))
+        # A brand the vendor matrix does not know ("Other / not sure") is a
+        # disk no detector claims.  CP Plus is parsed as Dahua (plan_stages).
+        dets = [{"vendor": vendor, "confidence": 1.0, "parser_available":
+                 ("Dahua" if vendor == "CP Plus" else vendor) in parsers}] if b.get("status") else []
+        steps = plan_stages(dets, "CASE", "DISK", indexed=True, ml=ml, **({fmt: 1} if fmt else {}))
+        stages = []
+        for st in steps:
+            if st["id"] not in ("parse", "recover", "ml"):
+                continue
+            skip = NOT_CARVED if st["id"] == "recover" and not fmt else st["skip"]
+            stages.append({"id": st["id"], "runs": [_say(c) for c in st["commands"]],
+                           "skip": skip})
+        rows.append({"vendor": vendor, "source": b.get("source", ""),
+                     "status": b.get("status", ""), "media": b.get("media", ""),
+                     "stages": stages})
+    return rows
 
 def case_name(prefix: str, disk: dict) -> str:
     """CASE-<serial>, so the same disk plugged in again finds its own case."""

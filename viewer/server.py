@@ -32,6 +32,8 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import parsers  # noqa: E402,F401  (registers plugins, loads drop-ins)
+from acquire.station import brand_plans  # noqa: E402  (pure: plans, opens no disk)
+from parsers.base import available_vendors  # noqa: E402
 from report.case import list_cases, load_case, plugins_view, vendor_matrix  # noqa: E402
 from report.html import render  # noqa: E402
 from report.pipeline import station_view  # noqa: E402
@@ -178,8 +180,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/station":
                 # Plug and use: the station's status and runs, read from files
                 # the station wrote. The console still opens no device.
+                # `brands`: what it runs on each brand's disk, from its own plan.
                 ids = [c["id"] for c in self._cases()]
-                return self._json(station_view(self.out_root, ids))
+                view = station_view(self.out_root, ids)
+                view["brands"] = brand_plans(brand_guide()["brands"], set(available_vendors()))
+                return self._json(view)
             if path == "/access/me":
                 # Reached only with sign-in off: behind --require-access the
                 # gate answers everything under /access/ itself. No account,

@@ -5588,13 +5588,46 @@ def test_station(tmp: str) -> None:
     check("a weak match chooses no parser; raw H.264/H.265 is the last resort",
           not p["parse"]["commands"] and "carving" in p["parse"]["skip"]
           and p["recover"]["commands"][0][-2:] == ["--format", "annexb"])
-    check("no clips the analytics layer reads: faces and objects skipped, saying why",
-          not p["ml"]["commands"] and "clips" in p["ml"]["skip"])
+    check("raw H.264/H.265 clips are looked at for faces and objects too",
+          p["ml"]["commands"] and p["ml"]["commands"][0][0] == "analyse-video")
     empty = os.path.join(tmp, "st-empty")
     os.makedirs(empty, exist_ok=True)
     p = plan(empty, [])
-    check("nothing carved: recovery skipped, saying why",
-          not p["recover"]["commands"] and p["recover"]["skip"])
+    check("nothing carved: recovery skipped, and faces and objects, saying why",
+          not p["recover"]["commands"] and p["recover"]["skip"]
+          and not p["ml"]["commands"] and "clips" in p["ml"]["skip"])
+    import cli
+    for sub, name in (("streams", "a.h264"), ("ps_streams", "b.ps"), ("es_streams", "es-00001.h265")):
+        os.makedirs(os.path.join(unknown, "carve", sub), exist_ok=True)
+        open(os.path.join(unknown, "carve", sub, name), "wb").close()
+    got = sorted(os.path.basename(c) for c in cli._extracted_clips(unknown, ""))
+    check("analyse-video reads DHAV, MPEG-PS and raw H.264/H.265 clips",
+          got == ["a.h264", "b.ps", "es-00001.h265"], f"{got}")
+
+    # -- brand by brand: the station's own plan for each brand of the guide --
+    from parsers.base import available_vendors
+    from viewer.guide import BRANDS, brand_guide
+    rows = {r["vendor"]: {s["id"]: s for s in r["stages"]}
+            for r in ST.brand_plans(brand_guide()["brands"], set(available_vendors()))}
+    runs = lambda v, st: [c["cmd"] for c in rows[v][st]["runs"]]   # noqa: E731
+    check("brand by brand: every brand of the guide, with parse, recover and ML",
+          list(rows) == [b["vendor"] for b in BRANDS]
+          and all(list(r) == ["parse", "recover", "ml"] for r in rows.values()), f"{list(rows)}")
+    check("brand by brand: Dahua and CP Plus parse as Dahua and save the deleted DHAV footage",
+          runs("Dahua", "parse") == runs("CP Plus", "parse") == ["parse --vendor Dahua"]
+          and "--label outside_index" in runs("CP Plus", "recover")[0]
+          and runs("CP Plus", "ml")[0].startswith("analyse-video"))
+    check("brand by brand: Hikvision adds its cameras and system log, and saves MPEG-PS",
+          runs("Hikvision", "parse") == ["parse --vendor Hikvision", "label-ps", "hik-log"]
+          and runs("Hikvision", "recover") == ["extract-carved --format ps"])
+    check("brand by brand: Honeywell, TP-Link and Godrej go through raw H.264/H.265 to ML",
+          all(runs(v, "recover") == ["extract-carved --format annexb"] and runs(v, "ml")
+              for v in ("Honeywell", "TP-Link", "Godrej")))
+    check("brand by brand: no carver for Uniview or Matrix - said, not hidden",
+          all(not runs(v, "recover") and rows[v]["recover"]["skip"] == ST.NOT_CARVED
+              and not runs(v, "ml") for v in ("Uniview", "Matrix")))
+    check("brand by brand: an unknown brand is carved, then looked at",
+          not runs("Other / not sure", "parse") and runs("Other / not sure", "ml"))
     p = plan(dahua, [{"vendor": "Dahua", "confidence": 0.99, "parser_available": True}], ml=False)
     check("--no-ml skips faces and objects, saying so",
           not p["ml"]["commands"] and "--no-ml" in p["ml"]["skip"])
@@ -5675,7 +5708,8 @@ def test_station(tmp: str) -> None:
             got = json.loads(r.read())
         check("/api/station serves the seven stages and the station's runs",
               len(got["stages"]) == 7
-              and {r["id"] for r in got["runs"]} == {"CASE-station", "CASE-stale"})
+              and {r["id"] for r in got["runs"]} == {"CASE-station", "CASE-stale"}
+              and [b["vendor"] for b in got["brands"]] == [b["vendor"] for b in BRANDS])
     finally:
         httpd.shutdown()
 

@@ -1909,11 +1909,13 @@ def _recorder_times(case_dir: str, clips: list, key: str) -> bool:
 
 
 def _extracted_clips(case_dir: str, ids: str) -> list:
-    """The clips extract-carved wrote, optionally only the ids given."""
+    """The clips extract-carved wrote - DHAV, MPEG-PS and raw H.264/H.265 -
+    optionally only the ids given."""
     import glob
-    src = os.path.join(case_dir, "carve", "streams")
-    clips = sorted(glob.glob(os.path.join(src, "*.h265")) + glob.glob(os.path.join(src, "*.h264"))
-                   + glob.glob(os.path.join(case_dir, "carve", "ps_streams", "*.ps")))
+    carve = os.path.join(case_dir, "carve")
+    clips = sorted(glob.glob(os.path.join(carve, "streams", "*.h26[45]"))
+                   + glob.glob(os.path.join(carve, "ps_streams", "*.ps"))
+                   + glob.glob(os.path.join(carve, "es_streams", "*.h26[45]")))
     if ids:
         want = set(ids.split(","))
         clips = [c for c in clips if os.path.splitext(os.path.basename(c))[0] in want]
@@ -1952,7 +1954,7 @@ def cmd_analyse_video(args) -> int:
         return 2
     from core.hashing import sha256_file
 
-    src = os.path.join(args.out, "carve", "streams")
+    src = os.path.join(args.out, "carve")
     clips = _extracted_clips(args.out, args.ids)
     if not clips:
         print(f"[!] no extracted clips in {src} - run `extract-carved` first")
