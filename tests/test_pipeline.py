@@ -5536,6 +5536,52 @@ def test_brand_guide(tmp: str) -> None:
           not bad, f"{bad}")
 
 
+def test_analytics_runs(tmp: str) -> None:
+    """AI leads: parked vehicles, how far each rule can be trusted, and an
+    earlier run kept beside a re-run, tied to the ledger entry that recorded it."""
+    print("\n[AI leads: parked vehicles, measured rates, earlier runs]")
+    from analytics.models import MEASURED, MODEL_SETS
+    from core.hashing import sha256_file
+    from report.case import load_case
+
+    check("every model set's rule has its measured rates",
+          all(s["rule"] in MEASURED for s in MODEL_SETS.values())
+          and all(r[1] <= r[2] and r[3] <= r[4] for m in MEASURED.values() for r in m["rows"]))
+
+    case = os.path.join(tmp, "an-runs")
+    clip = {"clip": "carve-00001.h265", "frames_analysed": 4, "detections": [], "thumbnails": [],
+            "parked_vehicles": [{"label": "car", "box": [0.1, 0.1, 0.2, 0.2], "best": 0.8,
+                                 "frames": 4, "first": 0.0, "last": 15.0}]}
+    for sub, doc in (("analytics", {"rule": "analytics.yolox_yunet.v3", "clips": [clip],
+                                    "frames_with_totals": {"person": 3},
+                                    "parked_vehicle_spots": 1}),
+                     ("analytics_classic_26sep", {"rule": "analytics.ultraface_ssdmobilenet.v1",
+                                                  "clips": [dict(clip, parked_vehicles=[])],
+                                                  "frames_with_totals": {"person": 1}}),
+                     ("analytics_unrecorded", {"rule": "no.such.rule", "clips": []})):
+        os.makedirs(os.path.join(case, sub), exist_ok=True)
+        with open(os.path.join(case, sub, "analytics.json"), "w") as fh:
+            json.dump(doc, fh)
+    led = CustodyLedger(os.path.join(case, "custody_ledger.jsonl"), actor="t", case_id="T")
+    led.append("scan_started", {})
+    led.append("video_analytics_run", {},
+               data_hash=sha256_file(os.path.join(case, "analytics_classic_26sep", "analytics.json")))
+    an = load_case(case)["analytics"]
+    check("parked vehicles reach the console, with how many places",
+          an["parked_spots"] == 1 and an["parked"][0]["clip"] == "carve-00001.h265")
+    check("this run's rates are the ones measured for its rule",
+          an["measured"]["rows"][0] == ["person", 44, 57, 6, 230] and "287 frames" in an["measured"]["on"])
+    old = {e["folder"]: e for e in an["earlier"]}
+    check("an earlier run kept beside it is read, with its own rule's rates",
+          old["analytics_classic_26sep"]["totals"] == {"person": 1}
+          and old["analytics_classic_26sep"]["measured"]["rows"][0][1] == 0
+          and old["analytics_classic_26sep"]["frames_analysed"] == 4)
+    check("an earlier run is tied to the ledger entry that recorded that very file",
+          old["analytics_classic_26sep"]["ledger_seq"] == 1
+          and old["analytics_unrecorded"]["ledger_seq"] is None
+          and old["analytics_unrecorded"]["measured"] is None)
+
+
 def test_station(tmp: str) -> None:
     """Plug and use: what the station runs after the scan, a whole run on a
     generated disk, and what the console reads back - never a device."""
@@ -6702,6 +6748,7 @@ def main() -> int:
         test_viewer_serving(tmp)
         test_brand_guide(tmp)
         test_station(tmp)
+        test_analytics_runs(tmp)
         test_dahua_real_media()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

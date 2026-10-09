@@ -559,6 +559,16 @@ Measured on 287 real recorder frames labelled by eye, it finds a person in
 (`docs/VALIDATION_REPORT.md` §8a): **an empty list does not mean nobody was
 there.**
 
+The console's **AI leads** screen shows, beside the counts: how far to trust
+them (the rates measured for the rule the run used, `analytics/models.py:
+MEASURED`); the parked vehicles, once per place; when each top detection
+happened (the recorder's clock on Hikvision MPEG-PS, otherwise the time into
+the clip); and any earlier run kept as `analytics_<name>/` - as when a case is
+run again with newer models - with its counts next to the new ones and the
+custody-ledger entry that recorded that very file. To re-run a case, copy
+`analytics/` to `analytics_<name>/` first, then run `analyse-video` again and
+`sign` the case again: its earlier signature still verifies what it covered.
+
 ### 3.4p Face search by a reference photo (candidates, not identifications)
 
 Optional, the same layer as §3.4o. Run it only when the investigation

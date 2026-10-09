@@ -173,6 +173,42 @@ def _labelled_thumb(thumb: dict, clip: dict) -> dict:
                 score=max((d["score"] for d in kept), default=None))
 
 
+def _measured(rule: Optional[str]) -> Optional[dict]:
+    """How the rule a run used did on footage labelled by eye (stdlib only)."""
+    from analytics.models import MEASURED, MEASURED_ON
+    m = MEASURED.get(rule or "")
+    return dict(m, on=MEASURED_ON) if m else None
+
+
+def _earlier_runs(case_dir: str) -> list[dict]:
+    """Earlier analytics runs kept beside the current one (analytics_<name>/),
+    as when a case is run again with newer models: what each found, and how
+    far its rule could be trusted, so the change can be read side by side."""
+    import glob
+    runs = []
+    paths = sorted(glob.glob(os.path.join(case_dir, "analytics_*", "analytics.json")))
+    # Which custody-ledger entry recorded this exact file, if any: the proof
+    # that what is shown is what was reported then.
+    seen = {e.get("data_hash"): e.get("seq") for e in
+            CustodyLedger(os.path.join(case_dir, "custody_ledger.jsonl")).entries} if paths else {}
+    for p in paths:
+        e = _load(p)
+        if not e:
+            continue
+        models = e.get("models") or {}
+        sha = _hashed(p)
+        runs.append({"folder": os.path.basename(os.path.dirname(p)), "sha256": sha,
+                     "ledger_seq": seen.get(sha),
+                     "rule": e.get("rule"), "sample_fps": e.get("sample_fps"),
+                     "models": [m.get("name", "") for m in models.values() if isinstance(m, dict)],
+                     "totals": e.get("frames_with_totals", {}),
+                     "clips": len(e.get("clips", [])),
+                     "frames_analysed": sum(int(c.get("frames_analysed", 0))
+                                            for c in e.get("clips", [])),
+                     "measured": _measured(e.get("rule"))})
+    return runs
+
+
 def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
     j = lambda *p: os.path.join(case_dir, *p)
     scan = _load(j("scan_report.json"))
@@ -380,7 +416,10 @@ def load_case(case_dir: str, recordings_limit: int = 200) -> dict:
             "static_totals": an.get("static_totals", {}),
             "static_rule": an.get("static_rule"),
             "not_counted": an.get("flagged_not_counted", {}),
-            "implausible_rule": an.get("implausible_rule")}
+            "implausible_rule": an.get("implausible_rule"),
+            "parked_spots": an.get("parked_vehicle_spots"),
+            "measured": _measured(an.get("rule")),
+            "earlier": _earlier_runs(case_dir)}
 
     fs = _load(j("analytics", "face_search.json"))
     if fs:

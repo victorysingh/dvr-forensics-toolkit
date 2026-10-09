@@ -72,6 +72,34 @@ MODEL_SETS = {
 }
 DEFAULT_SET = "yolox"
 
+#: What each rule found on footage labelled by eye, never on a case
+#: (docs/VALIDATION_REPORT.md section 8a), so the console can put a run's
+#: counts beside how far they can be trusted.  Keyed by the `rule` a run
+#: writes into analytics.json, so an older run is shown with its own rates.
+#: Set A: 287 frames from six public recorder clips (Dahua OEMs, Hikvision,
+#: Swann, Lorex); each row is [what, frames found, frames that had it,
+#: false alarms, frames that did not].  CAVIAR: 1,089 people boxed in its
+#: own ground truth; it played no part in choosing.
+MEASURED_ON = "287 frames from six public recorder clips, labelled by eye"
+MEASURED = {
+    "analytics.yolox_yunet.v3": {
+        "when": "30 Sep 2026",
+        "rows": [["person", 44, 57, 6, 230], ["face", 22, 27, 1, 260],
+                 ["moving vehicle", 7, 12, 0, 275]],
+        "caviar": [810, 1089],
+        "parked": "8 parked-vehicle places, all real cars; none on CAVIAR"},
+    "analytics.ultraface_ssdmobilenet.v2": {
+        "when": "29 Sep 2026",
+        "rows": [["person", 24, 57, 1, 230], ["face", 11, 27, 0, 260],
+                 ["vehicle", 5, 12, 0, 275]],
+        "caviar": [543, 1089]},
+    "analytics.ultraface_ssdmobilenet.v1": {
+        "when": "28 Sep 2026",
+        "rows": [["person", 0, 57, 0, 230], ["face", 3, 27, 0, 260],
+                 ["vehicle", 4, 12, 0, 275]],
+        "caviar": [341, 1089]},
+}
+
 
 def threshold(model_set: str, label: str) -> float:
     """The score a detection of `label` needs to be reported by this set."""
