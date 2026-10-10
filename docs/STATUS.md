@@ -91,7 +91,7 @@ Not code. Each one needs the hardware or the team:
 | Underneath | the Hikvision recorder's footage: **2,516 streams, 923 GiB, ~6,300 h**, every one dated, April 2021 (H.264) → 30 Aug 2024 (H.265 + audio) |
 | Hikvision index | a master copy and two HIKBTREE copies survived at the end of the disk: **922 records, 8 channels**; 2,021 streams attributed to a camera; the carve recovered **99.6–99.7%** of the hours the index says each camera recorded |
 | Camera labels checked against the picture | two decoded frames show "Camera 01" and "Camera 03" burned in, where the index gave CH01 and CH03; their on-screen clocks match the decoded times to within 2 s |
-| Analytics | 50-stream / 22 GB subset, 68,639 sampled frames: person 517, face 73, bus 1 — each with its camera and recorder time. 64 more "faces" were boxes spanning most of the frame (a floor, buckets) and are flagged implausible |
+| Analytics | 50-stream / 22 GB subset, 68,639 sampled frames, each detection with its camera and recorder time. Re-run 10 Oct with YOLOX-S + YuNet: person 2,875, face 552, suitcase 242, car 64, 12 parked places; about half the faces, and the laundry on CH03, are false alarms repeated in one spot that the static rule misses (VALIDATION_REPORT §8b). The 26 Sep run (person 517, face 73, bus 1) is kept beside it |
 | Output | `out/drive2_Z9C2632A/report.html` |
 
 Both drives: every block shared by independent reads is identical, apart
