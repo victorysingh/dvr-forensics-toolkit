@@ -8,9 +8,9 @@ import { api } from "./lib/api.js";
 import { useHashRoute, linkTo, go, toPlace } from "./lib/useHashRoute.js";
 import { bytes, num, pct } from "./lib/format.js";
 import { isDemo } from "./lib/host.js";
-import { Skeleton, Empty, ToastHost, useToast, DL } from "./components/index.jsx";
+import { Skeleton, Empty, ToastHost, useToast, DL, ThemeIcon } from "./components/index.jsx";
 import { ProfileMenu } from "./components/Account.jsx";
-import { useTheme, flipTheme } from "./lib/theme.js";
+import { useTheme, flipTheme, setTheme } from "./lib/theme.js";
 
 import Dashboard from "./screens/Dashboard.jsx";
 import Evidence from "./screens/Evidence.jsx";
@@ -230,18 +230,29 @@ function Badge({ children, tone, title }) {
 }
 
 /* The theme lives in lib/theme.js, so the profile menu can switch it too.
-   On a phone the switch is in that menu only; the bar has no room for both. */
+   Both choices are on show and the one in use is lit, so nobody has to
+   guess what a single glyph meant; the words join the icons once the bar
+   has room. On a phone the switch is in that menu only. */
+const THEMES = [["light", "Light"], ["dark", "Dark"]];
+
 function ThemeToggle() {
   const theme = useTheme();
   return (
-    <button onClick={flipTheme}
-      title={`${theme === "light" ? "Dark" : "Light"} mode (press t)`}
-      aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
-      className="hairline border rounded-[var(--radius-panel)] w-8 h-8 shrink-0
-        dim hover:text-accent hover:border-accent cursor-pointer leading-none
-        hidden sm:block">
-      {theme === "light" ? "◑" : "◐"}
-    </button>
+    <div role="group" aria-label="Colour theme" title="Light or dark mode (press t)"
+      className="hairline border rounded-[var(--radius-panel)] p-0.5 shrink-0
+        hidden sm:flex items-center gap-0.5">
+      {THEMES.map(([t, label]) => (
+        <button key={t} type="button" onClick={() => setTheme(t)}
+          aria-pressed={theme === t} aria-label={`${label} mode`}
+          className={`h-8 px-2 md:px-2.5 rounded-[var(--radius-panel)] cursor-pointer
+            inline-flex items-center gap-1.5 text-[13px] whitespace-nowrap
+            ${theme === t ? "bg-accent/15 text-accent font-semibold"
+                          : "dim hover:text-current"}`}>
+          <ThemeIcon theme={t} size={18} />
+          <span className="hidden md:inline">{label}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 

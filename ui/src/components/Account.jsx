@@ -12,6 +12,7 @@ import { api } from "../lib/api.js";
 import { isDemo } from "../lib/host.js";
 import { utcTime, dur, camColor } from "../lib/format.js";
 import { useTheme, flipTheme } from "../lib/theme.js";
+import { ThemeIcon } from "./index.jsx";
 import { toPlace } from "../lib/useHashRoute.js";
 
 /* ------------------------------------------------------------- who */
@@ -275,8 +276,9 @@ export function ProfileMenu({ place }) {
               ))}
             <button type="button" role="menuitem" className={ITEM}
               onClick={() => flipTheme()}>
-              <span className="w-5 text-center shrink-0" aria-hidden="true">
-                {theme === "light" ? "◑" : "◐"}</span>
+              {/* The icon is the theme a tap switches to, like the words. */}
+              <span className="w-5 shrink-0 inline-flex justify-center">
+                <ThemeIcon theme={theme === "light" ? "dark" : "light"} /></span>
               {theme === "light" ? "Dark mode" : "Light mode"}
               <kbd className="ml-auto dim font-mono text-[11px]">t</kbd>
             </button>
