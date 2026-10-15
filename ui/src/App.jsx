@@ -152,6 +152,10 @@ function TopBar({ cases, caseId, screen, c, place }) {
   return (
     // On a phone the name shrinks to its mark and the posture badge moves
     // into the profile menu, so the case picker keeps the room it needs.
+    // Below 1280px "Start here" and "Plug and use" are in that menu only,
+    // and the case picker gives up width before anything is pushed off the
+    // edge: from 640 to 1180px the bar used to run past the screen and cut
+    // off the profile button.
     <header className="panel rounded-none border-0 border-b flex items-center gap-2 sm:gap-3.5
       px-3 sm:px-4 h-13 min-h-[52px] relative z-30">
       <a href="#/" title="All cases"
@@ -164,8 +168,8 @@ function TopBar({ cases, caseId, screen, c, place }) {
 
       <select value={caseId || ""} aria-label="Case"
         onChange={(e) => go(e.target.value || null, screen)}
-        className="panel-2 hairline border rounded-lg px-2.5 py-1.5 w-0 flex-1 sm:flex-none
-          sm:w-auto max-w-[320px] min-w-0 text-sm">
+        className="panel-2 hairline border rounded-lg px-2.5 py-1.5 w-0 flex-1 sm:flex-initial
+          sm:w-auto max-w-[320px] min-w-0 sm:min-w-32 text-sm">
         <option value="">All cases&hellip;</option>
         {cases.map((x) => (
           <option key={x.id} value={x.id}>{x.id}{x.case_id ? ` · ${x.case_id}` : ""}</option>
@@ -175,7 +179,7 @@ function TopBar({ cases, caseId, screen, c, place }) {
       {PLACES.map(([id, label]) => (
         <a key={id} href={`#/${id}`} onClick={toPlace(id)}
           aria-current={place === id ? "page" : undefined}
-          className={`hidden sm:inline text-[13px] whitespace-nowrap
+          className={`hidden xl:inline text-[13px] whitespace-nowrap
           ${place === id ? "text-accent" : "hover:text-accent"}`}>{label}</a>
       ))}
 
