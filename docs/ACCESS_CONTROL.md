@@ -172,6 +172,8 @@ cli.py serve --require-access --access-store supabase     # + --cookie-secure --
   Vercel forwarding to it. `deploy/update_server.sh <user@host> <commit>`
   updates it: it tests the new copy on the server first, swaps it in only on
   "0 failed", and puts the old copy back if the service does not answer.
+  A new machine is one command, `deploy/new_server.sh`; `deploy/README.md`
+  walks through it.
 
 ## A hosted demo: real cases for named accounts only
 
