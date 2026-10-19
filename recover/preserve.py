@@ -131,6 +131,9 @@ def preserve(dev, bundle_dir: str, vendor: str = "",
     blocks: dict[int, dict] = {}
     out_regions = []
     for r in regions:
+        # A structure near the start of the drive (a Hikvision index 4 KiB in)
+        # can ask for margin before offset 0; the drive starts there.
+        r.start = max(r.start, 0)
         r.end = min(r.end, dev.size_bytes)
         if r.end <= r.start:
             notes.append(f"{r.name}: empty or beyond the drive - skipped")

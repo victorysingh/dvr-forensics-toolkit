@@ -1348,6 +1348,16 @@ def test_preserve(tmp: str) -> None:
           m3["acquisition_merkle_root"] == "" and
           not any("merkle_path" in b for b in m3["blocks"]))
 
+    # A Hikvision index 4 KiB into the drive: its region starts 64 KiB earlier.
+    from recover.preserve import Region
+    with BlockDevice(img) as dev:
+        m4 = preserve(dev, os.path.join(tmp, "preserved4"), blockmap=blockmap,
+                      extra=[Region("near_start", 0x1010 - 0x10000, 0x1010 + 512, "test")])
+    near = next((r for r in m4["regions"] if r["name"] == "near_start"), None)
+    check("a region that would start before the drive starts at 0, not a crash",
+          near is not None and near["start"] == 0 and near["length"] == 0x1010 + 512
+          and m4["all_blocks_match"] is True, str(near))
+
 
 def test_inline_carve(tmp: str) -> None:
     """Carving inside the acquisition pass must equal carving by re-reading,
@@ -5711,6 +5721,14 @@ def test_station(tmp: str) -> None:
     check("the console reads the same stages back from the files",
           view["done"] == 6 and view["stages"][5]["state"] == "skipped"
           and "--no-ml" in view["stages"][5]["result"], f"{view['stages']}")
+    half = os.path.join(tmp, "station-half-preserved")
+    os.makedirs(os.path.join(half, "preserved", "blocks"))
+    with open(os.path.join(half, PL.STATION_FILE), "w") as fh:
+        json.dump({"outcome": "failed", "stages": [
+            {"id": "preserve", "state": "failed", "note": "`preserve` exited 1"}]}, fh)
+    pv = next(x for x in PL.case_stages(half)["stages"] if x["id"] == "preserve")
+    check("a preserve that stopped part way reads failed, not done",
+          pv["state"] == "failed" and "exited 1" in pv["result"], str(pv))
     before = os.path.getmtime(os.path.join(case, "scan_report.json"))
     check("the same disk plugged in again is not acquired twice",
           st.run(disk) == 0

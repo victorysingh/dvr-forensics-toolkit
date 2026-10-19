@@ -92,7 +92,9 @@ def _from_files(d: str) -> dict[str, dict]:
         out["scan"] = {"state": "part", "progress": min(frac, 1.0),
                        "result": f"{round(100 * min(frac, 1.0))}% read"}
 
-    if os.path.isdir(j("preserved")):
+    # The manifest is written last: a folder without one is a preserve that
+    # stopped part way, and must not read as done.
+    if os.path.exists(j("preserved", "manifest.json")):
         out["preserve"] = {"state": "done", "result": "metadata saved"}
 
     # A recorder's index: a vendor parse, or Hikvision's HIKBTREE records read
