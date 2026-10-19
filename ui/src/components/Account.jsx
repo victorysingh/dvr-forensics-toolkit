@@ -32,7 +32,7 @@ function describe(acct) {
   }
   if (isDemo()) {
     return { key: "guest", name: "Guest", role: "Public demonstration",
-             posture: "demo · synthetic data", why: "no account in the demonstration" };
+             posture: "public demonstration", why: "no account in the demonstration" };
   }
   return { key: "local", name: "Examiner", role: "This workstation",
            posture: "offline · read-only", why: "sign-in is off on this workstation" };

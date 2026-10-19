@@ -191,10 +191,10 @@ function TopBar({ cases, caseId, screen, c, place }) {
         <span className="hidden min-[400px]:inline">
           {ver.valid ? "chain intact" : "chain broken"}</span></Badge>}
       <span className="hidden lg:inline-flex">
-      {isDemo() && cases.length && cases.every((x) => x.synthetic)
-        ? <Badge tone="warn" title="Sample cases generated for the demonstration from made-up
-            disks - not evidence. The tool itself runs offline on an examiner's machine.">
-            demo &middot; synthetic data</Badge>
+      {isDemo() && import.meta.env.MODE === "demo"
+        ? <Badge tone="warn" title="A copy of the interface served for review, with no sign-in.
+            The tool itself runs offline on an examiner's machine.">
+            public demonstration</Badge>
         : isDemo()
         ? <Badge tone="warn" title="Served over the internet for review, behind sign-in and an
             administrator's approval. The tool itself runs offline on an examiner's machine.">

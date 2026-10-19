@@ -223,7 +223,7 @@ account to tell apart (`viewer/server.py::visible_cases`).
   officer signs off at the workstation — and it keeps the console's
   "offline · read-only" badge honest. That is the workstation. A hosted
   demonstration (above) still binds loopback, but a TLS proxy in front of it
-  makes it reachable, and the console then reads "demo · synthetic data".
+  makes it reachable, and the console then reads "hosted · approved access".
 * **Rate limiting is in memory.** It is lost on restart. The account lockout,
   which is persisted, is the durable control; the limiter only stops a script
   on this machine walking the password list. Its *keying* matters more than
