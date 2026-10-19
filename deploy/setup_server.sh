@@ -43,6 +43,9 @@ chown anokhi:anokhi "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
 echo "[3/6] synthetic demo cases"
+# From a folder the service user can enter: the carve workers start in the
+# current folder, and the caller's home (e.g. /home/ubuntu) is closed to them.
+cd "$STATE"
 sudo -u anokhi env PS26150_SEAL_KEY="$STATE/ledger_seal.key" \
     python3 "$APP/deploy/make_demo_cases.py" --out "$DATA/out" --images "$DATA/images"
 
